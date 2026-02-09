@@ -2,6 +2,30 @@
 
 All features implemented as of 2026-02-09.
 
+test multi asset again with true in the coul in your sheet? or do we need multi asset true and asset ci's  (see cisco example if needed) v your example) but we do want it so we have it clearer on sheet as we want pdiffrent password for each multi asset item) 
+
+test virt roadshow 20 users and 2 clusters/count
+
+market it to John and team - soultion for White gloves
+
+Test multi region (but use aws item)
+
+Make super clear example sheets
+
+make super clear example commands - for deployibng and for QA 
+
+eXxamples to lock all, extend destory extend stops
+
+Update passwords feature? can check all and update opasswords if changed in sheet (run tool though manually)
+
+csv wizard examples
+
+mini video showing all options
+
+can test on intergration 
+
+want a way to easily get csv from white glove workshop space or in a less mnaual fasshion - we have a white glov ehelper tool we run within white glove workshops and it gives us a csv? we need item name (maybe has to be agv item) but we are oc'd into cluster so it can check
+
 ## Completed Features
 
 - [x] Basic workshop scheduling via ResourceClaim
