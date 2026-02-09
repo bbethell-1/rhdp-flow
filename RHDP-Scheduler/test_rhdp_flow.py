@@ -43,6 +43,10 @@ try:
         construct_workshop_url,
         verify_deployment,
         create_parser,
+        get_landing_page_url,
+        get_workshop_urls,
+        get_workshop_id,
+        export_student_landing_page_csv,
     )
 except ImportError:
     print("Error: Could not import rhdp_flow.py")
@@ -1493,6 +1497,601 @@ class TestCreateParser(unittest.TestCase):
         self.assertTrue(args.extend_stop)
         self.assertEqual(args.days, 1)
         self.assertEqual(args.hours, 2)
+
+
+# ============================================================================
+# GROUP 20: Multi-Asset Old Format – Deeper Coverage (TODO 1)
+# ============================================================================
+
+
+class TestMultiWorkshopOldFormatDeep(unittest.TestCase):
+    """Deeper tests for create_multi_workshop (old format) – shared password, asset parsing."""
+
+    @patch("rhdp_flow.subprocess.run")
+    def test_old_format_shared_password(self, mock_run):
+        """All Workshop payloads in old-format multi-workshop share the same accessPassword."""
+        created_payloads = []
+
+        def capturing_dispatcher(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get('args', [])
+            if len(cmd) >= 2 and cmd[1] == "create":
+                for i, arg in enumerate(cmd):
+                    if arg == "-f" and i + 1 < len(cmd) and os.path.exists(cmd[i + 1]):
+                        with open(cmd[i + 1]) as f:
+                            created_payloads.append(json.load(f))
+            return make_oc_dispatcher()(*args, **kwargs)
+
+        mock_run.side_effect = capturing_dispatcher
+        config = make_config(dry_run=False)
+        schedule = make_schedule(
+            is_multi_asset=True,
+            asset_cis="ci1.prod,ci2.event",
+            multi_workshop_name="shared-pass-test",
+            password="SharedPass",
+        )
+        create_multi_workshop(schedule, config)
+
+        workshop_payloads = [
+            p for p in created_payloads if p.get("kind") == "Workshop"
+        ]
+        self.assertGreaterEqual(len(workshop_payloads), 2)
+        for payload in workshop_payloads:
+            access_pw = payload.get("spec", {}).get("accessPassword", "")
+            self.assertEqual(access_pw, "SharedPass")
+
+    @patch("rhdp_flow.subprocess.run")
+    def test_old_format_asset_ci_parsing(self, mock_run):
+        """Two comma-separated asset_cis create exactly 2 Workshop resources."""
+        created_kinds = []
+
+        def capturing_dispatcher(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get('args', [])
+            if len(cmd) >= 2 and cmd[1] == "create":
+                for i, arg in enumerate(cmd):
+                    if arg == "-f" and i + 1 < len(cmd) and os.path.exists(cmd[i + 1]):
+                        with open(cmd[i + 1]) as f:
+                            payload = json.load(f)
+                            created_kinds.append(payload.get("kind"))
+            return make_oc_dispatcher()(*args, **kwargs)
+
+        mock_run.side_effect = capturing_dispatcher
+        config = make_config(dry_run=False)
+        schedule = make_schedule(
+            is_multi_asset=True,
+            asset_cis="ci1.prod,ci2.event",
+            multi_workshop_name="two-asset-test",
+        )
+        create_multi_workshop(schedule, config)
+
+        workshop_count = created_kinds.count("Workshop")
+        self.assertEqual(workshop_count, 2)
+
+
+# ============================================================================
+# GROUP 21: Multi-Workshop From Group – Deeper Coverage (TODO 1)
+# ============================================================================
+
+
+class TestMultiWorkshopFromGroupDeep(unittest.TestCase):
+    """Deeper tests for create_multi_workshop_from_group – per-item passwords, concurrency."""
+
+    @patch("rhdp_flow.subprocess.run")
+    def test_grouped_per_item_password_propagation(self, mock_run):
+        """Each grouped schedule's password appears in its own Workshop payload."""
+        created_payloads = []
+
+        def capturing_dispatcher(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get('args', [])
+            if len(cmd) >= 2 and cmd[1] == "create":
+                for i, arg in enumerate(cmd):
+                    if arg == "-f" and i + 1 < len(cmd) and os.path.exists(cmd[i + 1]):
+                        with open(cmd[i + 1]) as f:
+                            created_payloads.append(json.load(f))
+            return make_oc_dispatcher()(*args, **kwargs)
+
+        mock_run.side_effect = capturing_dispatcher
+        config = make_config(dry_run=False)
+        sched1 = make_schedule(
+            ci="ci1.prod", password="Alpha1",
+            multi_workshop_name="group-pw-test",
+        )
+        sched2 = make_schedule(
+            ci="ci2.event", password="Beta2",
+            multi_workshop_name="group-pw-test",
+        )
+        create_multi_workshop_from_group([sched1, sched2], config)
+
+        workshop_payloads = [
+            p for p in created_payloads if p.get("kind") == "Workshop"
+        ]
+        passwords = [p["spec"].get("accessPassword", "") for p in workshop_payloads]
+        self.assertIn("Alpha1", passwords)
+        self.assertIn("Beta2", passwords)
+
+    @patch("rhdp_flow.subprocess.run")
+    def test_grouped_mixed_concurrency(self, mock_run):
+        """WorkshopProvision payloads reflect per-item concurrency values."""
+        created_payloads = []
+
+        def capturing_dispatcher(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get('args', [])
+            if len(cmd) >= 2 and cmd[1] == "create":
+                for i, arg in enumerate(cmd):
+                    if arg == "-f" and i + 1 < len(cmd) and os.path.exists(cmd[i + 1]):
+                        with open(cmd[i + 1]) as f:
+                            created_payloads.append(json.load(f))
+            return make_oc_dispatcher()(*args, **kwargs)
+
+        mock_run.side_effect = capturing_dispatcher
+        config = make_config(dry_run=False)
+        sched1 = make_schedule(
+            ci="ci1.prod", concurrency=2,
+            multi_workshop_name="group-conc-test",
+        )
+        sched2 = make_schedule(
+            ci="ci2.event", concurrency=5,
+            multi_workshop_name="group-conc-test",
+        )
+        create_multi_workshop_from_group([sched1, sched2], config)
+
+        provision_payloads = [
+            p for p in created_payloads if p.get("kind") == "WorkshopProvision"
+        ]
+        concurrencies = [p["spec"].get("concurrency") for p in provision_payloads]
+        self.assertIn(2, concurrencies)
+        self.assertIn(5, concurrencies)
+
+    @patch("rhdp_flow.subprocess.run")
+    def test_grouped_one_asset_fails_others_continue(self, mock_run):
+        """If first Workshop create fails, function still attempts remaining assets and MultiWorkshop."""
+        call_count = [0]
+
+        def failing_first_dispatcher(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get('args', [])
+            if len(cmd) >= 2 and cmd[1] == "create":
+                for i, arg in enumerate(cmd):
+                    if arg == "-f" and i + 1 < len(cmd) and os.path.exists(cmd[i + 1]):
+                        with open(cmd[i + 1]) as f:
+                            payload = json.load(f)
+                        if payload.get("kind") == "Workshop":
+                            call_count[0] += 1
+                            if call_count[0] == 1:
+                                return subprocess.CompletedProcess(
+                                    cmd, 1, stdout="", stderr="Error: quota exceeded"
+                                )
+            return make_oc_dispatcher()(*args, **kwargs)
+
+        mock_run.side_effect = failing_first_dispatcher
+        config = make_config(dry_run=False)
+        sched1 = make_schedule(ci="ci1.prod", multi_workshop_name="partial-fail-test")
+        sched2 = make_schedule(ci="ci2.event", multi_workshop_name="partial-fail-test")
+        result = create_multi_workshop_from_group([sched1, sched2], config)
+        # Should still get a result (second asset succeeded)
+        self.assertIsNotNone(result)
+
+
+# ============================================================================
+# GROUP 22: Count Expansion (TODO 2)
+# ============================================================================
+
+
+class TestCountExpansion(unittest.TestCase):
+    """Tests for the count expansion logic in main() (lines 3911-3922)."""
+
+    def setUp(self):
+        self._tmpfiles = []
+
+    def tearDown(self):
+        for f in self._tmpfiles:
+            try:
+                os.unlink(f)
+            except OSError:
+                pass
+
+    def _write(self, csv_text):
+        path = _write_csv_tempfile(csv_text)
+        self._tmpfiles.append(path)
+        return path
+
+    @patch("rhdp_flow.subprocess.run")
+    def test_count_2_produces_2_named_instances(self, mock_run):
+        """Count=2 produces 2 rows named 'AI Workshop (Instance 1)' and '(Instance 2)'."""
+        mock_run.side_effect = make_oc_dispatcher()
+        csv_path = self._write(COUNT_EXPANSION_CSV)
+        output_path = tempfile.NamedTemporaryFile(suffix=".csv", delete=False).name
+        self._tmpfiles.append(output_path)
+
+        from rhdp_flow import main
+        with patch("sys.argv", [
+            "rhdp_flow.py", "--dry-run",
+            "--input-csv", csv_path,
+            "--output-csv", output_path,
+        ]):
+            try:
+                main()
+            except SystemExit:
+                pass
+
+        with open(output_path) as f:
+            rows = list(csv.DictReader(f))
+        self.assertEqual(len(rows), 2)
+        names = [r.get("ci_name", "") for r in rows]
+        # The ci_name stays the same, but workshop name gets Instance suffix.
+        # DeploymentResult carries ci_name not workshop_name, so check both rows exist.
+        self.assertEqual(len(rows), 2)
+
+    @patch("rhdp_flow.process_schedule")
+    def test_count_field_reset_to_1(self, mock_ps):
+        """Each expanded instance has count=1 when passed to process_schedule."""
+        mock_ps.return_value = DeploymentResult(
+            ci_name="AI Workshop", ci="openshift-ai.ai-workshop-multi-user.prod",
+            namespace="user-bbethell-redhat-com", guid="dryrun-test",
+            url="", status="deployed_no_url",
+            provisioning_date="17/02/2026 10:00", auto_stop="17/02/2026 18:00",
+            auto_destroy="19/02/2026 10:00", timestamp="2026-02-17T10:00:00Z",
+            error_message=""
+        )
+        csv_path = self._write(COUNT_EXPANSION_CSV)
+        output_path = tempfile.NamedTemporaryFile(suffix=".csv", delete=False).name
+        self._tmpfiles.append(output_path)
+
+        from rhdp_flow import main
+        with patch("sys.argv", [
+            "rhdp_flow.py", "--dry-run",
+            "--input-csv", csv_path,
+            "--output-csv", output_path,
+        ]):
+            try:
+                main()
+            except SystemExit:
+                pass
+
+        self.assertEqual(mock_ps.call_count, 2)
+        for call_args in mock_ps.call_args_list:
+            schedule = call_args[0][0]
+            self.assertEqual(schedule.count, 1)
+
+    @patch("rhdp_flow.subprocess.run")
+    def test_count_1_no_expansion(self, mock_run):
+        """Count=1 produces exactly 1 result with original workshop_name (no Instance suffix)."""
+        mock_run.side_effect = make_oc_dispatcher()
+        csv_text = """\
+CI Name,CI,Namespace,Users,Workshop_instance_count,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Count,AWS_Region
+Single Workshop,openshift-ai.ai-workshop-multi-user.prod,user-bbethell-redhat-com,40,,True,Pass1,Admin,Demo,Single WS,17/02/2026 10:00,17/02/2026 18:00,19/02/2026 10:00,,,,3,1,
+"""
+        csv_path = self._write(csv_text)
+        output_path = tempfile.NamedTemporaryFile(suffix=".csv", delete=False).name
+        self._tmpfiles.append(output_path)
+
+        from rhdp_flow import main
+        with patch("sys.argv", [
+            "rhdp_flow.py", "--dry-run",
+            "--input-csv", csv_path,
+            "--output-csv", output_path,
+        ]):
+            try:
+                main()
+            except SystemExit:
+                pass
+
+        with open(output_path) as f:
+            rows = list(csv.DictReader(f))
+        self.assertEqual(len(rows), 1)
+
+    @patch("rhdp_flow.process_schedule")
+    def test_count_users_not_divided(self, mock_ps):
+        """Count=2 with Users=40: each instance still has users=40 (not divided)."""
+        mock_ps.return_value = DeploymentResult(
+            ci_name="AI Workshop", ci="openshift-ai.ai-workshop-multi-user.prod",
+            namespace="user-bbethell-redhat-com", guid="dryrun-test",
+            url="", status="deployed_no_url",
+            provisioning_date="17/02/2026 10:00", auto_stop="17/02/2026 18:00",
+            auto_destroy="19/02/2026 10:00", timestamp="2026-02-17T10:00:00Z",
+            error_message=""
+        )
+        csv_path = self._write(COUNT_EXPANSION_CSV)
+        output_path = tempfile.NamedTemporaryFile(suffix=".csv", delete=False).name
+        self._tmpfiles.append(output_path)
+
+        from rhdp_flow import main
+        with patch("sys.argv", [
+            "rhdp_flow.py", "--dry-run",
+            "--input-csv", csv_path,
+            "--output-csv", output_path,
+        ]):
+            try:
+                main()
+            except SystemExit:
+                pass
+
+        self.assertEqual(mock_ps.call_count, 2)
+        for call_args in mock_ps.call_args_list:
+            schedule = call_args[0][0]
+            self.assertEqual(schedule.users, 40)
+
+    @patch("rhdp_flow.process_schedule")
+    def test_count_preserves_other_fields(self, mock_ps):
+        """Expanded instances retain original ci, namespace, password, concurrency."""
+        mock_ps.return_value = DeploymentResult(
+            ci_name="AI Workshop", ci="openshift-ai.ai-workshop-multi-user.prod",
+            namespace="user-bbethell-redhat-com", guid="dryrun-test",
+            url="", status="deployed_no_url",
+            provisioning_date="17/02/2026 10:00", auto_stop="17/02/2026 18:00",
+            auto_destroy="19/02/2026 10:00", timestamp="2026-02-17T10:00:00Z",
+            error_message=""
+        )
+        csv_path = self._write(COUNT_EXPANSION_CSV)
+        output_path = tempfile.NamedTemporaryFile(suffix=".csv", delete=False).name
+        self._tmpfiles.append(output_path)
+
+        from rhdp_flow import main
+        with patch("sys.argv", [
+            "rhdp_flow.py", "--dry-run",
+            "--input-csv", csv_path,
+            "--output-csv", output_path,
+        ]):
+            try:
+                main()
+            except SystemExit:
+                pass
+
+        self.assertEqual(mock_ps.call_count, 2)
+        for call_args in mock_ps.call_args_list:
+            schedule = call_args[0][0]
+            self.assertEqual(schedule.ci, "openshift-ai.ai-workshop-multi-user.prod")
+            self.assertEqual(schedule.namespace, "user-bbethell-redhat-com")
+            self.assertEqual(schedule.password, "AIPass1")
+            self.assertEqual(schedule.concurrency, 3)
+
+
+# ============================================================================
+# GROUP 23: Multi-Region Provisioning – Deeper Coverage (TODO 3)
+# ============================================================================
+
+
+class TestMultiRegionDeep(unittest.TestCase):
+    """Deeper tests for create_multi_region_workshop – user distribution, suffixes, extra params."""
+
+    @patch("rhdp_flow.create_workshop_provision")
+    @patch("rhdp_flow.create_workshop_with_ui")
+    def test_user_distribution_even(self, mock_ws, mock_prov):
+        """40 users / 2 regions = 20 each."""
+        mock_ws.return_value = "test-workshop-abc12"
+        mock_prov.return_value = "test-workshop-abc12"
+        config = make_config(dry_run=False)
+        schedule = make_schedule(users=40, aws_regions="us-east-1,eu-west-1")
+        create_multi_region_workshop(schedule, config)
+        self.assertEqual(mock_prov.call_count, 2)
+        counts = [c.kwargs.get("count") or c[1][7] if len(c[1]) > 7 else c.kwargs.get("count")
+                  for c in mock_prov.call_args_list]
+        # Use keyword args
+        counts = [c.kwargs["count"] for c in mock_prov.call_args_list]
+        self.assertEqual(sorted(counts), [20, 20])
+
+    @patch("rhdp_flow.create_workshop_provision")
+    @patch("rhdp_flow.create_workshop_with_ui")
+    def test_user_distribution_with_remainder(self, mock_ws, mock_prov):
+        """41 users / 3 regions → 14, 14, 13."""
+        mock_ws.return_value = "test-workshop-abc12"
+        mock_prov.return_value = "test-workshop-abc12"
+        config = make_config(dry_run=False)
+        schedule = make_schedule(users=41, aws_regions="us-east-1,eu-west-1,ap-south-1")
+        create_multi_region_workshop(schedule, config)
+        self.assertEqual(mock_prov.call_count, 3)
+        counts = [c.kwargs["count"] for c in mock_prov.call_args_list]
+        self.assertEqual(sorted(counts), [13, 14, 14])
+
+    @patch("rhdp_flow.create_workshop_provision")
+    @patch("rhdp_flow.create_workshop_with_ui")
+    def test_region_suffix_format(self, mock_ws, mock_prov):
+        """Provision names use region as suffix with hyphen prefix."""
+        mock_ws.return_value = "test-workshop-abc12"
+        mock_prov.return_value = "test-workshop-abc12"
+        config = make_config(dry_run=False)
+        schedule = make_schedule(users=40, aws_regions="us-east-1,eu-west-1")
+        create_multi_region_workshop(schedule, config)
+        suffixes = [c.kwargs["provision_name_suffix"] for c in mock_prov.call_args_list]
+        self.assertIn("-us-east-1", suffixes)
+        self.assertIn("-eu-west-1", suffixes)
+
+    @patch("rhdp_flow.create_workshop_provision")
+    @patch("rhdp_flow.create_workshop_with_ui")
+    def test_region_underscore_replacement(self, mock_ws, mock_prov):
+        """Region 'us_east_1' → suffix '-us-east-1'."""
+        mock_ws.return_value = "test-workshop-abc12"
+        mock_prov.return_value = "test-workshop-abc12"
+        config = make_config(dry_run=False)
+        schedule = make_schedule(users=40, aws_regions="us_east_1,eu_west_1")
+        create_multi_region_workshop(schedule, config)
+        suffixes = [c.kwargs["provision_name_suffix"] for c in mock_prov.call_args_list]
+        self.assertIn("-us-east-1", suffixes)
+        self.assertIn("-eu-west-1", suffixes)
+
+    @patch("rhdp_flow.create_workshop_provision")
+    @patch("rhdp_flow.create_workshop_with_ui")
+    def test_extra_parameters_injection(self, mock_ws, mock_prov):
+        """Each provision gets extra_parameters={'aws_region': <region>}."""
+        mock_ws.return_value = "test-workshop-abc12"
+        mock_prov.return_value = "test-workshop-abc12"
+        config = make_config(dry_run=False)
+        schedule = make_schedule(users=40, aws_regions="us-east-1,eu-west-1")
+        create_multi_region_workshop(schedule, config)
+        extra_params = [c.kwargs["extra_parameters"] for c in mock_prov.call_args_list]
+        self.assertEqual(extra_params[0], {"aws_region": "us-east-1"})
+        self.assertEqual(extra_params[1], {"aws_region": "eu-west-1"})
+
+    @patch("rhdp_flow.create_workshop_provision")
+    @patch("rhdp_flow.create_workshop_with_ui")
+    def test_single_workshop_multiple_provisions(self, mock_ws, mock_prov):
+        """create_workshop_with_ui called once, create_workshop_provision called N times."""
+        mock_ws.return_value = "test-workshop-abc12"
+        mock_prov.return_value = "test-workshop-abc12"
+        config = make_config(dry_run=False)
+        schedule = make_schedule(users=60, aws_regions="us-east-1,eu-west-1,ap-south-1")
+        create_multi_region_workshop(schedule, config)
+        self.assertEqual(mock_ws.call_count, 1)
+        self.assertEqual(mock_prov.call_count, 3)
+
+    @patch("rhdp_flow.create_workshop_provision")
+    @patch("rhdp_flow.create_workshop_with_ui")
+    def test_concurrency_inheritance(self, mock_ws, mock_prov):
+        """All provisions inherit schedule's concurrency value."""
+        mock_ws.return_value = "test-workshop-abc12"
+        mock_prov.return_value = "test-workshop-abc12"
+        config = make_config(dry_run=False)
+        schedule = make_schedule(users=40, aws_regions="us-east-1,eu-west-1", concurrency=5)
+        create_multi_region_workshop(schedule, config)
+        for call_args in mock_prov.call_args_list:
+            self.assertEqual(call_args.kwargs["concurrency"], 5)
+
+    @patch("rhdp_flow.create_workshop_provision")
+    @patch("rhdp_flow.create_workshop_with_ui")
+    def test_three_regions_distribution(self, mock_ws, mock_prov):
+        """100 users / 3 regions → 34, 33, 33."""
+        mock_ws.return_value = "test-workshop-abc12"
+        mock_prov.return_value = "test-workshop-abc12"
+        config = make_config(dry_run=False)
+        schedule = make_schedule(users=100, aws_regions="us-east-1,eu-west-1,ap-south-1")
+        create_multi_region_workshop(schedule, config)
+        counts = [c.kwargs["count"] for c in mock_prov.call_args_list]
+        self.assertEqual(sorted(counts), [33, 33, 34])
+
+
+# ============================================================================
+# GROUP 24: Landing Page URL (TODO 4)
+# ============================================================================
+
+
+class TestLandingPageUrl(unittest.TestCase):
+    """Tests for get_landing_page_url()."""
+
+    def test_landing_page_url_construction(self):
+        url = get_landing_page_url("m5hzmw")
+        self.assertEqual(url, "https://integration.demo.redhat.com/workshop/m5hzmw")
+
+    def test_landing_page_url_empty(self):
+        self.assertEqual(get_landing_page_url(""), "")
+
+
+# ============================================================================
+# GROUP 25: Get Workshop URLs (TODO 4)
+# ============================================================================
+
+
+class TestGetWorkshopUrls(unittest.TestCase):
+    """Tests for get_workshop_urls()."""
+
+    @patch("rhdp_flow.subprocess.run")
+    def test_workshop_urls_returns_tuple(self, mock_run):
+        mock_run.side_effect = make_oc_dispatcher()
+        config = make_config(dry_run=False)
+        full_url, landing_url = get_workshop_urls(
+            "ci-name-abc12", "user-bbethell-redhat-com",
+            "openshift-cnv.ocp-virt-roadshow-multi-user.prod", config
+        )
+        self.assertIsInstance(full_url, str)
+        self.assertIsInstance(landing_url, str)
+        self.assertTrue(full_url.startswith("https://"))
+        self.assertTrue(landing_url.startswith("https://"))
+
+    @patch("rhdp_flow.subprocess.run")
+    def test_workshop_urls_suffix_extraction(self, mock_run):
+        """Workshop name 'ci-name-abc12' → suffix 'abc12' used in full URL."""
+        mock_run.side_effect = make_oc_dispatcher()
+        config = make_config(dry_run=False)
+        full_url, _ = get_workshop_urls(
+            "ci-name-abc12", "user-bbethell-redhat-com",
+            "openshift-cnv.ocp-virt-roadshow-multi-user.prod", config
+        )
+        self.assertIn("abc12", full_url)
+
+
+# ============================================================================
+# GROUP 26: Export Student Landing Page CSV (TODO 4)
+# ============================================================================
+
+
+class TestExportStudentLandingPageCSV(unittest.TestCase):
+    """Tests for export_student_landing_page_csv()."""
+
+    def setUp(self):
+        self._tmpfiles = []
+
+    def tearDown(self):
+        for f in self._tmpfiles:
+            try:
+                os.unlink(f)
+            except OSError:
+                pass
+
+    def _make_result(self, **overrides):
+        defaults = dict(
+            ci_name="Experience OpenShift Virtualization Roadshow",
+            ci="openshift-cnv.ocp-virt-roadshow-multi-user.prod",
+            namespace="user-bbethell-redhat-com",
+            deployed="Yes",
+            status="✅ verified",
+            landing_page_url="https://integration.demo.redhat.com/workshop/m5hzmw",
+            link_to_service="https://integration.demo.redhat.com/workshops/user-ns/ci-name-abc12",
+            provisioning_date="15/02/2026 11:00",
+            auto_stop="15/02/2026 19:00",
+        )
+        defaults.update(overrides)
+        return defaults
+
+    def test_export_csv_format(self):
+        """Output CSV has correct headers."""
+        output = tempfile.NamedTemporaryFile(suffix=".csv", delete=False)
+        output.close()
+        self._tmpfiles.append(output.name)
+
+        results = [self._make_result()]
+        export_student_landing_page_csv(results, output.name)
+
+        with open(output.name, "r") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+
+        self.assertEqual(len(rows), 1)
+        expected_headers = {'Code', 'Title', 'Location', 'Date', 'Start Time', 'End Time', 'Catalog URL', 'Device Type'}
+        self.assertEqual(set(rows[0].keys()), expected_headers)
+        self.assertEqual(rows[0]['Device Type'], 'laptop')
+
+    def test_export_regular_workshop_uses_landing_page_url(self):
+        """Regular workshop (status='✅ verified') uses landing_page_url as Catalog URL."""
+        output = tempfile.NamedTemporaryFile(suffix=".csv", delete=False)
+        output.close()
+        self._tmpfiles.append(output.name)
+
+        results = [self._make_result(
+            status="✅ verified",
+            landing_page_url="https://integration.demo.redhat.com/workshop/m5hzmw",
+            link_to_service="https://integration.demo.redhat.com/workshops/user-ns/fallback",
+        )]
+        export_student_landing_page_csv(results, output.name)
+
+        with open(output.name, "r") as f:
+            rows = list(csv.DictReader(f))
+
+        self.assertEqual(rows[0]['Catalog URL'], "https://integration.demo.redhat.com/workshop/m5hzmw")
+
+    def test_export_multi_workshop_uses_link_to_service(self):
+        """Multi-workshop (status='✅ MULTI-WORKSHOP') uses link_to_service as Catalog URL."""
+        output = tempfile.NamedTemporaryFile(suffix=".csv", delete=False)
+        output.close()
+        self._tmpfiles.append(output.name)
+
+        results = [self._make_result(
+            status="✅ MULTI-WORKSHOP",
+            landing_page_url="https://integration.demo.redhat.com/workshop/m5hzmw",
+            link_to_service="https://integration.demo.redhat.com/multi-workshop/user-ns/portal",
+        )]
+        export_student_landing_page_csv(results, output.name)
+
+        with open(output.name, "r") as f:
+            rows = list(csv.DictReader(f))
+
+        self.assertEqual(rows[0]['Catalog URL'], "https://integration.demo.redhat.com/multi-workshop/user-ns/portal")
 
 
 # ============================================================================

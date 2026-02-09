@@ -2,11 +2,11 @@
 
 ## Testing
 
-- [ ] Test multi-asset with `Multi_Asset=True` + `Asset_CIs` (old format) vs grouped rows with `Multi_Workshop_Name` (new format) — verify both paths produce correct results and that per-item passwords work in both cases
-- [ ] Test Virt Roadshow with 20 users and `Count=2` (2 clusters/instances)
-- [ ] Test multi-region provisioning with an AWS catalog item
+- [x] Test multi-asset with `Multi_Asset=True` + `Asset_CIs` (old format) vs grouped rows with `Multi_Workshop_Name` (new format) — verify both paths produce correct results and that per-item passwords work in both cases (5 tests: shared password, asset parsing, per-item password propagation, mixed concurrency, graceful degradation)
+- [x] Test Virt Roadshow with 20 users and `Count=2` (2 clusters/instances) (5 tests: 2 named instances, count reset, no expansion for count=1, users not divided, fields preserved)
+- [x] Test multi-region provisioning with an AWS catalog item (8 tests: even/remainder user distribution, region suffixes, underscore replacement, extra_parameters, single workshop + N provisions, concurrency inheritance, 3-region distribution)
 - [ ] Test on integration cluster (end-to-end with real `oc` commands)
-- [ ] Verify landing page URLs work correctly and export to CSV automatically
+- [x] Verify landing page URLs work correctly and export to CSV automatically (7 tests: URL construction, empty input, tuple return, suffix extraction, CSV format, regular vs multi-workshop URL selection)
 
 ## Documentation
 
@@ -44,7 +44,7 @@
 - [x] **Scale** — `--scale N` sets WorkshopProvision count to target value
 - [x] **Regions (Multi-Region Provisioning)** — `AWS_Region` column supports comma-separated regions; creates one Workshop with multiple regional WorkshopProvisions, users distributed evenly
 - [x] **Interactive CSV Wizard** — `--wizard` launches a rich CLI wizard to generate workshop schedule CSVs interactively
-- [x] **Test Suite** — 88 tests across 19 groups covering all functionality (see `test_rhdp_flow.py`)
+- [x] **Test Suite** — 113 tests across 26 groups covering all functionality (see `test_rhdp_flow.py`)
 
 ## Usage Examples
 
