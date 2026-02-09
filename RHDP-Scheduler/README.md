@@ -120,6 +120,72 @@ python3 rhdp_flow.py --input-csv workshop_schedule.csv --qa both
 | `--scale` | Scale WorkshopProvision count to N |
 | `--wizard` | Launch interactive CSV generation wizard |
 
+## Testing
+
+The test suite (`test_rhdp_flow.py`) provides comprehensive coverage of all `rhdp_flow.py` functionality. All tests run **offline** — no cluster access or `oc` login needed. Subprocess calls are mocked with a dispatcher that returns realistic OpenShift responses.
+
+### Running Tests
+
+```bash
+cd RHDP-Scheduler
+
+# Run all tests with pytest (verbose)
+python3 -m pytest test_rhdp_flow.py -v
+
+# Run all tests with unittest
+python3 -m unittest test_rhdp_flow -v
+
+# Run a specific test group
+python3 -m pytest test_rhdp_flow.py -v -k "TestCSVParsing"
+
+# Run a single test
+python3 -m pytest test_rhdp_flow.py -v -k "test_basic_single_row"
+```
+
+### Test Groups
+
+| Group | Class | What it covers |
+|-------|-------|----------------|
+| 1 | `TestDateTimeUtilities` | `parse_date_time`, `format_iso8601`, `calculate_duration` |
+| 2 | `TestCSVParsing` | `read_csv_input`, `write_deployment_results`, header formats, edge cases |
+| 3 | `TestBuildResourceClaimPayload` | Payload structure, provider fields, passwords, annotations, date defaults |
+| 4 | `TestCreateResourceClaimViaOc` | Dry-run, success/failure/timeout parsing, KUBECONFIG propagation |
+| 5 | `TestCreateWorkshopWithUI` | Dry-run, generateName extraction, "already exists" handling |
+| 6 | `TestCreateWorkshopProvision` | Dry-run, count/concurrency, name suffix, extra parameters |
+| 7 | `TestCreateMultiWorkshop` | Old-style multi-asset with Asset_CIs, custom vs generated names |
+| 8 | `TestCreateMultiWorkshopFromGroup` | Grouped rows sharing Multi_Workshop_Name, per-item passwords |
+| 9 | `TestMultiRegionWorkshop` | Multi-region provisioning, user distribution, single-region rejection |
+| 10 | `TestLockWorkshops` | Dry-run, `actionSchedule.stop` patching, no-workshops-found |
+| 11 | `TestExtendStopTime` | New stop time calculation, dry-run |
+| 12 | `TestExtendDestroyTime` | Workshop + WorkshopProvision `lifespan.end` patching |
+| 13 | `TestScaleWorkshops` | `spec.count` patching |
+| 14 | `TestProcessSchedule` | Routing: workshop UI, no UI, multi-asset, multi-region, failure |
+| 15 | `TestMainCLI` | End-to-end CLI: dry-run, `--ci` filter, `--lock`, `--extend-*`, `--scale`, count expansion, grouped routing |
+| 16 | `TestConstructWorkshopUrl` | URL construction with/without suffix |
+| 17 | `TestVerifyDeployment` | Dry-run, healthy+ready, not healthy |
+| 18 | `TestRHDPConfig` | `validate()` success, failure, oc-not-found |
+| 19 | `TestCreateParser` | Default values, flag parsing, QA choices, scale integer |
+
+### Writing New Tests
+
+The test file provides three helper factories:
+
+- **`make_schedule(**overrides)`** — creates a `WorkshopSchedule` with sensible defaults; override any field by keyword
+- **`make_config(dry_run=False)`** — creates an `RHDPConfig`
+- **`make_oc_dispatcher(overrides=None)`** — returns a callable for `@patch('rhdp_flow.subprocess.run')` that dispatches on the `oc` subcommand (`create`, `get`, `patch`, `delete`, `version`) and returns realistic `CompletedProcess` objects. Pass `overrides` dict to customize specific responses.
+
+Example adding a new test:
+
+```python
+@patch("rhdp_flow.subprocess.run")
+def test_my_new_feature(self, mock_run):
+    mock_run.side_effect = make_oc_dispatcher()
+    config = make_config(dry_run=False)
+    schedule = make_schedule(users=50, password="NewPass")
+    result = process_schedule(schedule, config)
+    self.assertEqual(result.status, "verified")
+```
+
 ## Requirements
 
 - Python 3.7+
