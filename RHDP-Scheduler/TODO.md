@@ -27,6 +27,9 @@ can test on intergration
 want a way to easily get csv from white glove workshop space or in a less mnaual fasshion - we have a white glov ehelper tool we run within white glove workshops and it gives us a csv? we need item name (maybe has to be agv item) but we are oc'd into cluster so it can check
 
 How can we sync any changes to the master sheet to our own sheet (this tool our own sheets)
+synch with apt before event or can we comapre each day in sheet
+
+Landing page URL's check them and see if they work from the tool and do they go to a csv autoamticly 
 
 ## Completed Features
 
