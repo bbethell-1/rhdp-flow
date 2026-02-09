@@ -408,18 +408,34 @@ def write_deployment_results(
 
 def build_resource_claim_payload(
     schedule: WorkshopSchedule,
+    config: 'RHDPConfig',
     requester_email: str = ""
 ) -> Dict:
     """
     Build JSON payload for ResourceClaim based on actual cluster structure.
-    
+
     Args:
         schedule: WorkshopSchedule object
+        config: RHDPConfig object (used for catalog display name lookup)
         requester_email: Requester email (extracted from namespace if not provided)
-        
+
     Returns:
         Dictionary representing the ResourceClaim payload
     """
+    # Look up the real catalog display name
+    catalog_display_name = schedule.ci_name  # fallback
+    if config.dry_run:
+        logger.info(f"Dry-run mode: skipping catalog lookup for display name, using ci_name: {schedule.ci_name}")
+    else:
+        try:
+            catalog_info = get_catalog_item_info(schedule.ci, config)
+            if catalog_info.get('displayName'):
+                catalog_display_name = catalog_info['displayName']
+                logger.info(f"Resolved catalog display name: {catalog_display_name}")
+            else:
+                logger.warning(f"Catalog lookup returned no displayName for {schedule.ci}, falling back to ci_name: {schedule.ci_name}")
+        except Exception as e:
+            logger.warning(f"Failed to look up catalog display name for {schedule.ci}: {e}, falling back to ci_name: {schedule.ci_name}")
     # Extract email from namespace if not provided
     if not requester_email:
         # Namespace format: user-bbethell-redhat-com -> bbethell@redhat.com
@@ -467,7 +483,7 @@ def build_resource_claim_payload(
             "namespace": schedule.namespace,
             "annotations": {
                 "babylon.gpte.redhat.com/catalogDisplayName": "RHDP",
-                "babylon.gpte.redhat.com/catalogItemDisplayName": schedule.ci_name,
+                "babylon.gpte.redhat.com/catalogItemDisplayName": catalog_display_name,
                 "babylon.gpte.redhat.com/notifier": "disable",
                 "demo.redhat.com/orderedBy": requester_email,
                 "demo.redhat.com/purpose": schedule.purpose,
@@ -2872,7 +2888,7 @@ def process_schedule(
             )
         
         # Build payload
-        payload = build_resource_claim_payload(schedule)
+        payload = build_resource_claim_payload(schedule, config)
         
         # If workshop UI is enabled, create Workshop directly without ResourceClaim to avoid duplicates
         if schedule.enable_workshop_interface:
