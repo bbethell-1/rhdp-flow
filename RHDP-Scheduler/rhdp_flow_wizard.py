@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RHDP-Flow Interactive CSV Wizard
+RHDP-Flow Interactive CSV Wizard (v2.0)
 Generates workshop schedule CSV files through a guided CLI experience.
 
 Requires: pip install rich

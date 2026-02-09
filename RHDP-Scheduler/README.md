@@ -125,3 +125,4 @@ python3 rhdp_flow.py --input-csv workshop_schedule.csv --qa both
 - Python 3.7+
 - OpenShift CLI (`oc`) installed and logged in
 - `rich` library for the wizard (optional)
+- Access to RHDP integration cluster

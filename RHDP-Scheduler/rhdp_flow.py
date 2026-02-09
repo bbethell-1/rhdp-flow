@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RHDP-Flow: Red Hat Demo Platform Workshop Automation Tool
+RHDP-Flow: Red Hat Demo Platform Workshop Automation Tool (v2.0)
 Automates scheduling and deployment for RHDP workshops with safety features.
 
 This script uses oc commands directly (no API authentication needed if already logged in).
