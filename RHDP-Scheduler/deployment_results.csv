@@ -1,0 +1,3 @@
+ci_name,ci,namespace,guid,url,status,provisioning_date,auto_stop,auto_destroy,timestamp,error_message
+Experience OpenShift Virtualization Roadshow,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,openshift-cnv.ocp-virt-roadshow-multi-user.prod-cxt4r,https://integration.demo.redhat.com/workshops/user-bbethell-redhat-com/openshift-cnv.ocp-virt-roadshow-multi-user.prod-cxt4r,verified,09/02/2026 11:00,09/02/26 18:00,12/02/26 11:00,2026-02-09 13:14:04,
+Multi-Asset Workshop Test,multi-asset-test,user-bbethell-redhat-com,test-qvvdw,https://integration.demo.redhat.com/multi-workshop/user-bbethell-redhat-com/test-qvvdw,deployed_unverified,09/02/2026 11:00,09/02/26 18:00,12/02/26 11:00,2026-02-09 13:14:13,
