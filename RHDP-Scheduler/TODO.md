@@ -1,5 +1,7 @@
 # RHDP-Flow TODO List
 
+All features implemented as of 2026-02-09.
+
 ## Completed Features
 
 - [x] Basic workshop scheduling via ResourceClaim
