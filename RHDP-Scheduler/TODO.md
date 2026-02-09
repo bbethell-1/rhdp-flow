@@ -4,6 +4,25 @@
 
 Can I add some feedback for the script, if possible it should still set the Disaply Name to the real display name, currently it sets displcay name to the subject name which normal people won't understand
 
+### Multi-asset - seperate into lines on sheet (in a better way) so we can also hav epasswords per multi asset item
+
+### Lock All 
+Run against the orginal csv and implement the global lock against all
+
+### Extend Stop
+Run agains to orgianl CSV - if it has got a stop time (hasn't got no auto stop) then extend by -days or/and - hours? extra
+
+## Extend Destory
+Run agains to orgianl CSV - if it has got a stop time (hasn't got no auto stop) then extend by -days or hours extra
+
+##Scale
+Could we run against spesfic items in sheet and scale up?
+
+##
+deployment Concurency - add option via sheet
+
+##
+Regions - could be super complexed but like this https://spaces.redhat.com/spaces/RHPDS/pages/630588938/Adding+a+WorkshopProvision+to+a+Workshop somehow split 1 workshop into multi aws regions if needed? or can do that if we have aws region_ aws_region_2 in the sections on sheet?
 
 ### Multiple Instance Support
 
