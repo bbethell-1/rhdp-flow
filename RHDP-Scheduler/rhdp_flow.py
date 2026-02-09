@@ -6,6 +6,7 @@ Automates scheduling and deployment for RHDP workshops with safety features.
 This script uses oc commands directly (no API authentication needed if already logged in).
 """
 
+import copy
 import csv
 import json
 import logging
@@ -53,6 +54,9 @@ class WorkshopSchedule:
     is_multi_asset: bool = False  # True if this is a multi-asset workshop
     asset_cis: str = ""  # Comma-separated list of catalog items for multi-asset workshops (e.g., "ci1,ci2,ci3")
     multi_workshop_name: str = ""  # Optional custom name for multi-asset workshop (e.g., "automation-test" or "test-qvvdw")
+    concurrency: int = 1  # Deployment concurrency (how many provisions deploy at once)
+    count: int = 1  # Number of workshop instances to create
+    aws_regions: str = ""  # Comma-separated AWS regions for multi-region provisioning
 
 @dataclass
 class DeploymentResult:
@@ -276,6 +280,23 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                     asset_cis = row.get(header_map.get('asset_cis', 'Asset_CIs'), '').strip()
                     multi_workshop_name = row.get(header_map.get('multi_workshop_name', 'Multi_Workshop_Name'), '').strip()
                     is_multi_asset = is_multi_asset_str.lower() in ['true', '1', 'yes', 'y'] if is_multi_asset_str else False
+
+                    # New optional fields: concurrency, count, aws_regions
+                    concurrency_str = row.get(header_map.get('concurrency', 'Concurrency'), '').strip()
+                    count_str = row.get(header_map.get('count', 'Count'), '').strip()
+                    aws_regions = row.get(header_map.get('aws_region', 'AWS_Region'), '').strip()
+
+                    try:
+                        concurrency = int(concurrency_str) if concurrency_str else 1
+                    except ValueError:
+                        logger.warning(f"Row {row_num}: Invalid concurrency value '{concurrency_str}', defaulting to 1")
+                        concurrency = 1
+
+                    try:
+                        count = int(count_str) if count_str else 1
+                    except ValueError:
+                        logger.warning(f"Row {row_num}: Invalid count value '{count_str}', defaulting to 1")
+                        count = 1
                     
                     # Support both old and new header formats (with/without UTC suffix)
                     # Try new format first, fall back to old format
@@ -341,7 +362,10 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                         auto_destroy=auto_destroy,
                         is_multi_asset=is_multi_asset,
                         asset_cis=asset_cis,
-                        multi_workshop_name=multi_workshop_name
+                        multi_workshop_name=multi_workshop_name,
+                        concurrency=concurrency,
+                        count=count,
+                        aws_regions=aws_regions
                     )
                     
                     schedules.append(schedule)
@@ -894,19 +918,29 @@ def create_workshop_with_ui(
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp_file:
             json.dump(workshop, tmp_file, indent=2)
             tmp_file_path = tmp_file.name
-        
+
         try:
+            # Dry-run: print payload and return a mock name
+            if config.dry_run:
+                logger.info("=" * 70)
+                logger.info(f"[DRY-RUN] Workshop payload ({workshop_name_or_prefix}):")
+                logger.info("=" * 70)
+                print(json.dumps(workshop, indent=2))
+                logger.info("=" * 70)
+                mock_name = f"{workshop_name_or_prefix}dryrun-{int(time.time())}" if use_generate_name else expected_workshop_name
+                return mock_name
+
             cmd = [
                 config.oc_command,
                 "create",
                 "-f", tmp_file_path,
                 "-n", namespace
             ]
-            
+
             env = os.environ.copy()
             if config.kubeconfig_path:
                 env['KUBECONFIG'] = config.kubeconfig_path
-            
+
             logger.debug(f"Creating Workshop: {workshop_name_or_prefix} with UI enabled")
             result = subprocess.run(
                 cmd,
@@ -975,18 +1009,26 @@ def create_workshop_provision(
     namespace: str,
     resourceclaim_payload: Dict,
     config: RHDPConfig,
-    enable_workshop_ui: bool = True
+    enable_workshop_ui: bool = True,
+    concurrency: int = 1,
+    count: int = 0,
+    provision_name_suffix: str = "",
+    extra_parameters: Optional[Dict] = None
 ) -> Optional[str]:
     """
     Create WorkshopProvision to enable workshop UI.
-    
+
     Args:
         workshop_name: Name of the Workshop (should already exist)
         namespace: Kubernetes namespace
         resourceclaim_payload: Original ResourceClaim payload
         config: RHDPConfig object
         enable_workshop_ui: Whether to enable the workshop user interface
-        
+        concurrency: Deployment concurrency (how many provisions deploy simultaneously)
+        count: Override for user/provision count (0 = use payload value)
+        provision_name_suffix: Optional suffix for provision name (e.g., "-us-east-1")
+        extra_parameters: Optional extra parameters to merge into spec.parameters
+
     Returns:
         WorkshopProvision name or None
     """
@@ -999,12 +1041,18 @@ def create_workshop_provision(
         # Get catalog namespace from provider (default to babylon-catalog-prod)
         catalog_namespace = resourceclaim_payload['spec']['provider'].get('namespace', 'babylon-catalog-prod')
         
+        # Determine provision name (with optional suffix for multi-region)
+        provision_name = f"{workshop_name}{provision_name_suffix}" if provision_name_suffix else workshop_name
+
+        # Determine count: use override if provided, otherwise from payload
+        effective_count = count if count > 0 else param_values.get('num_users', 20)
+
         # Build WorkshopProvision payload
         workshop_provision = {
             "apiVersion": "babylon.gpte.redhat.com/v1",
             "kind": "WorkshopProvision",
             "metadata": {
-                "name": workshop_name,
+                "name": provision_name,
                 "namespace": namespace,
                 "labels": {
                     "babylon.gpte.redhat.com/catalogItemName": ci,
@@ -1021,8 +1069,8 @@ def create_workshop_provision(
                     "namespace": catalog_namespace
                 },
                 "workshopName": workshop_name,
-                "count": 1,
-                "concurrency": 1,
+                "count": effective_count,
+                "concurrency": concurrency,
                 "enableResourcePools": False,
                 "actionSchedule": {
                     "start": param_values.get('start_timestamp', ''),
@@ -1043,13 +1091,22 @@ def create_workshop_provision(
                 "startDelay": 30
             }
         }
-        
+
+        # Merge extra parameters (e.g., aws_region for multi-region)
+        if extra_parameters:
+            workshop_provision["spec"]["parameters"].update(extra_parameters)
+
         # Create WorkshopProvision
+        if config.dry_run:
+            logger.info(f"[DRY-RUN] WorkshopProvision payload ({provision_name}):")
+            print(json.dumps(workshop_provision, indent=2))
+            return provision_name
+
         import tempfile
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp_file:
             json.dump(workshop_provision, tmp_file, indent=2)
             tmp_file_path = tmp_file.name
-        
+
         try:
             cmd = [
                 config.oc_command,
@@ -1057,11 +1114,11 @@ def create_workshop_provision(
                 "-f", tmp_file_path,
                 "-n", namespace
             ]
-            
+
             env = os.environ.copy()
             if config.kubeconfig_path:
                 env['KUBECONFIG'] = config.kubeconfig_path
-            
+
             logger.debug(f"Creating WorkshopProvision: {workshop_name}")
             result = subprocess.run(
                 cmd,
@@ -1456,23 +1513,34 @@ def create_multi_workshop(
             logger.error("No workshops were created for multi-asset workshop")
             return None
         
-        # Step 2: Wait for all workshops to get IDs
-        logger.info("Waiting for all asset workshops to be ready...")
-        for asset_ci, workshop_name, catalog_ns, display_name in created_workshops:
-            workshop_id = wait_for_workshop_id(workshop_name, schedule.namespace, config, max_wait=120)
-            
-            if workshop_id:
+        # Step 2: Wait for all workshops to get IDs (skip in dry-run)
+        if config.dry_run:
+            for asset_ci, workshop_name, catalog_ns, display_name in created_workshops:
                 assets.append({
                     'displayName': display_name,
                     'key': asset_ci,
                     'name': workshop_name,
                     'namespace': catalog_ns,
                     'type': 'Workshop',
-                    'workshopId': workshop_id
+                    'workshopId': f"dryrun-{workshop_name}"
                 })
-                logger.info(f"✅ Asset {asset_ci} ready with ID: {workshop_id}")
-            else:
-                logger.warning(f"⚠️  Asset {asset_ci} (Workshop {workshop_name}) did not get an ID, skipping...")
+        else:
+            logger.info("Waiting for all asset workshops to be ready...")
+            for asset_ci, workshop_name, catalog_ns, display_name in created_workshops:
+                workshop_id = wait_for_workshop_id(workshop_name, schedule.namespace, config, max_wait=120)
+
+                if workshop_id:
+                    assets.append({
+                        'displayName': display_name,
+                        'key': asset_ci,
+                        'name': workshop_name,
+                        'namespace': catalog_ns,
+                        'type': 'Workshop',
+                        'workshopId': workshop_id
+                    })
+                    logger.info(f"Asset {asset_ci} ready with ID: {workshop_id}")
+                else:
+                    logger.warning(f"Asset {asset_ci} (Workshop {workshop_name}) did not get an ID, skipping...")
         
         if not assets:
             logger.error("No assets with valid workshopIds for multi-asset workshop")
@@ -1504,11 +1572,16 @@ def create_multi_workshop(
         }
         
         # Create MultiWorkshop
+        if config.dry_run:
+            logger.info(f"[DRY-RUN] MultiWorkshop payload ({multi_workshop_name}):")
+            print(json.dumps(multi_workshop, indent=2))
+            return multi_workshop_name
+
         import tempfile
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp_file:
             json.dump(multi_workshop, tmp_file, indent=2)
             tmp_file_path = tmp_file.name
-        
+
         try:
             cmd = [
                 config.oc_command,
@@ -1516,11 +1589,11 @@ def create_multi_workshop(
                 "-f", tmp_file_path,
                 "-n", schedule.namespace
             ]
-            
+
             env = os.environ.copy()
             if config.kubeconfig_path:
                 env['KUBECONFIG'] = config.kubeconfig_path
-            
+
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -1551,6 +1624,198 @@ def create_multi_workshop(
         import traceback
         logger.debug(traceback.format_exc())
         return None
+
+def create_multi_workshop_from_group(
+    schedules_group: List[WorkshopSchedule],
+    config: RHDPConfig
+) -> Optional[str]:
+    """
+    Create a MultiWorkshop from grouped rows sharing the same Multi_Workshop_Name.
+    Each row in the group becomes its own asset with its own CI and password.
+
+    Args:
+        schedules_group: List of WorkshopSchedule objects sharing the same multi_workshop_name
+        config: RHDPConfig object
+
+    Returns:
+        MultiWorkshop name if successful, None otherwise
+    """
+    if not schedules_group:
+        return None
+
+    # Use the first schedule for shared fields (namespace, dates, users, etc.)
+    first = schedules_group[0]
+    multi_workshop_name = first.multi_workshop_name.lower().replace(' ', '-').replace('_', '-')
+    import re
+    multi_workshop_name = re.sub(r'[^a-z0-9-]', '', multi_workshop_name)
+
+    logger.info(f"Creating grouped multi-asset workshop '{multi_workshop_name}' with {len(schedules_group)} assets (per-item passwords)")
+
+    # Parse dates from first schedule
+    start_dt = parse_date_time(first.provisioning_date)
+    end_dt = parse_date_time(first.auto_destroy)
+
+    if not start_dt or not end_dt:
+        logger.error("Invalid dates for grouped multi-asset workshop")
+        return None
+
+    start_iso = format_iso8601(start_dt)
+    end_iso = format_iso8601(end_dt)
+
+    stop_iso = end_iso
+    if first.auto_stop:
+        stop_dt = parse_date_time(first.auto_stop)
+        if stop_dt:
+            stop_iso = format_iso8601(stop_dt)
+
+    # Step 1: Create individual Workshops for each row/asset
+    assets = []
+    created_workshops = []
+
+    for sched in schedules_group:
+        asset_ci = sched.ci
+        logger.info(f"Creating Workshop for grouped asset: {asset_ci} (password: {'***' if sched.password else 'none'})")
+
+        catalog_info = get_catalog_item_info(asset_ci, config)
+        catalog_namespace = catalog_info.get('namespace', 'babylon-catalog-prod')
+        display_name = catalog_info.get('displayName', asset_ci)
+
+        asset_ci_safe = asset_ci.replace('.', '-')
+        if len(f"{multi_workshop_name}-{asset_ci_safe}") > 50:
+            asset_ci_safe = asset_ci_safe[:50-len(multi_workshop_name)-1]
+        asset_workshop_prefix = f"{multi_workshop_name}-{asset_ci_safe}-"
+
+        email = sched.namespace.replace('user-', '').replace('-redhat-com', '@redhat.com')
+        asset_payload = {
+            'spec': {
+                'provider': {
+                    'name': asset_ci,
+                    'namespace': catalog_namespace,
+                    'parameterValues': {
+                        'start_timestamp': start_iso,
+                        'stop_timestamp': stop_iso,
+                        'num_users': sched.users
+                    }
+                },
+                'lifespan': {'end': end_iso},
+                'accessPassword': sched.password
+            },
+            'metadata': {
+                'annotations': {
+                    'babylon.gpte.redhat.com/catalogItemDisplayName': display_name,
+                    'demo.redhat.com/requester': email,
+                    'demo.redhat.com/purpose': sched.purpose,
+                    'demo.redhat.com/purpose-activity': sched.activity
+                }
+            }
+        }
+
+        asset_workshop_name = create_workshop_with_ui(asset_workshop_prefix, sched.namespace, asset_payload, config)
+
+        if not asset_workshop_name:
+            logger.warning(f"Failed to create Workshop for grouped asset {asset_ci}, continuing...")
+            continue
+
+        create_workshop_provision(
+            asset_workshop_name, sched.namespace, asset_payload, config,
+            enable_workshop_ui=False, concurrency=sched.concurrency
+        )
+        created_workshops.append((asset_ci, asset_workshop_name, catalog_namespace, display_name))
+        logger.info(f"Created Workshop '{asset_workshop_name}' for grouped asset {asset_ci}")
+
+    if not created_workshops:
+        logger.error("No workshops were created for grouped multi-asset workshop")
+        return None
+
+    # Step 2: Wait for workshop IDs (skip in dry-run)
+    if config.dry_run:
+        for asset_ci, workshop_name, catalog_ns, display_name in created_workshops:
+            assets.append({
+                'displayName': display_name,
+                'key': asset_ci,
+                'name': workshop_name,
+                'namespace': catalog_ns,
+                'type': 'Workshop',
+                'workshopId': f"dryrun-{workshop_name}"
+            })
+    else:
+        logger.info("Waiting for grouped asset workshops to be ready...")
+        for asset_ci, workshop_name, catalog_ns, display_name in created_workshops:
+            workshop_id = wait_for_workshop_id(workshop_name, first.namespace, config, max_wait=120)
+            if workshop_id:
+                assets.append({
+                    'displayName': display_name,
+                    'key': asset_ci,
+                    'name': workshop_name,
+                    'namespace': catalog_ns,
+                    'type': 'Workshop',
+                    'workshopId': workshop_id
+                })
+                logger.info(f"Grouped asset {asset_ci} ready with ID: {workshop_id}")
+            else:
+                logger.warning(f"Grouped asset {asset_ci} (Workshop {workshop_name}) did not get an ID, skipping...")
+
+    if not assets:
+        logger.error("No assets with valid workshopIds for grouped multi-asset workshop")
+        return None
+
+    # Step 3: Create MultiWorkshop resource
+    email = first.namespace.replace('user-', '').replace('-redhat-com', '@redhat.com')
+    multi_workshop = {
+        "apiVersion": "babylon.gpte.redhat.com/v1",
+        "kind": "MultiWorkshop",
+        "metadata": {
+            "name": multi_workshop_name,
+            "namespace": first.namespace,
+            "annotations": {
+                "babylon.gpte.redhat.com/created-by": email
+            }
+        },
+        "spec": {
+            "assets": assets,
+            "displayName": first.workshop_name or "automation",
+            "endDate": end_iso,
+            "name": "automation",
+            "numberSeats": first.users,
+            "purpose": first.purpose,
+            "purpose-activity": first.activity,
+            "startDate": start_iso
+        }
+    }
+
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp_file:
+        json.dump(multi_workshop, tmp_file, indent=2)
+        tmp_file_path = tmp_file.name
+
+    try:
+        cmd = [config.oc_command, "create", "-f", tmp_file_path, "-n", first.namespace]
+        env = os.environ.copy()
+        if config.kubeconfig_path:
+            env['KUBECONFIG'] = config.kubeconfig_path
+
+        if config.dry_run:
+            logger.info(f"[DRY-RUN] Would create grouped MultiWorkshop: {multi_workshop_name}")
+            with open(tmp_file_path, 'r') as f:
+                print(json.dumps(json.load(f), indent=2))
+            return multi_workshop_name
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+        if result.returncode == 0:
+            logger.info(f"Successfully created grouped MultiWorkshop: {multi_workshop_name}")
+            return multi_workshop_name
+        else:
+            if "already exists" in result.stderr:
+                logger.info(f"MultiWorkshop {multi_workshop_name} already exists")
+                return multi_workshop_name
+            logger.warning(f"Could not create grouped MultiWorkshop: {result.stderr}")
+            return None
+    finally:
+        try:
+            os.unlink(tmp_file_path)
+        except:
+            pass
+
 
 def enable_workshop_lab_interface(
     workshop_name: str,
@@ -2830,6 +3095,345 @@ def export_student_landing_page_csv(
         raise
 
 # ============================================================================
+# OPERATIONAL COMMANDS (Lock, Extend, Scale)
+# ============================================================================
+
+def lock_workshops(schedules: List[WorkshopSchedule], config: RHDPConfig) -> None:
+    """
+    Lock all workshops from the CSV by setting actionSchedule.stop to now.
+    This effectively stops all workshops immediately.
+
+    Args:
+        schedules: List of WorkshopSchedule objects from CSV
+        config: RHDPConfig object
+    """
+    now_iso = format_iso8601(datetime.now(timezone.utc))
+    logger.info(f"Locking {len(schedules)} workshop(s) - setting stop time to {now_iso}")
+
+    for schedule in schedules:
+        ci = schedule.ci
+        ns = schedule.namespace
+        logger.info(f"Looking for workshops with CI={ci} in namespace={ns}")
+
+        cmd = [
+            config.oc_command, "get", "workshop", "-n", ns,
+            "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}",
+            "-o", "jsonpath={.items[*].metadata.name}"
+        ]
+
+        env = os.environ.copy()
+        if config.kubeconfig_path:
+            env['KUBECONFIG'] = config.kubeconfig_path
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+        if result.returncode != 0 or not result.stdout.strip():
+            logger.warning(f"No workshops found for CI={ci} in namespace={ns}")
+            continue
+
+        workshop_names = result.stdout.strip().split()
+        for wname in workshop_names:
+            patch_json = json.dumps({"spec": {"actionSchedule": {"stop": now_iso}}})
+            patch_cmd = [
+                config.oc_command, "patch", "workshop", wname,
+                "-n", ns, "--type", "merge", "-p", patch_json
+            ]
+
+            if config.dry_run:
+                logger.info(f"[DRY-RUN] Would lock workshop {wname}: {patch_json}")
+                continue
+
+            patch_result = subprocess.run(patch_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+            if patch_result.returncode == 0:
+                logger.info(f"Locked workshop: {wname}")
+            else:
+                logger.warning(f"Failed to lock workshop {wname}: {patch_result.stderr}")
+
+
+def extend_stop_time(schedules: List[WorkshopSchedule], config: RHDPConfig, days: int, hours: int) -> None:
+    """
+    Extend the auto-stop time for workshops by the specified days/hours.
+
+    Args:
+        schedules: List of WorkshopSchedule objects from CSV
+        config: RHDPConfig object
+        days: Number of days to extend
+        hours: Number of hours to extend
+    """
+    delta = timedelta(days=days, hours=hours)
+    logger.info(f"Extending stop time by {days} days, {hours} hours for {len(schedules)} schedule(s)")
+
+    for schedule in schedules:
+        ci = schedule.ci
+        ns = schedule.namespace
+
+        cmd = [
+            config.oc_command, "get", "workshop", "-n", ns,
+            "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}",
+            "-o", "json"
+        ]
+
+        env = os.environ.copy()
+        if config.kubeconfig_path:
+            env['KUBECONFIG'] = config.kubeconfig_path
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+        if result.returncode != 0 or not result.stdout.strip():
+            logger.warning(f"No workshops found for CI={ci} in namespace={ns}")
+            continue
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            logger.warning(f"Invalid JSON response for CI={ci}")
+            continue
+
+        for item in data.get('items', []):
+            wname = item['metadata']['name']
+            current_stop = item.get('spec', {}).get('actionSchedule', {}).get('stop', '')
+            if not current_stop:
+                logger.info(f"Workshop {wname} has no auto-stop set, skipping")
+                continue
+
+            current_dt = parse_date_time(current_stop)
+            if not current_dt:
+                logger.warning(f"Cannot parse stop time '{current_stop}' for workshop {wname}")
+                continue
+
+            new_dt = current_dt + delta
+            new_iso = format_iso8601(new_dt)
+
+            patch_json = json.dumps({"spec": {"actionSchedule": {"stop": new_iso}}})
+            patch_cmd = [
+                config.oc_command, "patch", "workshop", wname,
+                "-n", ns, "--type", "merge", "-p", patch_json
+            ]
+
+            if config.dry_run:
+                logger.info(f"[DRY-RUN] Would extend stop for {wname}: {current_stop} -> {new_iso}")
+                continue
+
+            patch_result = subprocess.run(patch_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+            if patch_result.returncode == 0:
+                logger.info(f"Extended stop for {wname}: {current_stop} -> {new_iso}")
+            else:
+                logger.warning(f"Failed to extend stop for {wname}: {patch_result.stderr}")
+
+
+def extend_destroy_time(schedules: List[WorkshopSchedule], config: RHDPConfig, days: int, hours: int) -> None:
+    """
+    Extend the auto-destroy (lifespan end) time for workshops and their provisions.
+
+    Args:
+        schedules: List of WorkshopSchedule objects from CSV
+        config: RHDPConfig object
+        days: Number of days to extend
+        hours: Number of hours to extend
+    """
+    delta = timedelta(days=days, hours=hours)
+    logger.info(f"Extending destroy time by {days} days, {hours} hours for {len(schedules)} schedule(s)")
+
+    for schedule in schedules:
+        ci = schedule.ci
+        ns = schedule.namespace
+
+        env = os.environ.copy()
+        if config.kubeconfig_path:
+            env['KUBECONFIG'] = config.kubeconfig_path
+
+        # Extend Workshop lifespan.end
+        cmd = [
+            config.oc_command, "get", "workshop", "-n", ns,
+            "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}",
+            "-o", "json"
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+        if result.returncode != 0 or not result.stdout.strip():
+            logger.warning(f"No workshops found for CI={ci} in namespace={ns}")
+            continue
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            logger.warning(f"Invalid JSON response for CI={ci}")
+            continue
+
+        for item in data.get('items', []):
+            wname = item['metadata']['name']
+            current_end = item.get('spec', {}).get('lifespan', {}).get('end', '')
+            if not current_end:
+                logger.info(f"Workshop {wname} has no lifespan end set, skipping")
+                continue
+
+            current_dt = parse_date_time(current_end)
+            if not current_dt:
+                logger.warning(f"Cannot parse lifespan end '{current_end}' for workshop {wname}")
+                continue
+
+            new_dt = current_dt + delta
+            new_iso = format_iso8601(new_dt)
+
+            patch_json = json.dumps({"spec": {"lifespan": {"end": new_iso}}})
+            patch_cmd = [
+                config.oc_command, "patch", "workshop", wname,
+                "-n", ns, "--type", "merge", "-p", patch_json
+            ]
+
+            if config.dry_run:
+                logger.info(f"[DRY-RUN] Would extend destroy for {wname}: {current_end} -> {new_iso}")
+            else:
+                patch_result = subprocess.run(patch_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+                if patch_result.returncode == 0:
+                    logger.info(f"Extended destroy for {wname}: {current_end} -> {new_iso}")
+                else:
+                    logger.warning(f"Failed to extend destroy for {wname}: {patch_result.stderr}")
+
+        # Also extend associated WorkshopProvision lifespan
+        prov_cmd = [
+            config.oc_command, "get", "workshopprovision", "-n", ns,
+            "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}",
+            "-o", "json"
+        ]
+        prov_result = subprocess.run(prov_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+        if prov_result.returncode == 0 and prov_result.stdout.strip():
+            try:
+                prov_data = json.loads(prov_result.stdout)
+                for prov_item in prov_data.get('items', []):
+                    pname = prov_item['metadata']['name']
+                    prov_end = prov_item.get('spec', {}).get('lifespan', {}).get('end', '')
+                    if not prov_end:
+                        continue
+                    prov_dt = parse_date_time(prov_end)
+                    if not prov_dt:
+                        continue
+                    new_prov_iso = format_iso8601(prov_dt + delta)
+                    prov_patch = json.dumps({"spec": {"lifespan": {"end": new_prov_iso}}})
+                    prov_patch_cmd = [
+                        config.oc_command, "patch", "workshopprovision", pname,
+                        "-n", ns, "--type", "merge", "-p", prov_patch
+                    ]
+                    if config.dry_run:
+                        logger.info(f"[DRY-RUN] Would extend provision destroy for {pname}: {prov_end} -> {new_prov_iso}")
+                    else:
+                        pr = subprocess.run(prov_patch_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+                        if pr.returncode == 0:
+                            logger.info(f"Extended provision destroy for {pname}: {prov_end} -> {new_prov_iso}")
+                        else:
+                            logger.warning(f"Failed to extend provision destroy for {pname}: {pr.stderr}")
+            except json.JSONDecodeError:
+                logger.warning(f"Invalid JSON for WorkshopProvision list in namespace={ns}")
+
+
+def scale_workshops(schedules: List[WorkshopSchedule], config: RHDPConfig, target_count: int) -> None:
+    """
+    Scale WorkshopProvision resources to a target count.
+
+    Args:
+        schedules: List of WorkshopSchedule objects from CSV
+        config: RHDPConfig object
+        target_count: Target count value for WorkshopProvision spec.count
+    """
+    logger.info(f"Scaling {len(schedules)} schedule(s) to count={target_count}")
+
+    for schedule in schedules:
+        ci = schedule.ci
+        ns = schedule.namespace
+
+        env = os.environ.copy()
+        if config.kubeconfig_path:
+            env['KUBECONFIG'] = config.kubeconfig_path
+
+        cmd = [
+            config.oc_command, "get", "workshopprovision", "-n", ns,
+            "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}",
+            "-o", "jsonpath={.items[*].metadata.name}"
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+        if result.returncode != 0 or not result.stdout.strip():
+            logger.warning(f"No WorkshopProvisions found for CI={ci} in namespace={ns}")
+            continue
+
+        provision_names = result.stdout.strip().split()
+        for pname in provision_names:
+            patch_json = json.dumps({"spec": {"count": target_count}})
+            patch_cmd = [
+                config.oc_command, "patch", "workshopprovision", pname,
+                "-n", ns, "--type", "merge", "-p", patch_json
+            ]
+
+            if config.dry_run:
+                logger.info(f"[DRY-RUN] Would scale {pname} to count={target_count}")
+                continue
+
+            patch_result = subprocess.run(patch_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+            if patch_result.returncode == 0:
+                logger.info(f"Scaled {pname} to count={target_count}")
+            else:
+                logger.warning(f"Failed to scale {pname}: {patch_result.stderr}")
+
+
+def create_multi_region_workshop(
+    schedule: WorkshopSchedule,
+    config: RHDPConfig
+) -> Optional[str]:
+    """
+    Create a single Workshop with multiple WorkshopProvisions across AWS regions.
+    Users are distributed evenly across regions.
+
+    Args:
+        schedule: WorkshopSchedule with aws_regions set (comma-separated)
+        config: RHDPConfig object
+
+    Returns:
+        Workshop name if successful, None otherwise
+    """
+    regions = [r.strip() for r in schedule.aws_regions.split(',') if r.strip()]
+    if len(regions) < 2:
+        logger.error("Multi-region requires at least 2 regions")
+        return None
+
+    logger.info(f"Creating multi-region workshop across {len(regions)} regions: {regions}")
+
+    # Build the base payload
+    payload = build_resource_claim_payload(schedule, config)
+
+    # Create the single Workshop resource
+    ci = schedule.ci
+    generate_name = f"{ci}-"
+    workshop_name = create_workshop_with_ui(generate_name, schedule.namespace, payload, config)
+
+    if not workshop_name:
+        logger.error("Failed to create Workshop for multi-region provisioning")
+        return None
+
+    logger.info(f"Created Workshop: {workshop_name}, now creating {len(regions)} regional provisions")
+
+    # Distribute users across regions
+    base_per_region = schedule.users // len(regions)
+    remainder = schedule.users % len(regions)
+
+    for idx, region in enumerate(regions):
+        region_users = base_per_region + (1 if idx < remainder else 0)
+        region_suffix = f"-{region.replace('_', '-')}"
+
+        logger.info(f"Creating WorkshopProvision for region {region} with {region_users} users")
+
+        create_workshop_provision(
+            workshop_name=workshop_name,
+            namespace=schedule.namespace,
+            resourceclaim_payload=payload,
+            config=config,
+            enable_workshop_ui=False,
+            concurrency=schedule.concurrency,
+            count=region_users,
+            provision_name_suffix=region_suffix,
+            extra_parameters={"aws_region": region}
+        )
+
+    return workshop_name
+
+
+# ============================================================================
 # MAIN ORCHESTRATION
 # ============================================================================
 
@@ -2887,6 +3491,27 @@ def process_schedule(
                 timestamp=time.strftime("%Y-%m-%d %H:%M:%S")
             )
         
+        # Check if multi-region provisioning
+        if schedule.aws_regions and ',' in schedule.aws_regions:
+            logger.info(f"Multi-region workshop detected - regions: {schedule.aws_regions}")
+            workshop_name = create_multi_region_workshop(schedule, config)
+            if workshop_name:
+                url = construct_workshop_url(schedule.ci, schedule.namespace, workshop_name.split('-')[-1] if '-' in workshop_name else "")
+                return DeploymentResult(
+                    ci_name=schedule.ci_name, ci=schedule.ci, namespace=schedule.namespace,
+                    guid=workshop_name, url=url, status="deployed_unverified",
+                    provisioning_date=schedule.provisioning_date, auto_stop=schedule.auto_stop,
+                    auto_destroy=schedule.auto_destroy, timestamp=time.strftime("%Y-%m-%d %H:%M:%S")
+                )
+            else:
+                return DeploymentResult(
+                    ci_name=schedule.ci_name, ci=schedule.ci, namespace=schedule.namespace,
+                    guid="failed", url="", status="failed",
+                    provisioning_date=schedule.provisioning_date, auto_stop=schedule.auto_stop,
+                    auto_destroy=schedule.auto_destroy, timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+                    error_message="Failed to create multi-region workshop"
+                )
+
         # Build payload
         payload = build_resource_claim_payload(schedule, config)
         
@@ -2902,7 +3527,10 @@ def process_schedule(
                 logger.info(f"✅ Successfully created Workshop: {workshop_name} with UI enabled")
                 # Create WorkshopProvision to manage the Workshop
                 logger.info(f"Creating WorkshopProvision to manage Workshop...")
-                create_workshop_provision(workshop_name, schedule.namespace, payload, config, enable_workshop_ui=False)
+                create_workshop_provision(
+                    workshop_name, schedule.namespace, payload, config,
+                    enable_workshop_ui=False, concurrency=schedule.concurrency
+                )
                 # Use workshop name as guid for results
                 guid = workshop_name
                 namespace = schedule.namespace
@@ -3000,7 +3628,7 @@ Examples:
     
     parser.add_argument(
         "--input-csv",
-        required=True,
+        default="",
         help="Path to input CSV file with workshop schedules"
     )
     parser.add_argument(
@@ -3039,7 +3667,47 @@ Examples:
         choices=["1", "2", "both"],
         help="Run QA verification: '1'=verify setup (times/users), '2'=verify deployment status (seats), 'both'=run both"
     )
-    
+
+    # Operational commands
+    parser.add_argument(
+        "--lock",
+        action="store_true",
+        help="Lock all workshops from CSV (set stop time to now)"
+    )
+    parser.add_argument(
+        "--extend-stop",
+        action="store_true",
+        help="Extend auto-stop time for workshops from CSV"
+    )
+    parser.add_argument(
+        "--extend-destroy",
+        action="store_true",
+        help="Extend auto-destroy (lifespan end) time for workshops from CSV"
+    )
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=0,
+        help="Number of days to extend (used with --extend-stop or --extend-destroy)"
+    )
+    parser.add_argument(
+        "--hours",
+        type=int,
+        default=0,
+        help="Number of hours to extend (used with --extend-stop or --extend-destroy)"
+    )
+    parser.add_argument(
+        "--scale",
+        type=int,
+        default=None,
+        help="Scale WorkshopProvision count to N (e.g., --scale 40)"
+    )
+    parser.add_argument(
+        "--wizard",
+        action="store_true",
+        help="Launch interactive CSV generation wizard"
+    )
+
     return parser
 
 def main():
@@ -3067,7 +3735,51 @@ def main():
     logger.info("RHDP-Flow: Red Hat Demo Platform Workshop Automation")
     logger.info("=" * 70)
     logger.info(f"Dry-Run Mode: {config.dry_run}")
-    
+
+    # Handle wizard mode
+    if args.wizard:
+        try:
+            from rhdp_flow_wizard import RHDPWizard
+            wizard = RHDPWizard(config)
+            wizard.run()
+        except ImportError:
+            logger.error("Wizard requires 'rich' library. Install with: pip install rich")
+        sys.exit(0)
+
+    # Require input-csv for all non-wizard modes
+    if not args.input_csv:
+        parser.error("--input-csv is required (unless using --wizard)")
+
+    # Handle operational commands (lock, extend, scale)
+    if args.lock or args.extend_stop or args.extend_destroy or args.scale is not None:
+        try:
+            schedules = read_csv_input(args.input_csv)
+            if args.ci:
+                schedules = [s for s in schedules if s.ci == args.ci]
+            if not schedules:
+                logger.error("No schedules found in CSV")
+                sys.exit(1)
+
+            if args.lock:
+                lock_workshops(schedules, config)
+            elif args.extend_stop:
+                if args.days == 0 and args.hours == 0:
+                    logger.error("--extend-stop requires --days and/or --hours")
+                    sys.exit(1)
+                extend_stop_time(schedules, config, args.days, args.hours)
+            elif args.extend_destroy:
+                if args.days == 0 and args.hours == 0:
+                    logger.error("--extend-destroy requires --days and/or --hours")
+                    sys.exit(1)
+                extend_destroy_time(schedules, config, args.days, args.hours)
+            elif args.scale is not None:
+                scale_workshops(schedules, config, args.scale)
+
+            sys.exit(0)
+        except Exception as e:
+            logger.error(f"Operational command failed: {e}", exc_info=True)
+            sys.exit(1)
+
     # Handle QA mode
     if args.qa:
         logger.info("QA Mode: Enabled")
@@ -3161,22 +3873,68 @@ def main():
             if not schedules:
                 logger.error(f"No schedules found for CI: {args.ci}")
                 sys.exit(1)
-        
-        logger.info(f"Processing {len(schedules)} schedule(s)")
-        
-        # Process each schedule
+
+        # Handle grouped multi-asset workshops (rows sharing Multi_Workshop_Name without Asset_CIs)
+        # These are rows that have multi_workshop_name set but NOT the old is_multi_asset+Asset_CIs format
+        grouped_multi = {}
+        regular_schedules = []
+        for s in schedules:
+            if s.multi_workshop_name and not s.is_multi_asset:
+                grouped_multi.setdefault(s.multi_workshop_name, []).append(s)
+            else:
+                regular_schedules.append(s)
+
         results = []
+        for group_name, group_schedules in grouped_multi.items():
+            logger.info(f"Processing grouped multi-asset: '{group_name}' ({len(group_schedules)} assets)")
+            mw_name = create_multi_workshop_from_group(group_schedules, config)
+            first = group_schedules[0]
+            if mw_name:
+                url = f"https://integration.demo.redhat.com/multi-workshop/{first.namespace}/{mw_name}"
+                results.append(DeploymentResult(
+                    ci_name=group_name, ci=first.ci, namespace=first.namespace,
+                    guid=mw_name, url=url, status="deployed_unverified",
+                    provisioning_date=first.provisioning_date, auto_stop=first.auto_stop,
+                    auto_destroy=first.auto_destroy, timestamp=time.strftime("%Y-%m-%d %H:%M:%S")
+                ))
+            else:
+                results.append(DeploymentResult(
+                    ci_name=group_name, ci=first.ci, namespace=first.namespace,
+                    guid="failed", url="", status="failed",
+                    provisioning_date=first.provisioning_date, auto_stop=first.auto_stop,
+                    auto_destroy=first.auto_destroy, timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+                    error_message="Failed to create grouped MultiWorkshop"
+                ))
+
+        schedules = regular_schedules
+
+        # Expand schedules with count > 1 into multiple instances
+        expanded_schedules = []
         for schedule in schedules:
+            if schedule.count > 1:
+                logger.info(f"Expanding {schedule.ci_name} into {schedule.count} instances")
+                for i in range(1, schedule.count + 1):
+                    instance = copy.deepcopy(schedule)
+                    instance.workshop_name = f"{schedule.workshop_name} (Instance {i})"
+                    instance.count = 1  # Each instance is a single deployment
+                    expanded_schedules.append(instance)
+            else:
+                expanded_schedules.append(schedule)
+
+        logger.info(f"Processing {len(expanded_schedules)} schedule(s)")
+
+        # Process each schedule (append to grouped results if any)
+        for schedule in expanded_schedules:
             result = process_schedule(schedule, config)
             results.append(result)
-            
+
             logger.info(
                 f"Schedule processed: {result.ci_name} - "
                 f"Status: {result.status} - GUID: {result.guid}"
             )
-            
+
             # Small delay between schedules
-            if not config.dry_run and len(schedules) > 1:
+            if not config.dry_run and len(expanded_schedules) > 1:
                 time.sleep(1)
         
         # Write results

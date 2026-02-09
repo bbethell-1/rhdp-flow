@@ -1,177 +1,5 @@
 # RHDP-Flow TODO List
 
-#
-
-Can I add some feedback for the script, if possible it should still set the Disaply Name to the real display name, currently it sets displcay name to the subject name which normal people won't understand
-
-### Multi-asset - seperate into lines on sheet (in a better way) so we can also hav epasswords per multi asset item
-
-### Lock All 
-Run against the orginal csv and implement the global lock against all
-
-### Extend Stop
-Run agains to orgianl CSV - if it has got a stop time (hasn't got no auto stop) then extend by -days or/and - hours? extra
-
-## Extend Destory
-Run agains to orgianl CSV - if it has got a stop time (hasn't got no auto stop) then extend by -days or hours extra
-
-##Scale
-Could we run against spesfic items in sheet and scale up?
-
-##
-deployment Concurency - add option via sheet
-
-##
-Regions - could be super complexed but like this https://spaces.redhat.com/spaces/RHPDS/pages/630588938/Adding+a+WorkshopProvision+to+a+Workshop somehow split 1 workshop into multi aws regions if needed? or can do that if we have aws region_ aws_region_2 in the sections on sheet?
-
-### Multiple Instance Support
-
-(just like we do for 40 users of virt roadshow) 
-
-so do 1 workshop - 2 workshop instances
-
-Also for non multi user we need say 40 LLM's so need to deploy as a workshop and workshop count 40
-
-- [ ] **Support multiple instances of the same workshop**
-  - Add ability to create multiple instances of the same CI (e.g., 2x 20 user virt roadshows)
-  - **Implementation approach:**
-    - Add a "Count" field to CSV (optional, defaults to 1)
-   
-    - 
-## Pending Features
-
-### Interactive CSV Generation Wizard
-- [ ] **Create an interactive wizard to help generate workshop schedule CSV files**
-  - **Core Features:**
-    - Interactive CLI wizard (using `input()` or a library like `inquirer` or `rich`)
-    - Step-by-step guide through all required fields
-    - Smart defaults and suggestions
-    - Validation of inputs in real-time
-    - Preview generated CSV before saving
-    - Ability to add multiple workshops in one session
-  
-  - **Smart Logic & Intelligence:**
-    - **CI Auto-detection:**
-      - Query catalog to get available CIs and display them
-      - Auto-detect if CI is multi-asset capable
-      - Suggest appropriate settings based on CI type
-      - Show CI metadata (description, typical duration, user limits)
-    
-    - **Time Intelligence:**
-      - Calculate average provisioning time based on CI type
-      - Suggest auto-stop time (e.g., provisioning + 6-8 hours for workshops)
-      - Suggest auto-destroy time (e.g., auto-stop + 1-3 days)
-      - Timezone handling (convert user input to UTC)
-      - Validate dates are in the future
-      - Check for scheduling conflicts
-    
-    - **Resource Intelligence:**
-      - Check quota availability before suggesting user counts
-      - Suggest optimal user counts based on CI limits
-      - Warn if requesting too many resources
-      - Check namespace availability
-    
-    - **Naming Intelligence:**
-      - Auto-generate workshop names based on CI name + date
-      - Suggest unique multi-workshop names
-      - Validate Kubernetes name constraints
-      - Check for naming conflicts
-    
-    - **Multi-Asset Intelligence:**
-      - Suggest compatible asset combinations
-      - Auto-detect if workshop should be multi-asset
-      - Guide through asset selection with descriptions
-      - Validate asset compatibility
-    
-    - **Best Practices:**
-      - Suggest passwords (generate secure ones)
-      - Recommend Activity/Purpose based on context
-      - Warn about common mistakes
-      - Suggest optimal scheduling times
-    
-  - **Implementation Approach:**
-    - Create `rhdp_flow_wizard.py` or add `--wizard` mode to main script
-    - Use `rich` library for beautiful CLI interface (progress bars, tables, colors)
-    - Store historical data (provisioning times, success rates) in a local JSON file
-    - Query cluster for real-time data (quota, available CIs, etc.)
-    - Support both guided mode and quick-add mode
-    - Allow editing existing CSV files
-  
-  - **Example Flow:**
-    ```
-    $ python3 rhdp_flow.py --wizard
-    
-    🎯 RHDP-Flow Workshop Scheduler Wizard
-    ======================================
-    
-    1. Select Catalog Item:
-       [1] openshift-cnv.ocp-virt-roadshow-multi-user.prod (Experience OpenShift Virtualization Roadshow)
-       [2] zt-ansiblebu.ansible-network-automation-basics-lab-2.event
-       [3] Enter custom CI...
-    
-    > 1
-    
-    ℹ️  CI Info:
-       - Type: Multi-user Workshop
-       - Typical Duration: 6-8 hours
-       - Recommended Users: 20-40
-       - Average Provision Time: ~5 minutes
-    
-    2. Enter number of users [20]: 
-    > 20
-    
-    3. Select namespace:
-       [1] user-bbethell-redhat-com (current)
-       [2] Enter custom...
-    > 1
-    
-    4. Enable Workshop UI? [Y/n]: 
-    > Y
-    
-    5. Workshop Name [Experience OpenShift Virtualization Roadshow - 2026-02-09]: 
-    > Billys Workshop
-    
-    6. Provisioning Date & Time (UTC):
-       Date [09/02/2026]: 
-       Time [11:00]: 
-    
-    7. Auto-stop time (suggested: 09/02/2026 18:00) [Y/n]:
-    > Y
-    
-    8. Auto-destroy time (suggested: 12/02/2026 11:00) [Y/n]:
-    > Y
-    
-    9. Password [Generate secure password? Y/n]: 
-    > Y
-    ✅ Generated: Billy1
-    
-    10. Activity [Admin]: 
-    > Admin
-    
-    11. Purpose [QA]: 
-    > QA
-    
-    12. Create multiple instances? [N/y]:
-    > n
-    
-    ✅ Workshop configured!
-    
-    Add another workshop? [Y/n]:
-    > n
-    
-    📄 Preview CSV:
-    [Shows generated CSV]
-    
-    Save to file? [workshop_schedule.csv]: 
-    > workshop_schedule.csv
-    
-    ✅ CSV saved! Run with: python3 rhdp_flow.py --input-csv workshop_schedule.csv
-    ```
-
-
-
-
-
 ## Completed Features
 
 - [x] Basic workshop scheduling via ResourceClaim
@@ -183,3 +11,64 @@ Also for non multi user we need say 40 LLM's so need to deploy as a workshop and
 - [x] Student landing page CSV export
 - [x] WorkshopProvision creation for asset workshops
 - [x] Proper catalog namespace detection for event items
+- [x] **Display Name** - Use actual catalog display name in ResourceClaim annotations (PR #25)
+- [x] **Deployment Concurrency** - Add `Concurrency` column to CSV, configurable per workshop (`--input-csv`)
+- [x] **Multiple Instance Support (Count)** - Add `Count` column to CSV, automatically expands into N instances
+- [x] **Multi-Asset Per-Item Passwords** - Rows sharing the same `Multi_Workshop_Name` are auto-grouped; each row has its own CI and password
+- [x] **Lock All** - `--lock` flag stops all workshops from the CSV immediately (sets stop time to now)
+- [x] **Extend Stop** - `--extend-stop --days N --hours N` extends auto-stop time for workshops
+- [x] **Extend Destroy** - `--extend-destroy --days N --hours N` extends auto-destroy/lifespan time for workshops and provisions
+- [x] **Scale** - `--scale N` sets WorkshopProvision count to target value
+- [x] **Regions (Multi-Region Provisioning)** - `AWS_Region` column supports comma-separated regions; creates one Workshop with multiple regional WorkshopProvisions, users distributed evenly
+- [x] **Interactive CSV Wizard** - `--wizard` launches a rich CLI wizard to generate workshop schedule CSVs interactively
+
+## Usage Examples
+
+```bash
+# Normal deployment
+python3 rhdp_flow.py --input-csv workshop_schedule.csv
+
+# Dry-run preview
+python3 rhdp_flow.py --input-csv workshop_schedule.csv --dry-run
+
+# Lock all workshops from CSV
+python3 rhdp_flow.py --input-csv workshop_schedule.csv --lock
+
+# Extend stop time by 2 hours
+python3 rhdp_flow.py --input-csv workshop_schedule.csv --extend-stop --hours 2
+
+# Extend destroy time by 1 day
+python3 rhdp_flow.py --input-csv workshop_schedule.csv --extend-destroy --days 1
+
+# Scale workshops to 40 seats
+python3 rhdp_flow.py --input-csv workshop_schedule.csv --scale 40
+
+# Filter to specific CI
+python3 rhdp_flow.py --input-csv workshop_schedule.csv --ci openshift-cnv.ocp-virt-roadshow-multi-user.prod --scale 30
+
+# Interactive wizard
+python3 rhdp_flow.py --wizard
+```
+
+## CSV Column Reference
+
+| Column | Required | Default | Description |
+|--------|----------|---------|-------------|
+| CI Name | Yes | - | Display name for the catalog item |
+| CI | Yes | - | Catalog Item ID |
+| Namespace | Yes | - | Kubernetes namespace |
+| Users | Yes | 20 | Number of users/seats |
+| Enable_workshop_interface | Yes | - | Enable Workshop UI (True/False) |
+| Password | Yes | - | Access password |
+| Activity | Yes | Admin | Purpose activity |
+| Purpose | Yes | QA | Purpose |
+| Workshop Name | No | CI Name | Display name for the workshop |
+| Provisioning Date (UTC) | Yes | - | DD/MM/YYYY HH:MM format |
+| Auto-stop (UTC) | Yes | - | DD/MM/YYYY HH:MM format |
+| Auto-destroy (UTC) | Yes | - | DD/MM/YYYY HH:MM format |
+| Multi_Asset | No | False | Old-style multi-asset flag |
+| Asset_CIs | No | - | Old-style comma-separated asset CIs |
+| Multi_Workshop_Name | No | - | Group rows into a multi-asset workshop (new style: per-item passwords) |
+| Concurrency | No | 1 | Deployment concurrency |
+| Count | No | 1 | Number of instances to create |
+| AWS_Region | No | - | Comma-separated AWS regions for multi-region |

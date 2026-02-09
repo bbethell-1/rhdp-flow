@@ -5,126 +5,123 @@ Automates scheduling and deployment for RHDP workshops with safety features.
 ## Features
 
 - **CSV Input**: Reads workshop schedules from CSV files
-- **Mass Deployment**: Generates deployments for multiple users (default: 20)
-- **API Integration**: Uses `requests` library to POST ResourceClaims to Babylon API
-- **Safety First**: 
-  - `--dry-run` flag prints JSON payloads without sending
-  - Quota checking validates region capacity
-  - Comprehensive error handling
-- **QA Verification**: Verifies deployments using `oc get routes` and HTTP health checks
-- **Results Export**: Writes GUIDs and URLs to CSV for student landing pages
+- **Workshop UI**: Creates Workshop resources directly with lab user interface enabled
+- **Multi-Asset Workshops**: Supports multi-asset MultiWorkshop creation with per-item passwords
+- **Multi-Region**: Distributes users across multiple AWS regions
+- **Multiple Instances**: Deploy N copies of the same workshop via Count column
+- **Operational Commands**: Lock, extend stop/destroy, and scale existing workshops
+- **Interactive Wizard**: CLI wizard for generating schedule CSVs
+- **QA Verification**: Verifies deployments and exports student landing pages
+- **Safety First**: `--dry-run` prints JSON payloads without creating resources
 
 ## Installation
 
 ```bash
-# Install dependencies
 pip3 install -r requirements.txt
+
+# For the interactive wizard
+pip3 install rich>=13.0.0
+```
+
+## Quick Start
+
+```bash
+# Preview what would be created
+python3 rhdp_flow.py --input-csv example_workshop_schedule.csv --dry-run
+
+# Deploy workshops
+python3 rhdp_flow.py --input-csv workshop_schedule.csv
+
+# Interactive wizard to generate a CSV
+python3 rhdp_flow.py --wizard
 ```
 
 ## CSV Format
 
-The input CSV should have the following headers:
+See `example_workshop_schedule.csv` for a complete example. Required and optional columns:
 
-```
-CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Auto-stop,Auto-destroy
-```
-
-Example:
-```csv
-CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Auto-stop,Auto-destroy
-Experience OpenShift Virtualization Roadshow,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,20,True,Billy1,09/02/26 18:00,12/02/26 11:00
-```
+| Column | Required | Default | Description |
+|--------|----------|---------|-------------|
+| CI Name | Yes | - | Display name for the catalog item |
+| CI | Yes | - | Catalog Item ID |
+| Namespace | Yes | - | Kubernetes namespace (e.g., user-bbethell-redhat-com) |
+| Users | Yes | 20 | Number of users/seats |
+| Enable_workshop_interface | Yes | - | Enable Workshop UI (True/False) |
+| Password | Yes | - | Access password |
+| Activity | Yes | Admin | Purpose activity |
+| Purpose | Yes | QA | Purpose |
+| Workshop Name | No | CI Name | Display name for the workshop |
+| Provisioning Date (UTC) | Yes | - | DD/MM/YYYY HH:MM format |
+| Auto-stop (UTC) | Yes | - | DD/MM/YYYY HH:MM format |
+| Auto-destroy (UTC) | Yes | - | DD/MM/YYYY HH:MM format |
+| Multi_Asset | No | False | Old-style multi-asset flag (use with Asset_CIs) |
+| Asset_CIs | No | - | Comma-separated asset CIs (old-style multi-asset) |
+| Multi_Workshop_Name | No | - | Group rows into a multi-asset workshop (per-item passwords) |
+| Concurrency | No | 1 | Deployment concurrency |
+| Count | No | 1 | Number of instances to create |
+| AWS_Region | No | - | Comma-separated AWS regions for multi-region |
 
 ## Usage
 
-### Dry-Run Mode (Safe Preview)
+### Deploy Workshops
 
 ```bash
-python3 rhdp_flow.py \
-  --input-csv workshop_schedule.csv \
-  --ci openshift-cnv.ocp-virt-roadshow-multi-user.prod \
-  --dry-run
+python3 rhdp_flow.py --input-csv workshop_schedule.csv
 ```
 
-### Actual Deployment
+### Filter to Specific CI
 
 ```bash
-python3 rhdp_flow.py \
-  --input-csv workshop_schedule.csv \
-  --ci openshift-cnv.ocp-virt-roadshow-multi-user.prod \
-  --babylon-url https://api.example.com:6443 \
-  --babylon-token $BABYLON_TOKEN \
-  --region us-east-1 \
-  --kubeconfig ~/.kube/config
+python3 rhdp_flow.py --input-csv workshop_schedule.csv --ci openshift-cnv.ocp-virt-roadshow-multi-user.prod
 ```
 
-### With Debug Logging
+### Lock All Workshops
 
 ```bash
-python3 rhdp_flow.py \
-  --input-csv workshop_schedule.csv \
-  --ci openshift-cnv.ocp-virt-roadshow-multi-user.prod \
-  --dry-run \
-  --debug
+python3 rhdp_flow.py --input-csv workshop_schedule.csv --lock
+```
+
+### Extend Stop/Destroy Time
+
+```bash
+python3 rhdp_flow.py --input-csv workshop_schedule.csv --extend-stop --hours 2
+python3 rhdp_flow.py --input-csv workshop_schedule.csv --extend-destroy --days 1
+```
+
+### Scale Workshops
+
+```bash
+python3 rhdp_flow.py --input-csv workshop_schedule.csv --scale 40
+```
+
+### QA Verification
+
+```bash
+python3 rhdp_flow.py --input-csv workshop_schedule.csv --qa both
 ```
 
 ## Command Line Arguments
 
-- `--input-csv`: Path to input CSV file (required)
-- `--output-csv`: Path to output CSV file (default: deployment_results.csv)
-- `--ci`: Catalog Item ID to deploy (required)
-- `--user-count`: Number of users to deploy (default: 20, overrides CSV if specified)
-- `--dry-run`: Print JSON payloads without sending requests
-- `--babylon-url`: Babylon/Kubernetes API server URL
-- `--babylon-token`: Babylon API authentication token (or set BABYLON_TOKEN env var)
-- `--kubeconfig`: Path to kubeconfig file for oc commands
-- `--region`: AWS region for deployment (default: us-east-1)
-- `--timeout`: Request timeout in seconds (default: 60)
-- `--no-verify-ssl`: Disable SSL certificate verification (not recommended)
-- `--debug`: Enable debug logging
-
-## Output
-
-The script generates `deployment_results.csv` with the following columns:
-
-- `session_code`: Session identifier
-- `session_name`: Session name
-- `user`: User identifier
-- `workshop_name`: Workshop name
-- `catalog_item_id`: Catalog Item ID
-- `guid`: Deployment GUID
-- `url`: Workshop interface URL
-- `namespace`: Kubernetes namespace
-- `status`: Deployment status (verified, deployed_unverified, failed, error)
-- `timestamp`: Deployment timestamp
-- `error_message`: Error message if deployment failed
-
-## Workshop URL Pattern
-
-Workshop URLs follow this pattern:
-```
-https://integration.demo.redhat.com/workshops/user-{email}/{catalog-item}-{suffix}
-```
-
-Example:
-```
-https://integration.demo.redhat.com/workshops/user-bbethell-redhat-com/openshift-cnv.ocp-virt-roadshow-multi-user.prod-vt958
-```
-
-## Safety Features
-
-1. **Dry-Run Mode**: Test deployments without making actual API calls
-2. **Quota Checking**: Validates region capacity before deployment
-3. **Error Handling**: Comprehensive error handling with detailed logging
-4. **Verification**: Automatically verifies deployments are accessible
+| Argument | Description |
+|----------|-------------|
+| `--input-csv` | Path to input CSV file |
+| `--output-csv` | Path to output CSV file (default: deployment_results.csv) |
+| `--ci` | Filter to a specific Catalog Item ID |
+| `--dry-run` | Print JSON payloads without creating resources |
+| `--kubeconfig` | Path to kubeconfig file |
+| `--timeout` | Command timeout in seconds (default: 60) |
+| `--debug` | Enable debug logging |
+| `--qa` | QA verification: 1, 2, or both |
+| `--lock` | Lock all workshops (set stop time to now) |
+| `--extend-stop` | Extend auto-stop time (use with --days/--hours) |
+| `--extend-destroy` | Extend auto-destroy time (use with --days/--hours) |
+| `--days` | Days to extend (default: 0) |
+| `--hours` | Hours to extend (default: 0) |
+| `--scale` | Scale WorkshopProvision count to N |
+| `--wizard` | Launch interactive CSV generation wizard |
 
 ## Requirements
 
 - Python 3.7+
-- OpenShift CLI (`oc`) installed and configured
-- Access to RHDP/Babylon API
-- Valid authentication token
-
-## License
-
-Internal Red Hat tool for RHDP automation.
+- OpenShift CLI (`oc`) installed and logged in
+- `rich` library for the wizard (optional)
