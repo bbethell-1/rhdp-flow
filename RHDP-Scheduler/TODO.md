@@ -1,5 +1,24 @@
 # RHDP-Flow TODO List
 
+#
+
+Can I add some feedback for the script, if possible it should still set the Disaply Name to the real display name, currently it sets displcay name to the subject name which normal people won't understand
+
+
+### Multiple Instance Support
+
+(just like we do for 40 users of virt roadshow) 
+
+so do 1 workshop - 2 workshop instances
+
+Also for non multi user we need say 40 LLM's so need to deploy as a workshop and workshop count 40
+
+- [ ] **Support multiple instances of the same workshop**
+  - Add ability to create multiple instances of the same CI (e.g., 2x 20 user virt roadshows)
+  - **Implementation approach:**
+    - Add a "Count" field to CSV (optional, defaults to 1)
+   
+    - 
 ## Pending Features
 
 ### Interactive CSV Generation Wizard
@@ -130,18 +149,7 @@
     ✅ CSV saved! Run with: python3 rhdp_flow.py --input-csv workshop_schedule.csv
     ```
 
-### Multiple Instance Support
 
-(just like we do for 40 users of virt roadshow) 
-
-so do 1 workshop - 2 workshop instances
-
-Also for non multi user we need say 40 LLM's so need to deploy as a workshop and workshop count 40
-
-- [ ] **Support multiple instances of the same workshop**
-  - Add ability to create multiple instances of the same CI (e.g., 2x 20 user virt roadshows)
-  - **Implementation approach:**
-    - Add a "Count" field to CSV (optional, defaults to 1)
 
 
 
