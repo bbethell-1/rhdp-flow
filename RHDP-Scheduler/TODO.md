@@ -1,35 +1,27 @@
 # RHDP-Flow TODO List
 
-All features implemented as of 2026-02-09.
+## Testing
 
-test multi asset again with true in the coul in your sheet? or do we need multi asset true and asset ci's  (see cisco example if needed) v your example) but we do want it so we have it clearer on sheet as we want pdiffrent password for each multi asset item) 
+- [ ] Test multi-asset with `Multi_Asset=True` + `Asset_CIs` (old format) vs grouped rows with `Multi_Workshop_Name` (new format) — verify both paths produce correct results and that per-item passwords work in both cases
+- [ ] Test Virt Roadshow with 20 users and `Count=2` (2 clusters/instances)
+- [ ] Test multi-region provisioning with an AWS catalog item
+- [ ] Test on integration cluster (end-to-end with real `oc` commands)
+- [ ] Verify landing page URLs work correctly and export to CSV automatically
 
-test virt roadshow 20 users and 2 clusters/count
+## Documentation
 
-market it to John and team - soultion for White gloves
+- [ ] Create clear example CSV sheets covering each deployment type (basic, multi-asset, grouped, multi-region, count expansion)
+- [ ] Write clear example commands for deploying and for QA verification
+- [ ] Write examples for operational commands: lock all, extend stop, extend destroy, scale
+- [ ] Add CSV wizard usage examples
+- [ ] Record a short demo video showing all options
 
-Test multi region (but use aws item)
+## Feature Ideas
 
-Make super clear example sheets
-
-make super clear example commands - for deployibng and for QA 
-
-eXxamples to lock all, extend destory extend stops
-
-Update passwords feature? can check all and update opasswords if changed in sheet (run tool though manually)
-
-csv wizard examples
-
-mini video showing all options
-
-can test on intergration 
-
-want a way to easily get csv from white glove workshop space or in a less mnaual fasshion - we have a white glov ehelper tool we run within white glove workshops and it gives us a csv? we need item name (maybe has to be agv item) but we are oc'd into cluster so it can check
-
-How can we sync any changes to the master sheet to our own sheet (this tool our own sheets)
-synch with apt before event or can we comapre each day in sheet
-
-Landing page URL's check them and see if they work from the tool and do they go to a csv autoamticly 
+- [ ] **Update Passwords** — Re-run tool to detect changed passwords in the CSV and patch existing workshops (manual trigger)
+- [ ] **White Glove CSV Import** — Generate a schedule CSV directly from a white glove workshop namespace (the tool runs `oc` against the cluster to discover deployed items and exports them to CSV format)
+- [ ] **Master Sheet Sync** — Sync changes from the master scheduling sheet to our local sheet; compare daily or sync with APT before an event
+- [ ] **Business Requirements Document** — Create high-level BRD for presenting to John and team as a white glove solution (see `RHDP-Flow_BRD.md`)
 
 ## Completed Features
 
@@ -42,16 +34,17 @@ Landing page URL's check them and see if they work from the tool and do they go 
 - [x] Student landing page CSV export
 - [x] WorkshopProvision creation for asset workshops
 - [x] Proper catalog namespace detection for event items
-- [x] **Display Name** - Use actual catalog display name in ResourceClaim annotations (PR #25)
-- [x] **Deployment Concurrency** - Add `Concurrency` column to CSV, configurable per workshop (`--input-csv`)
-- [x] **Multiple Instance Support (Count)** - Add `Count` column to CSV, automatically expands into N instances
-- [x] **Multi-Asset Per-Item Passwords** - Rows sharing the same `Multi_Workshop_Name` are auto-grouped; each row has its own CI and password
-- [x] **Lock All** - `--lock` flag stops all workshops from the CSV immediately (sets stop time to now)
-- [x] **Extend Stop** - `--extend-stop --days N --hours N` extends auto-stop time for workshops
-- [x] **Extend Destroy** - `--extend-destroy --days N --hours N` extends auto-destroy/lifespan time for workshops and provisions
-- [x] **Scale** - `--scale N` sets WorkshopProvision count to target value
-- [x] **Regions (Multi-Region Provisioning)** - `AWS_Region` column supports comma-separated regions; creates one Workshop with multiple regional WorkshopProvisions, users distributed evenly
-- [x] **Interactive CSV Wizard** - `--wizard` launches a rich CLI wizard to generate workshop schedule CSVs interactively
+- [x] **Display Name** — Use actual catalog display name in ResourceClaim annotations (PR #25)
+- [x] **Deployment Concurrency** — Add `Concurrency` column to CSV, configurable per workshop
+- [x] **Multiple Instance Support (Count)** — Add `Count` column to CSV, automatically expands into N instances
+- [x] **Multi-Asset Per-Item Passwords** — Rows sharing the same `Multi_Workshop_Name` are auto-grouped; each row has its own CI and password
+- [x] **Lock All** — `--lock` flag stops all workshops from the CSV immediately (sets stop time to now)
+- [x] **Extend Stop** — `--extend-stop --days N --hours N` extends auto-stop time for workshops
+- [x] **Extend Destroy** — `--extend-destroy --days N --hours N` extends auto-destroy/lifespan time for workshops and provisions
+- [x] **Scale** — `--scale N` sets WorkshopProvision count to target value
+- [x] **Regions (Multi-Region Provisioning)** — `AWS_Region` column supports comma-separated regions; creates one Workshop with multiple regional WorkshopProvisions, users distributed evenly
+- [x] **Interactive CSV Wizard** — `--wizard` launches a rich CLI wizard to generate workshop schedule CSVs interactively
+- [x] **Test Suite** — 88 tests across 19 groups covering all functionality (see `test_rhdp_flow.py`)
 
 ## Usage Examples
 
