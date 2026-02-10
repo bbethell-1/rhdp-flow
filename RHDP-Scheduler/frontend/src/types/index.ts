@@ -45,6 +45,7 @@ export interface DeploymentResult {
   auto_destroy: string;
   timestamp: string;
   error_message: string;
+  log_url: string;
 }
 
 export interface JobResponse {

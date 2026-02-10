@@ -73,6 +73,7 @@ class DeploymentResult:
     auto_destroy: str
     timestamp: str
     error_message: str = ""
+    log_url: str = ""
 
 # ============================================================================
 # CONFIGURATION CLASS
@@ -415,7 +416,7 @@ def write_deployment_results(
         fieldnames = [
             'ci_name', 'ci', 'namespace', 'guid', 'url', 'status',
             'provisioning_date', 'auto_stop', 'auto_destroy',
-            'timestamp', 'error_message'
+            'timestamp', 'error_message', 'log_url'
         ]
         
         with open(output_file, 'w', newline='', encoding='utf-8') as f:
@@ -2060,18 +2061,18 @@ def verify_deployment(
     namespace: str,
     ci: str,
     config: RHDPConfig
-) -> Tuple[bool, Optional[str]]:
+) -> Tuple[bool, Optional[str], str]:
     """
     Verify deployment by checking ResourceClaim status.
-    
+
     Args:
         guid: ResourceClaim name/GUID
         namespace: Kubernetes namespace
         ci: Catalog Item ID for URL construction
         config: RHDPConfig object
-        
+
     Returns:
-        Tuple of (is_healthy: bool, url: Optional[str])
+        Tuple of (is_healthy: bool, url: Optional[str], log_url: str)
     """
     if config.dry_run:
         # Extract suffix from GUID if present
@@ -2082,8 +2083,8 @@ def verify_deployment(
                 suffix = parts[-1]
         url = construct_workshop_url(ci, namespace, suffix)
         logger.info(f"[DRY-RUN] Would verify deployment: {guid} in {namespace}")
-        return (True, url)
-    
+        return (True, url, "")
+
     try:
         # Get ResourceClaim status
         cmd = [
@@ -2092,11 +2093,11 @@ def verify_deployment(
             "-n", namespace,
             "-o", "json"
         ]
-        
+
         env = os.environ.copy()
         if config.kubeconfig_path:
             env['KUBECONFIG'] = config.kubeconfig_path
-        
+
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -2104,40 +2105,46 @@ def verify_deployment(
             timeout=30,
             env=env
         )
-        
+
         if result.returncode != 0:
             logger.warning(f"Could not get ResourceClaim {guid}: {result.stderr}")
             # Still construct URL
             suffix = guid.split('-')[-1] if '-' in guid else ""
             url = construct_workshop_url(ci, namespace, suffix)
-            return (False, url)
-        
+            return (False, url, "")
+
         rc_data = json.loads(result.stdout)
         status = rc_data.get('status', {})
-        
+
+        # Extract AAP2 provision log URL from towerJobs
+        tower_jobs = status.get('resources', [{}])[0].get('state', {}).get('status', {}).get('towerJobs', {})
+        provision_job = tower_jobs.get('provision', {})
+        tower_job_url = provision_job.get('towerJobURL', '')
+        log_url = f"https://{tower_job_url}" if tower_job_url else ""
+
         # Check if healthy and ready
         healthy = status.get('healthy', False)
         ready = status.get('ready', False)
-        
+
         # Extract suffix from GUID
         suffix = guid.split('-')[-1] if '-' in guid else ""
         url = construct_workshop_url(ci, namespace, suffix)
-        
+
         if healthy and ready:
             logger.info(f"Deployment verification passed for {guid}: {url}")
-            return (True, url)
+            return (True, url, log_url)
         elif healthy:
             logger.info(f"Deployment is healthy but not ready yet for {guid}: {url}")
-            return (True, url)  # Still consider it successful if healthy
+            return (True, url, log_url)  # Still consider it successful if healthy
         else:
             logger.warning(f"Deployment verification failed for {guid}: {url} (healthy={healthy}, ready={ready})")
-            return (False, url)
-        
+            return (False, url, log_url)
+
     except Exception as e:
         logger.error(f"Verification error for {guid}: {e}")
         suffix = guid.split('-')[-1] if '-' in guid else ""
         url = construct_workshop_url(ci, namespace, suffix)
-        return (False, url)
+        return (False, url, "")
 
 # ============================================================================
 # QA FUNCTIONS
@@ -3568,8 +3575,8 @@ def process_schedule(
             time.sleep(2)
         
         # Verify deployment
-        is_healthy, url = verify_deployment(guid, namespace or schedule.namespace, schedule.ci, config)
-        
+        is_healthy, url, log_url = verify_deployment(guid, namespace or schedule.namespace, schedule.ci, config)
+
         if is_healthy:
             status = "verified"
         elif url:
@@ -3579,7 +3586,7 @@ def process_schedule(
             # Construct URL anyway
             suffix = guid.split('-')[-1] if '-' in guid else ""
             url = construct_workshop_url(schedule.ci, schedule.namespace, suffix)
-        
+
         return DeploymentResult(
             ci_name=schedule.ci_name,
             ci=schedule.ci,
@@ -3591,7 +3598,8 @@ def process_schedule(
             auto_stop=schedule.auto_stop,
             auto_destroy=schedule.auto_destroy,
             timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
-            error_message=""
+            error_message="",
+            log_url=log_url
         )
         
     except Exception as e:

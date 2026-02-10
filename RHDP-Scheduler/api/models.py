@@ -49,6 +49,7 @@ class DeploymentResultResponse(BaseModel):
     auto_destroy: str
     timestamp: str
     error_message: str = ""
+    log_url: str = ""
 
 
 # ---------------------------------------------------------------------------

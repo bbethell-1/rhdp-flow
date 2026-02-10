@@ -1380,11 +1380,12 @@ class TestVerifyDeployment(unittest.TestCase):
 
     def test_dry_run_returns_true(self):
         config = make_config(dry_run=True)
-        healthy, url = verify_deployment(
+        healthy, url, log_url = verify_deployment(
             "ci-name-abc12", "user-ns", "ci-name.prod", config
         )
         self.assertTrue(healthy)
         self.assertIn("ci-name.prod", url)
+        self.assertEqual(log_url, "")
 
     @patch("rhdp_flow.subprocess.run")
     def test_healthy_and_ready(self, mock_run):
@@ -1395,10 +1396,11 @@ class TestVerifyDeployment(unittest.TestCase):
             [], 0, stdout=json.dumps(rc_json), stderr=""
         )
         config = make_config(dry_run=False)
-        healthy, url = verify_deployment(
+        healthy, url, log_url = verify_deployment(
             "ci-name-abc12", "user-ns", "ci-name.prod", config
         )
         self.assertTrue(healthy)
+        self.assertEqual(log_url, "")
 
     @patch("rhdp_flow.subprocess.run")
     def test_not_healthy(self, mock_run):
@@ -1409,10 +1411,11 @@ class TestVerifyDeployment(unittest.TestCase):
             [], 0, stdout=json.dumps(rc_json), stderr=""
         )
         config = make_config(dry_run=False)
-        healthy, url = verify_deployment(
+        healthy, url, log_url = verify_deployment(
             "ci-name-abc12", "user-ns", "ci-name.prod", config
         )
         self.assertFalse(healthy)
+        self.assertEqual(log_url, "")
 
 
 # ============================================================================

@@ -80,12 +80,13 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
             <Tr>
               <Th width={10}>CI Name</Th>
               <Th width={15}>CI</Th>
-              <Th width={15}>GUID</Th>
+              <Th width={10}>GUID</Th>
               <Th width={10}>Status</Th>
-              <Th width={20}>URL</Th>
+              <Th width={15}>URL</Th>
               <Th width={10}>Prov. Date</Th>
               <Th width={10}>Timestamp</Th>
               <Th width={10}>Error</Th>
+              <Th width={10}>Log</Th>
             </Tr>
           </Thead>
           <Tbody>
@@ -106,6 +107,13 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
                 <Td dataLabel="Timestamp">{r.timestamp}</Td>
                 <Td dataLabel="Error">
                   {r.error_message ? <span className="cell-truncate" title={r.error_message}>{r.error_message}</span> : ''}
+                </Td>
+                <Td dataLabel="Log">
+                  {r.log_url ? (
+                    <a className="cell-truncate" href={r.log_url} target="_blank" rel="noopener noreferrer" title={r.log_url}>
+                      Log
+                    </a>
+                  ) : '-'}
                 </Td>
               </Tr>
             ))}

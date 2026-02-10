@@ -571,7 +571,7 @@ def export_results():
     fieldnames = [
         "ci_name", "ci", "namespace", "guid", "url", "status",
         "provisioning_date", "auto_stop", "auto_destroy",
-        "timestamp", "error_message",
+        "timestamp", "error_message", "log_url",
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
