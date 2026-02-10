@@ -43,7 +43,6 @@ class WorkshopSchedule:
     ci_name: str
     ci: str  # Catalog Item ID
     namespace: str
-    users: int
     enable_workshop_interface: bool
     password: str
     activity: str  # Purpose activity (e.g., "Admin")
@@ -52,6 +51,7 @@ class WorkshopSchedule:
     provisioning_date: str  # Format: DD/MM/YYYY HH:MM
     auto_stop: str  # Format: DD/MM/YY HH:MM
     auto_destroy: str  # Format: DD/MM/YY HH:MM
+    users: Optional[int] = None
     is_multi_asset: bool = False  # True if this is a multi-asset workshop
     asset_cis: str = ""  # Comma-separated list of catalog items for multi-asset workshops (e.g., "ci1,ci2,ci3")
     multi_workshop_name: str = ""  # Optional custom name for multi-asset workshop (e.g., "automation-test" or "test-qvvdw")
@@ -75,6 +75,37 @@ class DeploymentResult:
     timestamp: str
     error_message: str = ""
     log_url: str = ""
+
+
+def _should_include_users(schedule: "WorkshopSchedule") -> bool:
+    """True if we should set num_users (Users field is set and > 0)."""
+    return schedule.users is not None and schedule.users > 0
+
+
+def _provider_parameter_values(schedule: "WorkshopSchedule", start_timestamp: str, stop_timestamp: str) -> dict:
+    """Build parameterValues dict, conditionally including num_users."""
+    pv = {
+        "purpose": schedule.purpose,
+        "start_timestamp": start_timestamp,
+        "stop_timestamp": stop_timestamp,
+    }
+    if _should_include_users(schedule):
+        pv["num_users"] = schedule.users
+    return pv
+
+
+def _workshop_provision_parameters(param_values: dict, resourceclaim_payload: dict) -> dict:
+    """Build WorkshopProvision parameters, conditionally including num_users."""
+    params = {
+        "purpose": param_values.get('purpose', 'QA'),
+        "purpose_activity": resourceclaim_payload['metadata']['annotations'].get('demo.redhat.com/purpose-activity', 'Admin'),
+        "purpose_explanation": None,
+        "salesforce_items": "[]",
+    }
+    if "num_users" in param_values:
+        params["num_users"] = param_values["num_users"]
+    return params
+
 
 # ============================================================================
 # CONFIGURATION CLASS
@@ -349,11 +380,14 @@ def read_csv_input(filepath) -> List[WorkshopSchedule]:
                         continue
                     
                     # Parse users
-                    try:
-                        users = int(users_str)
-                    except ValueError:
-                        logger.warning(f"Row {row_num}: Invalid users value '{users_str}', defaulting to 20")
-                        users = 20
+                    if users_str:
+                        try:
+                            users = int(users_str)
+                        except ValueError:
+                            logger.warning(f"Row {row_num}: Invalid users value '{users_str}', defaulting to None")
+                            users = None
+                    else:
+                        users = None
                     
                     # Parse boolean
                     enable_workshop_interface = enable_interface.lower() in ['true', '1', 'yes', 'y']
@@ -582,12 +616,7 @@ def build_resource_claim_payload(
             },
             "provider": {
                 "name": schedule.ci,
-                "parameterValues": {
-                    "num_users": schedule.users,
-                    "purpose": schedule.purpose,
-                    "start_timestamp": start_timestamp,
-                    "stop_timestamp": stop_timestamp
-                }
+                "parameterValues": _provider_parameter_values(schedule, start_timestamp, stop_timestamp)
             }
         }
     }
@@ -960,7 +989,7 @@ def create_workshop_with_ui(
                 "labUserInterface": {
                     "redirect": True
                 },
-                "multiuserServices": True,
+                "multiuserServices": "num_users" in param_values,
                 "openRegistration": True
             }
         }
@@ -1097,7 +1126,7 @@ def create_workshop_provision(
         provision_name = f"{workshop_name}{provision_name_suffix}" if provision_name_suffix else workshop_name
 
         # Determine count: use override if provided, otherwise from payload
-        effective_count = count if count > 0 else param_values.get('num_users', 20)
+        effective_count = count if count > 0 else param_values.get('num_users', 0)
 
         # Build WorkshopProvision payload
         workshop_provision = {
@@ -1133,13 +1162,7 @@ def create_workshop_provision(
                     "end": resourceclaim_payload['spec']['lifespan']['end']
                 },
                 "autoDetach": resourceclaim_payload['spec'].get('autoDetach', {}),
-                "parameters": {
-                    "num_users": param_values.get('num_users', 20),
-                    "purpose": param_values.get('purpose', 'QA'),
-                    "purpose_activity": resourceclaim_payload['metadata']['annotations'].get('demo.redhat.com/purpose-activity', 'Admin'),
-                    "purpose_explanation": None,
-                    "salesforce_items": "[]"
-                },
+                "parameters": _workshop_provision_parameters(param_values, resourceclaim_payload),
                 "startDelay": 30
             }
         }
@@ -1527,11 +1550,11 @@ def create_multi_workshop(
                     'provider': {
                         'name': asset_ci,
                         'namespace': catalog_namespace,
-                        'parameterValues': {
-                            'start_timestamp': start_iso,
-                            'stop_timestamp': format_iso8601(parse_date_time(schedule.auto_stop)) if schedule.auto_stop else end_iso,
-                            'num_users': schedule.users
-                        }
+                        'parameterValues': _provider_parameter_values(
+                            schedule,
+                            start_iso,
+                            format_iso8601(parse_date_time(schedule.auto_stop)) if schedule.auto_stop else end_iso
+                        )
                     },
                     'lifespan': {
                         'end': end_iso
@@ -1745,11 +1768,7 @@ def create_multi_workshop_from_group(
                 'provider': {
                     'name': asset_ci,
                     'namespace': catalog_namespace,
-                    'parameterValues': {
-                        'start_timestamp': start_iso,
-                        'stop_timestamp': stop_iso,
-                        'num_users': sched.users
-                    }
+                    'parameterValues': _provider_parameter_values(sched, start_iso, stop_iso)
                 },
                 'lifespan': {'end': end_iso},
                 'accessPassword': sched.password
