@@ -25,10 +25,6 @@ interface Props {
   onClear: () => void;
 }
 
-function truncate(s: string, n = 40) {
-  return s && s.length > n ? s.slice(0, n) + '...' : s || '';
-}
-
 export const UploadTab: React.FC<Props> = ({
   dryRun, schedules, setSchedules, setResults, showToast, onClear,
 }) => {
@@ -147,29 +143,29 @@ export const UploadTab: React.FC<Props> = ({
           <Title headingLevel="h3" style={{ marginBottom: 8 }}>
             Schedule Preview ({schedules.length})
           </Title>
-          <div style={{ overflowX: 'auto', marginBottom: 16 }}>
-            <Table aria-label="Schedule preview" variant="compact">
+          <div style={{ marginBottom: 16 }}>
+            <Table aria-label="Schedule preview" variant="compact" className="fixed-table">
               <Thead>
                 <Tr>
-                  <Th>CI Name</Th>
-                  <Th>CI</Th>
-                  <Th>Namespace</Th>
-                  <Th>Users</Th>
-                  <Th>Workshop UI</Th>
-                  <Th>Prov. Date</Th>
-                  <Th>Auto-Stop</Th>
-                  <Th>Auto-Destroy</Th>
-                  <Th>Count</Th>
+                  <Th width={10}>CI Name</Th>
+                  <Th width={15}>CI</Th>
+                  <Th width={15}>Namespace</Th>
+                  <Th width={10}>Users</Th>
+                  <Th width={10}>UI</Th>
+                  <Th width={10}>Prov. Date</Th>
+                  <Th width={10}>Auto-Stop</Th>
+                  <Th width={10}>Auto-Destroy</Th>
+                  <Th width={10}>Count</Th>
                 </Tr>
               </Thead>
               <Tbody>
                 {schedules.map((s, i) => (
                   <Tr key={i}>
                     <Td dataLabel="CI Name">{s.ci_name}</Td>
-                    <Td dataLabel="CI"><span className="truncated" title={s.ci}>{truncate(s.ci)}</span></Td>
-                    <Td dataLabel="Namespace">{s.namespace}</Td>
+                    <Td dataLabel="CI"><span className="cell-truncate" title={s.ci}>{s.ci}</span></Td>
+                    <Td dataLabel="Namespace"><span className="cell-truncate" title={s.namespace}>{s.namespace}</span></Td>
                     <Td dataLabel="Users">{s.users}</Td>
-                    <Td dataLabel="Workshop UI">{s.enable_workshop_interface ? 'Yes' : 'No'}</Td>
+                    <Td dataLabel="UI">{s.enable_workshop_interface ? 'Yes' : 'No'}</Td>
                     <Td dataLabel="Prov. Date">{s.provisioning_date}</Td>
                     <Td dataLabel="Auto-Stop">{s.auto_stop}</Td>
                     <Td dataLabel="Auto-Destroy">{s.auto_destroy}</Td>

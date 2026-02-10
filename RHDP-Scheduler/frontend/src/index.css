@@ -124,9 +124,13 @@ html, body, #root {
   font-weight: 600;
 }
 
-/* Truncated cell with tooltip on hover */
-.truncated {
-  max-width: 200px;
+/* Fixed-width tables: no horizontal scroll, cells truncate with ellipsis */
+.fixed-table {
+  table-layout: fixed;
+  width: 100%;
+}
+.cell-truncate {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

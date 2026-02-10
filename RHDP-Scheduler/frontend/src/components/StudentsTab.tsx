@@ -40,30 +40,28 @@ export const StudentsTab: React.FC<Props> = ({ qaResults }) => {
       </Split>
 
       {students.length > 0 ? (
-        <div style={{ overflowX: 'auto' }}>
-          <Table aria-label="Student landing pages" variant="compact">
-            <Thead>
-              <Tr>
-                <Th>CI Name</Th>
-                <Th>Landing Page URL</Th>
-                <Th>Status</Th>
+        <Table aria-label="Student landing pages" variant="compact" className="fixed-table">
+          <Thead>
+            <Tr>
+              <Th width={20}>CI Name</Th>
+              <Th width={60}>Landing Page URL</Th>
+              <Th width={20}>Status</Th>
+            </Tr>
+          </Thead>
+          <Tbody>
+            {students.map((r, i) => (
+              <Tr key={i}>
+                <Td dataLabel="CI Name">{r.ci_name}</Td>
+                <Td dataLabel="Landing Page URL">
+                  <a className="cell-truncate" href={r.landing_page_url} target="_blank" rel="noopener noreferrer" title={r.landing_page_url}>
+                    {r.landing_page_url}
+                  </a>
+                </Td>
+                <Td dataLabel="Status">{r.status}</Td>
               </Tr>
-            </Thead>
-            <Tbody>
-              {students.map((r, i) => (
-                <Tr key={i}>
-                  <Td dataLabel="CI Name">{r.ci_name}</Td>
-                  <Td dataLabel="Landing Page URL">
-                    <a href={r.landing_page_url} target="_blank" rel="noopener noreferrer">
-                      {r.landing_page_url}
-                    </a>
-                  </Td>
-                  <Td dataLabel="Status">{r.status}</Td>
-                </Tr>
-              ))}
-            </Tbody>
-          </Table>
-        </div>
+            ))}
+          </Tbody>
+        </Table>
       ) : (
         <EmptyState titleText="No student data" headingLevel="h3" icon={UsersIcon}>
           <EmptyStateBody>Run QA first to populate student landing pages.</EmptyStateBody>

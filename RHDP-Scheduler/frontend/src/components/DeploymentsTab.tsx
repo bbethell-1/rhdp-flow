@@ -19,13 +19,22 @@ interface Props {
   showToast: (msg: string, variant: 'success' | 'danger' | 'info') => void;
 }
 
-function truncate(s: string, n = 40) {
-  return s && s.length > n ? s.slice(0, n) + '...' : s || '';
+const STATUS_LABELS: Record<string, string> = {
+  verified: 'Verified',
+  deployed_unverified: 'Deployed (Unverified)',
+  deployed_no_url: 'Deployed (No URL)',
+  failed: 'Failed',
+  error: 'Error',
+};
+
+function formatStatus(raw: string) {
+  if (!raw) return '';
+  return STATUS_LABELS[raw.toLowerCase()] || raw.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
 function statusClass(status: string) {
   if (!status) return '';
-  const s = status.toLowerCase().replace(/[^a-z_]/g, '');
+  const s = status.toLowerCase();
   if (s.includes('verified') && !s.includes('unverified')) return 'status-verified';
   if (s.includes('unverified') || s.includes('no_url')) return 'status-deployed_unverified';
   if (s.includes('failed') || s.includes('error')) return 'status-failed';
@@ -66,38 +75,42 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
       </Split>
 
       {results.length > 0 ? (
-        <div style={{ overflowX: 'auto' }}>
-          <Table aria-label="Deployment results" variant="compact">
-            <Thead>
-              <Tr>
-                <Th>CI Name</Th>
-                <Th>CI</Th>
-                <Th>GUID</Th>
-                <Th>Status</Th>
-                <Th>URL</Th>
-                <Th>Prov. Date</Th>
-                <Th>Timestamp</Th>
-                <Th>Error</Th>
+        <Table aria-label="Deployment results" variant="compact" className="fixed-table">
+          <Thead>
+            <Tr>
+              <Th width={10}>CI Name</Th>
+              <Th width={15}>CI</Th>
+              <Th width={15}>GUID</Th>
+              <Th width={10}>Status</Th>
+              <Th width={20}>URL</Th>
+              <Th width={10}>Prov. Date</Th>
+              <Th width={10}>Timestamp</Th>
+              <Th width={10}>Error</Th>
+            </Tr>
+          </Thead>
+          <Tbody>
+            {results.map((r, i) => (
+              <Tr key={i}>
+                <Td dataLabel="CI Name">{r.ci_name}</Td>
+                <Td dataLabel="CI"><span className="cell-truncate" title={r.ci}>{r.ci}</span></Td>
+                <Td dataLabel="GUID"><span className="cell-truncate" title={r.guid}>{r.guid}</span></Td>
+                <Td dataLabel="Status"><span className={statusClass(r.status)}>{formatStatus(r.status)}</span></Td>
+                <Td dataLabel="URL">
+                  {r.url ? (
+                    <a className="cell-truncate" href={r.url} target="_blank" rel="noopener noreferrer" title={r.url}>
+                      {r.url}
+                    </a>
+                  ) : '-'}
+                </Td>
+                <Td dataLabel="Prov. Date">{r.provisioning_date}</Td>
+                <Td dataLabel="Timestamp">{r.timestamp}</Td>
+                <Td dataLabel="Error">
+                  {r.error_message ? <span className="cell-truncate" title={r.error_message}>{r.error_message}</span> : ''}
+                </Td>
               </Tr>
-            </Thead>
-            <Tbody>
-              {results.map((r, i) => (
-                <Tr key={i}>
-                  <Td dataLabel="CI Name">{r.ci_name}</Td>
-                  <Td dataLabel="CI"><span className="truncated" title={r.ci}>{truncate(r.ci)}</span></Td>
-                  <Td dataLabel="GUID">{r.guid}</Td>
-                  <Td dataLabel="Status"><span className={statusClass(r.status)}>{r.status}</span></Td>
-                  <Td dataLabel="URL">
-                    {r.url ? <a href={r.url} target="_blank" rel="noopener noreferrer">{truncate(r.url, 50)}</a> : '-'}
-                  </Td>
-                  <Td dataLabel="Prov. Date">{r.provisioning_date}</Td>
-                  <Td dataLabel="Timestamp">{r.timestamp}</Td>
-                  <Td dataLabel="Error"><span className="truncated" title={r.error_message}>{truncate(r.error_message, 30)}</span></Td>
-                </Tr>
-              ))}
-            </Tbody>
-          </Table>
-        </div>
+            ))}
+          </Tbody>
+        </Table>
       ) : (
         <EmptyState titleText="No deployment results yet" headingLevel="h3" icon={CubesIcon}>
           <EmptyStateBody>Deploy schedules from the Upload tab to see results here.</EmptyStateBody>
