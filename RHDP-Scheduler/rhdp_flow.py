@@ -70,13 +70,20 @@ def _provider_parameter_values(
     return pv
 
 
+def _salesforce_items(schedule: "WorkshopSchedule") -> str:
+    """Format salesforce_items JSON string from campaign_id. Empty [] when not set."""
+    if schedule.campaign_id:
+        return json.dumps([{"id": schedule.campaign_id, "type": "opportunity", "required": True}])
+    return "[]"
+
+
 def _workshop_provision_parameters(param_values: Dict, resourceclaim_payload: Dict) -> Dict:
     """Build WorkshopProvision parameters; include num_users only when present in payload."""
     params: Dict = {
         "purpose": param_values.get('purpose', 'QA'),
         "purpose_activity": resourceclaim_payload['metadata']['annotations'].get('demo.redhat.com/purpose-activity', 'Admin'),
         "purpose_explanation": None,
-        "salesforce_items": "[]"
+        "salesforce_items": resourceclaim_payload.get('metadata', {}).get('annotations', {}).get('demo.redhat.com/salesforce-items', '[]')
     }
     if "num_users" in param_values:
         params["num_users"] = param_values["num_users"]
@@ -103,6 +110,7 @@ class WorkshopSchedule:
     users: Optional[int] = None  # Optional; when omitted/empty we don't set num_users
     instances: Optional[int] = None  # Optional; workshop instance/seat count for multi-asset (e.g. 30); used for numberSeats when users not set
     concurrency: Optional[int] = None  # Optional; WorkshopProvision concurrency (default 1)
+    campaign_id: str = ""  # Optional Salesforce Campaign/Opportunity ID
 
 @dataclass
 class DeploymentResult:
@@ -327,6 +335,7 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                     multi_workshop_name = row.get(header_map.get('multi_workshop_name', 'Multi_Workshop_Name'), '').strip()
                     instances_str = row.get(header_map.get('instances', 'Instances'), '').strip()
                     concurrency_str = row.get(header_map.get('concurrency', 'Concurrency'), '').strip()
+                    campaign_id = row.get(header_map.get('campaign_id', 'Campaign_ID'), '').strip()
                     is_multi_asset = is_multi_asset_str.lower() in ['true', '1', 'yes', 'y'] if is_multi_asset_str else False
                     
                     # Support both old and new header formats (with/without UTC suffix)
@@ -412,7 +421,8 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                         asset_cis=asset_cis,
                         multi_workshop_name=multi_workshop_name,
                         instances=instances,
-                        concurrency=concurrency
+                        concurrency=concurrency,
+                        campaign_id=campaign_id
                     )
                     
                     schedules.append(schedule)
@@ -662,7 +672,7 @@ def build_resource_claim_payload(
                 "demo.redhat.com/purpose": schedule.purpose,
                 "demo.redhat.com/purpose-activity": schedule.activity,
                 "demo.redhat.com/requester": requester_email,
-                "demo.redhat.com/salesforce-items": "[]",
+                "demo.redhat.com/salesforce-items": _salesforce_items(schedule),
                 "poolboy.gpte.redhat.com/resource-pool-name": "disable"
             },
             "labels": {
@@ -1702,11 +1712,12 @@ def create_multi_workshop(
                         'babylon.gpte.redhat.com/catalogItemDisplayName': display_name,
                         'demo.redhat.com/requester': schedule.namespace.replace('user-', '').replace('-redhat-com', '@redhat.com'),
                         'demo.redhat.com/purpose': schedule.purpose,
-                        'demo.redhat.com/purpose-activity': schedule.activity
+                        'demo.redhat.com/purpose-activity': schedule.activity,
+                        'demo.redhat.com/salesforce-items': _salesforce_items(schedule)
                     }
                 }
             }
-            
+
             # Create Workshop for this asset
             asset_workshop_name = create_workshop_with_ui(asset_workshop_prefix, schedule.namespace, asset_payload, config)
             

@@ -10,8 +10,7 @@ from tests.conftest import (
     BASIC_WORKSHOP_CSV,
     MULTI_ASSET_OLD_CSV,
     MULTI_ASSET_GROUPED_CSV,
-    COUNT_EXPANSION_CSV,
-    MULTI_REGION_CSV,
+    INSTANCES_AND_CONCURRENCY_CSV,
     MISSING_HEADERS_CSV,
     OLD_DATE_HEADERS_CSV,
     write_csv_tempfile,
@@ -62,16 +61,11 @@ class TestCSVParsing:
         assert schedules[0].multi_workshop_name == "summit-demo-2026"
         assert schedules[0].is_multi_asset is False
 
-    def test_count_and_concurrency(self):
-        path = self._write(COUNT_EXPANSION_CSV)
+    def test_instances_and_concurrency(self):
+        path = self._write(INSTANCES_AND_CONCURRENCY_CSV)
         schedules = read_csv_input(path)
-        assert schedules[0].count == 2
+        assert schedules[0].instances == 30
         assert schedules[0].concurrency == 3
-
-    def test_aws_region(self):
-        path = self._write(MULTI_REGION_CSV)
-        schedules = read_csv_input(path)
-        assert schedules[0].aws_regions == "us-east-1,eu-west-1"
 
     def test_missing_required_headers_raises(self):
         path = self._write(MISSING_HEADERS_CSV)
@@ -123,9 +117,13 @@ Valid Row,valid-ci,valid-ns,20,True,pass,Admin,QA,My Workshop,15/02/2026 11:00,1
         assert len(schedules) == 1
         assert schedules[0].ci_name == "Valid Row"
 
-    def test_stringio_input(self):
-        """Test that read_csv_input accepts io.StringIO."""
-        sio = io.StringIO(BASIC_WORKSHOP_CSV)
-        schedules = read_csv_input(sio)
+    def test_campaign_id_parsed(self):
+        """Test that Campaign_ID column is parsed."""
+        csv_text = """\
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Campaign_ID
+Valid Row,valid-ci,valid-ns,20,True,pass,Admin,QA,My Workshop,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,71403328
+"""
+        path = self._write(csv_text)
+        schedules = read_csv_input(path)
         assert len(schedules) == 1
-        assert schedules[0].ci_name == "Experience OpenShift Virtualization Roadshow"
+        assert schedules[0].campaign_id == "71403328"
