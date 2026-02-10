@@ -1,0 +1,7 @@
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Count,AWS_Region
+Experience OpenShift Virtualization Roadshow,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,20,True,Workshop1,Admin,QA,Virt Roadshow Basic,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,,,,,,
+Ansible Network Automation Lab,zt-ansiblebu.ansible-network-automation-basics-lab-2.event,user-bbethell-redhat-com,30,True,AnsibleLab1,Admin,Training,Ansible Basics Lab,16/02/2026 09:00,16/02/2026 17:00,18/02/2026 09:00,,,,,2,
+OpenShift AI Workshop,openshift-ai.ai-workshop-multi-user.prod,user-bbethell-redhat-com,40,True,AIWorkshop1,Admin,Demo,AI Workshop - 2 Instances,17/02/2026 10:00,17/02/2026 18:00,19/02/2026 10:00,,,,3,2,
+Multi-Region Workshop,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,60,True,RegionWS1,Admin,QA,Multi-Region Virt Roadshow,18/02/2026 08:00,18/02/2026 20:00,20/02/2026 08:00,,,,,,"us-east-1,eu-west-1,ap-southeast-1"
+Virt Roadshow Asset,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,20,True,VirtPass1,Admin,QA,Summit Demo,19/02/2026 10:00,19/02/2026 18:00,21/02/2026 10:00,,,summit-demo-2026,,,
+Ansible Lab Asset,zt-ansiblebu.ansible-network-automation-basics-lab-2.event,user-bbethell-redhat-com,20,True,AnsPass2,Admin,QA,Summit Demo,19/02/2026 10:00,19/02/2026 18:00,21/02/2026 10:00,,,summit-demo-2026,,,
