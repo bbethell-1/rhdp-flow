@@ -29,11 +29,49 @@ This repo includes UI and API components:
 
 Use the API server and frontend for browser-based scheduling; use `rhdp_flow.py` for CLI/batch runs.
 
+## Requirements
+
+- Python 3.7+
+- Node.js 18+ and npm
+- OpenShift CLI (`oc`) installed and logged in
+- Access to RHDP cluster
+
 ## Installation
 
+### Backend (Python)
+
 ```bash
+cd RHDP-Scheduler
 pip3 install -r requirements.txt
 ```
+
+### Frontend (Node)
+
+```bash
+cd frontend
+npm install
+```
+
+## Running the Web UI
+
+Open **two terminals** from the `RHDP-Scheduler` directory:
+
+**Terminal 1 — API server** (runs on port 8000):
+
+```bash
+python3 -m uvicorn api.server:app --host 127.0.0.1 --port 8000
+```
+
+**Terminal 2 — Frontend dev server** (runs on port 5173, proxies `/api` to the backend):
+
+```bash
+cd frontend
+npm run dev
+```
+
+Then open http://localhost:5173 in your browser.
+
+The frontend has five tabs: **Upload & Deploy**, **Deployments**, **Operations**, **QA**, and **Students**.
 
 ## CSV Format
 
@@ -129,12 +167,6 @@ See `examples/asset_passwords_example.csv`.
 | `--days` | Days to extend (with `--extend-*`) |
 | `--hours` | Hours to extend (with `--extend-*`) |
 | `--scale N` | Scale WorkshopProvision seat count |
-
-## Requirements
-
-- Python 3.7+
-- OpenShift CLI (`oc`) installed and logged in
-- Access to RHDP cluster
 
 ## License
 
