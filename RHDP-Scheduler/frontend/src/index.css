@@ -1,0 +1,142 @@
+:root {
+  --rh-red: #ee0000;
+  --rh-dark: #1a1a1a;
+  --rh-gray: #6a6e73;
+  --rh-light: #f0f0f0;
+  --rh-white: #ffffff;
+  --rh-green: #3e8635;
+  --rh-yellow: #f0ab00;
+  --rh-blue: #06c;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+.pf-v6-c-page {
+  height: 100vh;
+}
+
+/* ── Dark masthead (always dark regardless of theme) ── */
+.pf-v6-c-masthead {
+  background-color: var(--rh-dark) !important;
+}
+
+/* Toolbar background transparent on dark masthead */
+.pf-v6-c-masthead .pf-v6-c-toolbar {
+  --pf-v6-c-toolbar--BackgroundColor: transparent;
+  background-color: transparent !important;
+}
+
+/* Masthead direct text elements: white */
+.pf-v6-c-masthead .pf-v6-c-check__label {
+  color: var(--rh-white) !important;
+}
+
+/* Health badge label: style for dark background */
+.pf-v6-c-masthead .pf-v6-c-label.pf-m-green {
+  --pf-v6-c-label--BackgroundColor: #1e4620 !important;
+  background-color: #1e4620 !important;
+}
+.pf-v6-c-masthead .pf-v6-c-label.pf-m-green .pf-v6-c-label__content,
+.pf-v6-c-masthead .pf-v6-c-label.pf-m-green .pf-v6-c-label__text {
+  color: #92d88a !important;
+}
+.pf-v6-c-masthead .pf-v6-c-label.pf-m-red {
+  --pf-v6-c-label--BackgroundColor: #4a0e0e !important;
+  background-color: #4a0e0e !important;
+}
+.pf-v6-c-masthead .pf-v6-c-label.pf-m-red .pf-v6-c-label__content,
+.pf-v6-c-masthead .pf-v6-c-label.pf-m-red .pf-v6-c-label__text {
+  color: #f5a6a6 !important;
+}
+.pf-v6-c-masthead .pf-v6-c-label.pf-m-grey,
+.pf-v6-c-masthead .pf-v6-c-label:not(.pf-m-green):not(.pf-m-red) {
+  --pf-v6-c-label--BackgroundColor: #333 !important;
+  background-color: #333 !important;
+}
+.pf-v6-c-masthead .pf-v6-c-label.pf-m-grey .pf-v6-c-label__content,
+.pf-v6-c-masthead .pf-v6-c-label.pf-m-grey .pf-v6-c-label__text,
+.pf-v6-c-masthead .pf-v6-c-label:not(.pf-m-green):not(.pf-m-red) .pf-v6-c-label__content,
+.pf-v6-c-masthead .pf-v6-c-label:not(.pf-m-green):not(.pf-m-red) .pf-v6-c-label__text {
+  color: #d2d2d2 !important;
+}
+
+/* Brand title in masthead */
+.app-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--rh-white);
+  white-space: nowrap;
+}
+.app-title .accent {
+  color: var(--rh-red);
+}
+
+/* Theme toggle in masthead */
+.theme-toggle {
+  background: none;
+  border: 1px solid rgba(255,255,255,0.3);
+  border-radius: 4px;
+  color: var(--rh-white);
+  cursor: pointer;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+.theme-toggle:hover {
+  border-color: rgba(255,255,255,0.6);
+  background: rgba(255,255,255,0.1);
+}
+
+/* ── Log display ── */
+.log-box {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  font-family: 'Red Hat Mono', 'Menlo', monospace;
+  font-size: 0.8rem;
+  padding: 12px;
+  border-radius: 6px;
+  max-height: 350px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+/* ── Status badges ── */
+.status-verified {
+  color: var(--rh-green);
+  font-weight: 600;
+}
+.status-deployed_unverified {
+  color: var(--rh-yellow);
+  font-weight: 600;
+}
+.status-failed {
+  color: var(--rh-red);
+  font-weight: 600;
+}
+
+/* Truncated cell with tooltip on hover */
+.truncated {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Operations grid */
+.ops-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+/* Dry-run checkbox + controls in masthead */
+.masthead-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
