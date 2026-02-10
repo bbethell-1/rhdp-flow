@@ -136,3 +136,12 @@ class OperationResponse(BaseModel):
     success: bool
     message: str
     details: List[str] = Field(default_factory=list)
+
+
+class SessionSummary(BaseModel):
+    session_id: str
+    filename: str
+    schedule_count: int
+    result_count: int
+    timestamp: str
+    has_results: bool

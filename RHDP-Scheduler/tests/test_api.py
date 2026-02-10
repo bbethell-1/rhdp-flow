@@ -26,6 +26,9 @@ def reset_state():
     routes._deployment_results = []
     routes._qa_results = []
     routes._csv_filepath = None
+    routes._current_filename = ""
+    routes._sessions = []
+    routes._session_counter = 0
     yield
 
 
@@ -249,3 +252,66 @@ def test_export_results_after_dry_run(uploaded_client):
 def test_export_students_no_data(client):
     resp = client.get("/api/export/students")
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Sessions
+# ---------------------------------------------------------------------------
+
+def test_sessions_empty(client):
+    resp = client.get("/api/sessions")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_clear_no_data(client):
+    resp = client.post("/api/sessions/clear", json={})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["session_count"] == 0
+
+
+def test_clear_archives_session(uploaded_client):
+    uploaded_client.post("/api/deploy/dry-run", json={})
+    resp = uploaded_client.post("/api/sessions/clear", json={})
+    assert resp.status_code == 200
+    assert resp.json()["session_count"] == 1
+    # Current state should be empty
+    resp = uploaded_client.get("/api/schedules")
+    assert resp.json() == []
+    resp = uploaded_client.get("/api/deploy/results")
+    assert resp.json() == []
+
+
+def test_view_archived_session(uploaded_client):
+    uploaded_client.post("/api/deploy/dry-run", json={})
+    uploaded_client.post("/api/sessions/clear", json={})
+    # View the archived session
+    resp = uploaded_client.get("/api/sessions/1")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["session_id"] == "1"
+    assert len(data["schedules"]) == 1
+    assert len(data["results"]) >= 1
+
+
+def test_session_not_found(client):
+    resp = client.get("/api/sessions/999")
+    assert resp.status_code == 404
+
+
+def test_multiple_sessions(uploaded_client):
+    # First session
+    uploaded_client.post("/api/deploy/dry-run", json={})
+    uploaded_client.post("/api/sessions/clear", json={})
+    # Second upload + session
+    uploaded_client.post(
+        "/api/schedules/upload",
+        files={"file": ("test2.csv", BASIC_WORKSHOP_CSV.encode(), "text/csv")},
+    )
+    uploaded_client.post("/api/sessions/clear", json={})
+    # Should have 2 sessions
+    resp = uploaded_client.get("/api/sessions")
+    assert len(resp.json()) == 2
+    assert resp.json()[0]["session_id"] == "1"
+    assert resp.json()[1]["session_id"] == "2"

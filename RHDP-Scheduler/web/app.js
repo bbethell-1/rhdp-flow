@@ -87,6 +87,77 @@ async function checkHealth() {
 }
 
 // ---------------------------------------------------------------------------
+// Session history
+// ---------------------------------------------------------------------------
+
+let _viewingSession = false;
+
+async function refreshSessionList() {
+  try {
+    const res = await api("/sessions");
+    const sessions = await res.json();
+    const select = document.getElementById("sessionSelect");
+    const bar = document.getElementById("sessionBar");
+    // Keep first option
+    select.innerHTML = '<option value="">-- select --</option>';
+    sessions.forEach((s) => {
+      const opt = document.createElement("option");
+      opt.value = s.session_id;
+      opt.textContent = "#" + s.session_id + " " + s.filename + " (" + s.schedule_count + " sched, " + s.result_count + " results) " + s.timestamp;
+      select.appendChild(opt);
+    });
+    bar.style.display = sessions.length ? "flex" : "none";
+  } catch {
+    // ignore
+  }
+}
+
+document.getElementById("btnViewSession").addEventListener("click", async () => {
+  const id = document.getElementById("sessionSelect").value;
+  if (!id) return toast("Select a session first", "error");
+  try {
+    const res = await api("/sessions/" + id);
+    const data = await res.json();
+    _viewingSession = true;
+    // Show schedules
+    if (data.schedules.length) {
+      renderSchedules(data.schedules);
+    }
+    // Show results
+    if (data.results.length) {
+      renderResults(data.results);
+      document.querySelector('[data-tab="deployments"]').click();
+    }
+    // Show QA
+    if (data.qa_results && data.qa_results.length) {
+      renderQA(data.qa_results);
+    }
+    toast("Viewing session #" + id + ": " + data.filename, "");
+  } catch (e) {
+    toast(e.message, "error");
+  }
+});
+
+document.getElementById("btnBackToCurrent").addEventListener("click", async () => {
+  _viewingSession = false;
+  // Reload current state
+  try {
+    const res = await api("/schedules");
+    const schedules = await res.json();
+    if (schedules.length) {
+      renderSchedules(schedules);
+    } else {
+      clearUI();
+    }
+    await refreshResults();
+  } catch {
+    clearUI();
+  }
+  document.querySelector('[data-tab="upload"]').click();
+  toast("Back to current session", "");
+});
+
+// ---------------------------------------------------------------------------
 // TAB 1: Upload & Deploy
 // ---------------------------------------------------------------------------
 
@@ -104,12 +175,49 @@ document.getElementById("btnUpload").addEventListener("click", async () => {
       throw new Error(err.detail || "Upload failed");
     }
     const data = await res.json();
+    _viewingSession = false;
     renderSchedules(data.schedules);
     toast("Loaded " + data.count + " schedule(s)", "success");
   } catch (e) {
     toast(e.message, "error");
   }
 });
+
+document.getElementById("btnClear").addEventListener("click", async () => {
+  try {
+    const res = await api("/sessions/clear", { method: "POST", body: JSON.stringify({}) });
+    const data = await res.json();
+    clearUI();
+    refreshSessionList();
+    toast(data.message, "success");
+  } catch (e) {
+    toast(e.message, "error");
+  }
+});
+
+function clearUI() {
+  // Reset upload tab
+  document.getElementById("csvFile").value = "";
+  document.getElementById("schedulePreview").style.display = "none";
+  document.querySelector("#scheduleTable tbody").innerHTML = "";
+  document.getElementById("scheduleCount").textContent = "0";
+  document.getElementById("deployProgress").style.display = "none";
+  document.getElementById("deployLog").textContent = "";
+  // Reset results tab
+  document.querySelector("#resultsTable tbody").innerHTML = "";
+  document.getElementById("resultsEmpty").style.display = "block";
+  // Reset QA tab
+  document.querySelector("#qaTable tbody").innerHTML = "";
+  document.getElementById("qaEmpty").style.display = "block";
+  document.getElementById("qaCount").textContent = "0";
+  // Reset students tab
+  document.querySelector("#studentsTable tbody").innerHTML = "";
+  document.getElementById("studentsEmpty").style.display = "block";
+  // Reset operations log
+  document.getElementById("opsLog").textContent = "Ready.";
+  // Switch to upload tab
+  document.querySelector('[data-tab="upload"]').click();
+}
 
 function renderSchedules(schedules) {
   const tbody = document.querySelector("#scheduleTable tbody");
@@ -407,3 +515,4 @@ document.getElementById("btnDownloadStudents").addEventListener("click", () => {
 // ---------------------------------------------------------------------------
 
 checkHealth();
+refreshSessionList();

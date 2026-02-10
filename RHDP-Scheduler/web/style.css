@@ -215,6 +215,35 @@ td a:hover { text-decoration: underline; }
 .toast.error { background: var(--rh-red); }
 .toast.success { background: var(--rh-green); }
 
+/* Session bar */
+.session-bar {
+  background: var(--rh-white);
+  border-bottom: 1px solid #e0e0e0;
+  padding: 8px 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--rh-gray);
+}
+.session-bar select {
+  font-size: 13px;
+  padding: 4px 8px;
+  min-width: 200px;
+}
+
+/* Viewing banner */
+.viewing-banner {
+  background: var(--rh-yellow);
+  color: var(--rh-dark);
+  padding: 8px 24px;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 /* Empty state */
 .empty {
   text-align: center;

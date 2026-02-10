@@ -20,6 +20,14 @@
   </div>
 </div>
 
+<!-- Session history bar -->
+<div id="sessionBar" class="session-bar" style="display:none">
+  <span id="sessionLabel">Prior sessions:</span>
+  <select id="sessionSelect"><option value="">-- select --</option></select>
+  <button class="btn btn-sm btn-secondary" id="btnViewSession">View</button>
+  <button class="btn btn-sm btn-secondary" id="btnBackToCurrent">Back to Current</button>
+</div>
+
 <!-- Tab bar -->
 <div class="tab-bar">
   <button class="tab-btn active" data-tab="upload">Upload &amp; Deploy</button>
@@ -38,6 +46,7 @@
     <div class="form-row">
       <input type="file" id="csvFile" accept=".csv">
       <button class="btn btn-primary" id="btnUpload">Upload</button>
+      <button class="btn btn-secondary" id="btnClear" style="margin-left:auto">Clear / New Upload</button>
     </div>
   </div>
 

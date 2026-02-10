@@ -46,6 +46,7 @@ from api.models import (
     OperationResponse,
     QARequest,
     ScaleRequest,
+    SessionSummary,
     UploadResponse,
     WorkshopScheduleResponse,
 )
@@ -62,6 +63,11 @@ _schedules: List[WorkshopSchedule] = []
 _deployment_results: List[DeploymentResult] = []
 _qa_results: List[dict] = []
 _csv_filepath: Optional[str] = None  # stashed for QA functions that need a path
+_current_filename: str = ""
+
+# Session history — each completed upload+deploy cycle gets archived here
+_sessions: List[dict] = []
+_session_counter: int = 0
 
 
 def _get_config(dry_run: bool = False) -> RHDPConfig:
@@ -95,6 +101,75 @@ def _filter_schedules(ci_filter: Optional[str]) -> List[WorkshopSchedule]:
             raise HTTPException(404, f"No schedules found for CI: {ci_filter}")
         return filtered
     return list(_schedules)
+
+
+def _archive_current_session():
+    """Save the current state as a session if there's anything to save."""
+    global _session_counter
+    if not _schedules and not _deployment_results:
+        return
+    _session_counter += 1
+    session = {
+        "session_id": str(_session_counter),
+        "filename": _current_filename,
+        "schedules": list(_schedules),
+        "deployment_results": list(_deployment_results),
+        "qa_results": list(_qa_results),
+        "csv_filepath": _csv_filepath,
+        "schedule_count": len(_schedules),
+        "result_count": len(_deployment_results),
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    _sessions.append(session)
+
+
+# ---------------------------------------------------------------------------
+# Sessions
+# ---------------------------------------------------------------------------
+
+@router.post("/sessions/clear")
+def clear_session():
+    """Archive current session and reset state for a new upload."""
+    global _schedules, _deployment_results, _qa_results, _csv_filepath, _current_filename
+    _archive_current_session()
+    _schedules = []
+    _deployment_results = []
+    _qa_results = []
+    _csv_filepath = None
+    _current_filename = ""
+    return {"message": "Session cleared", "session_count": len(_sessions)}
+
+
+@router.get("/sessions", response_model=List[SessionSummary])
+def list_sessions():
+    """List all prior sessions."""
+    return [
+        SessionSummary(
+            session_id=s["session_id"],
+            filename=s["filename"],
+            schedule_count=s["schedule_count"],
+            result_count=s["result_count"],
+            timestamp=s["timestamp"],
+            has_results=s["result_count"] > 0,
+        )
+        for s in _sessions
+    ]
+
+
+@router.get("/sessions/{session_id}")
+def get_session(session_id: str):
+    """Restore a prior session's data for viewing."""
+    for s in _sessions:
+        if s["session_id"] == session_id:
+            return {
+                "session_id": s["session_id"],
+                "filename": s["filename"],
+                "timestamp": s["timestamp"],
+                "schedules": [_schedule_to_response(sc) for sc in s["schedules"]],
+                "results": [_result_to_response(r) for r in s["deployment_results"]],
+                "qa_results": s["qa_results"],
+            }
+    raise HTTPException(404, "Session not found")
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +237,7 @@ def health():
 
 @router.post("/schedules/upload", response_model=UploadResponse)
 async def upload_csv(file: UploadFile = File(...)):
-    global _schedules, _csv_filepath
+    global _schedules, _csv_filepath, _current_filename
     content = await file.read()
     try:
         text = content.decode("utf-8")
@@ -176,6 +251,7 @@ async def upload_csv(file: UploadFile = File(...)):
         raise HTTPException(400, str(e))
 
     _schedules = schedules
+    _current_filename = file.filename or "unknown.csv"
     # Also write a temp file so QA functions can use a path
     import tempfile
     tmp = tempfile.NamedTemporaryFile(
