@@ -33,6 +33,7 @@ class WorkshopScheduleResponse(BaseModel):
     concurrency: int = 1
     count: int = 1
     aws_regions: str = ""
+    white_glove: bool = False
 
 
 class DeploymentResultResponse(BaseModel):

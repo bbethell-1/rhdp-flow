@@ -84,6 +84,7 @@ def make_schedule(**overrides):
         concurrency=1,
         count=1,
         aws_regions="",
+        white_glove=False,
     )
     defaults.update(overrides)
     return WorkshopSchedule(**defaults)

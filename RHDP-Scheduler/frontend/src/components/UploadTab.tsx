@@ -156,6 +156,7 @@ export const UploadTab: React.FC<Props> = ({
                   <Th width={10}>Auto-Stop</Th>
                   <Th width={10}>Auto-Destroy</Th>
                   <Th width={10}>Count</Th>
+                  <Th width={10}>WG</Th>
                 </Tr>
               </Thead>
               <Tbody>
@@ -170,6 +171,7 @@ export const UploadTab: React.FC<Props> = ({
                     <Td dataLabel="Auto-Stop">{s.auto_stop}</Td>
                     <Td dataLabel="Auto-Destroy">{s.auto_destroy}</Td>
                     <Td dataLabel="Count">{s.count}</Td>
+                    <Td dataLabel="WG">{s.white_glove ? 'Yes' : 'No'}</Td>
                   </Tr>
                 ))}
               </Tbody>

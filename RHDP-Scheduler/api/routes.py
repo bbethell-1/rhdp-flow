@@ -10,7 +10,7 @@ import logging
 import subprocess
 import time
 from dataclasses import asdict
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
@@ -26,6 +26,7 @@ from rhdp_flow import (
     WorkshopSchedule,
     DeploymentResult,
     read_csv_input,
+    load_asset_passwords,
     process_schedule,
     lock_workshops,
     extend_stop_time,
@@ -64,6 +65,7 @@ _deployment_results: List[DeploymentResult] = []
 _qa_results: List[dict] = []
 _csv_filepath: Optional[str] = None  # stashed for QA functions that need a path
 _current_filename: str = ""
+_asset_passwords: Optional[Dict[str, str]] = None
 
 # Session history — each completed upload+deploy cycle gets archived here
 _sessions: List[dict] = []
@@ -87,6 +89,7 @@ def _schedule_to_response(s: WorkshopSchedule) -> WorkshopScheduleResponse:
         is_multi_asset=s.is_multi_asset, asset_cis=s.asset_cis,
         multi_workshop_name=s.multi_workshop_name,
         concurrency=s.concurrency, count=s.count, aws_regions=s.aws_regions,
+        white_glove=s.white_glove,
     )
 
 
@@ -130,13 +133,14 @@ def _archive_current_session():
 @router.post("/sessions/clear")
 def clear_session():
     """Archive current session and reset state for a new upload."""
-    global _schedules, _deployment_results, _qa_results, _csv_filepath, _current_filename
+    global _schedules, _deployment_results, _qa_results, _csv_filepath, _current_filename, _asset_passwords
     _archive_current_session()
     _schedules = []
     _deployment_results = []
     _qa_results = []
     _csv_filepath = None
     _current_filename = ""
+    _asset_passwords = None
     return {"message": "Session cleared", "session_count": len(_sessions)}
 
 
@@ -267,6 +271,26 @@ async def upload_csv(file: UploadFile = File(...)):
     )
 
 
+@router.post("/schedules/upload-passwords")
+async def upload_passwords(file: UploadFile = File(...)):
+    """Upload a per-asset passwords CSV (columns: CI, Password)."""
+    global _asset_passwords
+    content = await file.read()
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(400, "File must be UTF-8 encoded CSV")
+
+    import tempfile as _tf
+    tmp = _tf.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, encoding="utf-8")
+    tmp.write(text)
+    tmp.close()
+    _asset_passwords = load_asset_passwords(tmp.name)
+    os.unlink(tmp.name)
+
+    return {"count": len(_asset_passwords), "message": f"Loaded {len(_asset_passwords)} asset password(s)"}
+
+
 @router.get("/schedules", response_model=List[WorkshopScheduleResponse])
 def get_schedules():
     return [_schedule_to_response(s) for s in _schedules]
@@ -346,7 +370,7 @@ async def deploy(body: DeployRequest = DeployRequest()):
             total = done + len(expanded)
 
             for s in expanded:
-                result = process_schedule(s, config)
+                result = process_schedule(s, config, asset_passwords=_asset_passwords)
                 results.append(result)
                 done += 1
                 pct = int(done / total * 100) if total else 100
@@ -433,7 +457,7 @@ def deploy_dry_run(body: DeployRequest = DeployRequest()):
             expanded.append(s)
 
     for s in expanded:
-        result = process_schedule(s, config)
+        result = process_schedule(s, config, asset_passwords=_asset_passwords)
         results.append(result)
 
     global _deployment_results

@@ -36,7 +36,7 @@ class RHDPWizard:
         "Password", "Activity", "Purpose", "Workshop Name",
         "Provisioning Date (UTC)", "Auto-stop (UTC)", "Auto-destroy (UTC)",
         "Multi_Asset", "Asset_CIs", "Multi_Workshop_Name",
-        "Concurrency", "Count", "AWS_Region"
+        "Concurrency", "Count", "AWS_Region", "White_Glove"
     ]
 
     def __init__(self, config=None):
@@ -101,6 +101,7 @@ class RHDPWizard:
         multi_asset = "False"
         asset_cis = ""
         multi_workshop_name = ""
+        white_glove = "False"
 
         if Confirm.ask("Configure advanced options? (count, concurrency, regions, multi-asset)", default=False):
             concurrency = str(IntPrompt.ask("Deployment concurrency", default=1))
@@ -116,6 +117,9 @@ class RHDPWizard:
                 multi_asset = "True"
                 asset_cis = Prompt.ask("Asset CIs (comma-separated)")
                 multi_workshop_name = Prompt.ask("Multi-Workshop Name", default="")
+
+            if Confirm.ask("White-glove engagement?", default=False):
+                white_glove = "True"
 
         return {
             "CI Name": ci_name,
@@ -136,6 +140,7 @@ class RHDPWizard:
             "Concurrency": concurrency,
             "Count": count,
             "AWS_Region": aws_region,
+            "White_Glove": white_glove,
         }
 
     def _select_ci(self) -> str:

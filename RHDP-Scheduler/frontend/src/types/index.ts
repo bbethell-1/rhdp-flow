@@ -26,6 +26,7 @@ export interface WorkshopSchedule {
   concurrency: number;
   count: number;
   aws_regions: string;
+  white_glove: boolean;
 }
 
 export interface UploadResponse {

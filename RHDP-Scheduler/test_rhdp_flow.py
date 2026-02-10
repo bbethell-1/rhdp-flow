@@ -8,6 +8,7 @@ Run with:
 """
 
 import csv
+import io
 import json
 import os
 import subprocess
@@ -27,6 +28,7 @@ try:
         format_iso8601,
         calculate_duration,
         read_csv_input,
+        load_asset_passwords,
         write_deployment_results,
         build_resource_claim_payload,
         create_resource_claim_via_oc,
@@ -120,6 +122,7 @@ def make_schedule(**overrides):
         concurrency=1,
         count=1,
         aws_regions="",
+        white_glove=False,
     )
     defaults.update(overrides)
     return WorkshopSchedule(**defaults)
@@ -2095,6 +2098,121 @@ class TestExportStudentLandingPageCSV(unittest.TestCase):
             rows = list(csv.DictReader(f))
 
         self.assertEqual(rows[0]['Catalog URL'], "https://integration.demo.redhat.com/multi-workshop/user-ns/portal")
+
+
+# ============================================================================
+# WHITE-GLOVE TESTS
+# ============================================================================
+
+class TestWhiteGloveLabel(unittest.TestCase):
+    """Tests for white-glove label in payloads."""
+
+    def test_white_glove_false_by_default(self):
+        """White-glove defaults to False, label is 'false'."""
+        schedule = make_schedule()
+        config = make_config(dry_run=True)
+        payload = build_resource_claim_payload(schedule, config)
+        self.assertEqual(
+            payload["metadata"]["labels"]["demo.redhat.com/white-glove"], "false"
+        )
+
+    def test_white_glove_true_sets_label(self):
+        """White-glove=True sets label to 'true'."""
+        schedule = make_schedule(white_glove=True)
+        config = make_config(dry_run=True)
+        payload = build_resource_claim_payload(schedule, config)
+        self.assertEqual(
+            payload["metadata"]["labels"]["demo.redhat.com/white-glove"], "true"
+        )
+
+    def test_white_glove_threaded_via_payload(self):
+        """_white_glove key is set on payload for create_workshop_with_ui."""
+        schedule = make_schedule(white_glove=True)
+        config = make_config(dry_run=True)
+        payload = build_resource_claim_payload(schedule, config)
+        self.assertTrue(payload.get("_white_glove"))
+
+    def test_csv_missing_white_glove_defaults_false(self):
+        """CSV without White_Glove column still parses (backward compat)."""
+        schedules = read_csv_input(io.StringIO(BASIC_WORKSHOP_CSV))
+        self.assertFalse(schedules[0].white_glove)
+
+
+# ============================================================================
+# ASSET PASSWORD TESTS
+# ============================================================================
+
+class TestLoadAssetPasswords(unittest.TestCase):
+    """Tests for load_asset_passwords()."""
+
+    def test_valid_password_file(self):
+        """Loads CI->password mappings from valid CSV."""
+        csv_text = "CI,Password\nsome-ci,secret1\nother-ci,secret2\n"
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False, encoding="utf-8"
+        )
+        tmp.write(csv_text)
+        tmp.close()
+        try:
+            passwords = load_asset_passwords(tmp.name)
+            self.assertEqual(passwords, {"some-ci": "secret1", "other-ci": "secret2"})
+        finally:
+            os.unlink(tmp.name)
+
+    def test_missing_file_returns_empty(self):
+        """Returns empty dict for nonexistent file."""
+        passwords = load_asset_passwords("/nonexistent/path/passwords.csv")
+        self.assertEqual(passwords, {})
+
+    def test_empty_file_returns_empty(self):
+        """Returns empty dict for empty CSV."""
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False, encoding="utf-8"
+        )
+        tmp.write("")
+        tmp.close()
+        try:
+            passwords = load_asset_passwords(tmp.name)
+            self.assertEqual(passwords, {})
+        finally:
+            os.unlink(tmp.name)
+
+    def test_none_filepath_returns_empty(self):
+        """Returns empty dict for None filepath."""
+        passwords = load_asset_passwords(None)
+        self.assertEqual(passwords, {})
+
+
+class TestPerAssetPasswordOverride(unittest.TestCase):
+    """Tests for per-asset password override in create_multi_workshop."""
+
+    @patch("subprocess.run")
+    def test_asset_password_used_in_multi_workshop(self, mock_run):
+        """create_multi_workshop uses asset_passwords for matching CIs."""
+        mock_run.side_effect = make_oc_dispatcher()
+        schedule = make_schedule(
+            is_multi_asset=True,
+            asset_cis="ci-a,ci-b",
+            multi_workshop_name="test-pw-override",
+            provisioning_date="15/02/2026 11:00",
+            auto_stop="15/02/2026 19:00",
+            auto_destroy="17/02/2026 11:00",
+        )
+        config = make_config(dry_run=True)
+        asset_passwords = {"ci-a": "override-a"}
+
+        # Capture the payloads passed to create_workshop_with_ui
+        with patch("rhdp_flow.create_workshop_with_ui", wraps=create_workshop_with_ui) as mock_cwui:
+            create_multi_workshop(schedule, config, asset_passwords=asset_passwords)
+            # Check that the first asset got the overridden password
+            calls = mock_cwui.call_args_list
+            if calls:
+                first_payload = calls[0][0][2]  # Third positional arg is the payload
+                self.assertEqual(first_payload["spec"]["accessPassword"], "override-a")
+                # Second asset falls back to schedule password
+                if len(calls) > 1:
+                    second_payload = calls[1][0][2]
+                    self.assertEqual(second_payload["spec"]["accessPassword"], schedule.password)
 
 
 # ============================================================================

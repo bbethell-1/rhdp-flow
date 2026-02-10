@@ -58,6 +58,7 @@ class WorkshopSchedule:
     concurrency: int = 1  # Deployment concurrency (how many provisions deploy at once)
     count: int = 1  # Number of workshop instances to create
     aws_regions: str = ""  # Comma-separated AWS regions for multi-region provisioning
+    white_glove: bool = False  # White-glove engagement flag
 
 @dataclass
 class DeploymentResult:
@@ -292,6 +293,10 @@ def read_csv_input(filepath) -> List[WorkshopSchedule]:
                     count_str = row.get(header_map.get('count', 'Count'), '').strip()
                     aws_regions = row.get(header_map.get('aws_region', 'AWS_Region'), '').strip()
 
+                    # White-glove flag (optional, defaults to False)
+                    white_glove_str = row.get(header_map.get('white_glove', 'White_Glove'), '').strip()
+                    white_glove = white_glove_str.lower() in ['true', '1', 'yes', 'y'] if white_glove_str else False
+
                     try:
                         concurrency = int(concurrency_str) if concurrency_str else 1
                     except ValueError:
@@ -371,7 +376,8 @@ def read_csv_input(filepath) -> List[WorkshopSchedule]:
                         multi_workshop_name=multi_workshop_name,
                         concurrency=concurrency,
                         count=count,
-                        aws_regions=aws_regions
+                        aws_regions=aws_regions,
+                        white_glove=white_glove
                     )
                     
                     schedules.append(schedule)
@@ -396,6 +402,43 @@ def read_csv_input(filepath) -> List[WorkshopSchedule]:
     except Exception as e:
         logger.error(f"Error reading CSV file: {e}")
         raise
+
+
+def load_asset_passwords(filepath) -> Dict[str, str]:
+    """
+    Load per-asset passwords from a CSV file.
+
+    Expected CSV columns: CI, Password
+
+    Args:
+        filepath: Path to passwords CSV file
+
+    Returns:
+        Dict mapping CI to password. Empty dict if file not found.
+    """
+    if not filepath or not Path(filepath).exists():
+        return {}
+
+    passwords = {}
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            if not reader.fieldnames:
+                return {}
+            header_map = {h.lower(): h for h in reader.fieldnames}
+            ci_key = header_map.get('ci', 'CI')
+            pw_key = header_map.get('password', 'Password')
+            for row in reader:
+                ci = row.get(ci_key, '').strip()
+                pw = row.get(pw_key, '').strip()
+                if ci and pw:
+                    passwords[ci] = pw
+        if passwords:
+            logger.info(f"Loaded {len(passwords)} asset password(s) from {filepath}")
+    except Exception as e:
+        logger.warning(f"Could not load asset passwords from {filepath}: {e}")
+    return passwords
+
 
 def write_deployment_results(
     results: List[DeploymentResult],
@@ -525,7 +568,7 @@ def build_resource_claim_payload(
             "labels": {
                 "babylon.gpte.redhat.com/catalogItemName": schedule.ci,
                 "babylon.gpte.redhat.com/catalogItemNamespace": "babylon-catalog-prod",
-                "demo.redhat.com/white-glove": "false",
+                "demo.redhat.com/white-glove": "true" if schedule.white_glove else "false",
                 "rhdp-flow.gpte.redhat.com/scheduled": "true",
                 "rhdp-flow.gpte.redhat.com/scheduled-by": "rhdp-flow"
             }
@@ -553,6 +596,9 @@ def build_resource_claim_payload(
     if schedule.password:
         payload["spec"]["accessPassword"] = schedule.password
     
+    # Thread white-glove flag through payload for create_workshop_with_ui
+    payload["_white_glove"] = schedule.white_glove
+
     # If workshop interface is enabled, store flag and workshop name for later use
     # Note: enable_workshop_ui is not a valid ResourceClaim parameter
     # The UI will be enabled by patching the Workshop after it's created
@@ -890,7 +936,7 @@ def create_workshop_with_ui(
         workshop_metadata["labels"] = {
             "babylon.gpte.redhat.com/catalogItemName": ci,
             "babylon.gpte.redhat.com/catalogItemNamespace": "babylon-catalog-prod",
-            "demo.redhat.com/white-glove": "false"
+            "demo.redhat.com/white-glove": "true" if resourceclaim_payload.get('_white_glove', False) else "false"
         }
         
         # Build Workshop payload with UI enabled from the start
@@ -1387,7 +1433,8 @@ def get_catalog_item_info(ci: str, config: RHDPConfig) -> Dict[str, str]:
 
 def create_multi_workshop(
     schedule: WorkshopSchedule,
-    config: RHDPConfig
+    config: RHDPConfig,
+    asset_passwords: Optional[Dict[str, str]] = None
 ) -> Optional[str]:
     """
     Create a MultiWorkshop resource with multiple asset workshops.
@@ -1489,7 +1536,7 @@ def create_multi_workshop(
                     'lifespan': {
                         'end': end_iso
                     },
-                    'accessPassword': schedule.password
+                    'accessPassword': asset_passwords.get(asset_ci, schedule.password) if asset_passwords else schedule.password
                 },
                     'metadata': {
                     'annotations': {
@@ -1498,7 +1545,8 @@ def create_multi_workshop(
                         'demo.redhat.com/purpose': schedule.purpose,
                         'demo.redhat.com/purpose-activity': schedule.activity
                     }
-                }
+                },
+                '_white_glove': schedule.white_glove
             }
             
             # Create Workshop for this asset
@@ -1713,7 +1761,8 @@ def create_multi_workshop_from_group(
                     'demo.redhat.com/purpose': sched.purpose,
                     'demo.redhat.com/purpose-activity': sched.activity
                 }
-            }
+            },
+            '_white_glove': sched.white_glove
         }
 
         asset_workshop_name = create_workshop_with_ui(asset_workshop_prefix, sched.namespace, asset_payload, config)
@@ -3451,7 +3500,8 @@ def create_multi_region_workshop(
 
 def process_schedule(
     schedule: WorkshopSchedule,
-    config: RHDPConfig
+    config: RHDPConfig,
+    asset_passwords: Optional[Dict[str, str]] = None
 ) -> DeploymentResult:
     """
     Process a single workshop schedule.
@@ -3469,7 +3519,7 @@ def process_schedule(
         # Check if this is a multi-asset workshop
         if schedule.is_multi_asset:
             logger.info(f"Multi-asset workshop detected - creating MultiWorkshop with assets: {schedule.asset_cis}")
-            multi_workshop_name = create_multi_workshop(schedule, config)
+            multi_workshop_name = create_multi_workshop(schedule, config, asset_passwords=asset_passwords)
             
             if not multi_workshop_name:
                 return DeploymentResult(
@@ -3879,7 +3929,14 @@ def main():
     try:
         # Read input CSV
         schedules = read_csv_input(args.input_csv)
-        
+
+        # Auto-discover per-asset passwords file ({stem}_passwords.csv)
+        input_path = Path(args.input_csv)
+        passwords_path = input_path.parent / f"{input_path.stem}_passwords.csv"
+        asset_passwords = load_asset_passwords(str(passwords_path))
+        if asset_passwords:
+            logger.info(f"Loaded per-asset passwords from: {passwords_path}")
+
         # Filter by CI if specified
         if args.ci:
             schedules = [s for s in schedules if s.ci == args.ci]
@@ -3938,7 +3995,7 @@ def main():
 
         # Process each schedule (append to grouped results if any)
         for schedule in expanded_schedules:
-            result = process_schedule(schedule, config)
+            result = process_schedule(schedule, config, asset_passwords=asset_passwords)
             results.append(result)
 
             logger.info(
