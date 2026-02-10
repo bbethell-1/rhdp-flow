@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """
-RHDP-Flow: Red Hat Demo Platform Workshop Automation Tool (v2.0)
+RHDP-Flow: Red Hat Demo Platform Workshop Automation Tool
 Automates scheduling and deployment for RHDP workshops with safety features.
 
 This script uses oc commands directly (no API authentication needed if already logged in).
 """
 
-import copy
 import csv
-import io
 import json
 import logging
 import subprocess
@@ -37,6 +35,54 @@ logger = logging.getLogger('rhdp_flow')
 # DATA MODELS
 # ============================================================================
 
+def _should_include_users(schedule: "WorkshopSchedule") -> bool:
+    """True if we should set num_users/numberSeats (Users field is set and > 0)."""
+    return schedule.users is not None and schedule.users > 0
+
+
+def _effective_users(schedule: "WorkshopSchedule") -> Optional[int]:
+    """Return schedule user count when configured (> 0), else None (for QA: skip user check)."""
+    if schedule.users is not None and schedule.users > 0:
+        return schedule.users
+    return None
+
+
+def _expected_total_seats(schedule: "WorkshopSchedule") -> Optional[int]:
+    """Expected total seats for UI (Workshop Users Assigned denominator). Instances (e.g. 30) or Users when set."""
+    if getattr(schedule, 'instances', None) is not None and schedule.instances > 0:
+        return schedule.instances
+    if _should_include_users(schedule) and schedule.users is not None:
+        return schedule.users
+    return None
+
+
+def _provider_parameter_values(
+    schedule: "WorkshopSchedule", start_timestamp: str, stop_timestamp: str
+) -> Dict:
+    """Build provider parameterValues; include num_users only when Users is set and > 0."""
+    pv: Dict = {
+        "purpose": schedule.purpose,
+        "start_timestamp": start_timestamp,
+        "stop_timestamp": stop_timestamp,
+    }
+    if _should_include_users(schedule) and schedule.users is not None:
+        pv["num_users"] = schedule.users
+    return pv
+
+
+def _workshop_provision_parameters(param_values: Dict, resourceclaim_payload: Dict) -> Dict:
+    """Build WorkshopProvision parameters; include num_users only when present in payload."""
+    params: Dict = {
+        "purpose": param_values.get('purpose', 'QA'),
+        "purpose_activity": resourceclaim_payload['metadata']['annotations'].get('demo.redhat.com/purpose-activity', 'Admin'),
+        "purpose_explanation": None,
+        "salesforce_items": "[]"
+    }
+    if "num_users" in param_values:
+        params["num_users"] = param_values["num_users"]
+    return params
+
+
 @dataclass
 class WorkshopSchedule:
     """Represents a workshop schedule from input CSV"""
@@ -51,14 +97,12 @@ class WorkshopSchedule:
     provisioning_date: str  # Format: DD/MM/YYYY HH:MM
     auto_stop: str  # Format: DD/MM/YY HH:MM
     auto_destroy: str  # Format: DD/MM/YY HH:MM
-    users: Optional[int] = None
     is_multi_asset: bool = False  # True if this is a multi-asset workshop
     asset_cis: str = ""  # Comma-separated list of catalog items for multi-asset workshops (e.g., "ci1,ci2,ci3")
     multi_workshop_name: str = ""  # Optional custom name for multi-asset workshop (e.g., "automation-test" or "test-qvvdw")
-    concurrency: int = 1  # Deployment concurrency (how many provisions deploy at once)
-    count: int = 1  # Number of workshop instances to create
-    aws_regions: str = ""  # Comma-separated AWS regions for multi-region provisioning
-    white_glove: bool = False  # White-glove engagement flag
+    users: Optional[int] = None  # Optional; when omitted/empty we don't set num_users
+    instances: Optional[int] = None  # Optional; workshop instance/seat count for multi-asset (e.g. 30); used for numberSeats when users not set
+    concurrency: Optional[int] = None  # Optional; WorkshopProvision concurrency (default 1)
 
 @dataclass
 class DeploymentResult:
@@ -74,38 +118,6 @@ class DeploymentResult:
     auto_destroy: str
     timestamp: str
     error_message: str = ""
-    log_url: str = ""
-
-
-def _should_include_users(schedule: "WorkshopSchedule") -> bool:
-    """True if we should set num_users (Users field is set and > 0)."""
-    return schedule.users is not None and schedule.users > 0
-
-
-def _provider_parameter_values(schedule: "WorkshopSchedule", start_timestamp: str, stop_timestamp: str) -> dict:
-    """Build parameterValues dict, conditionally including num_users."""
-    pv = {
-        "purpose": schedule.purpose,
-        "start_timestamp": start_timestamp,
-        "stop_timestamp": stop_timestamp,
-    }
-    if _should_include_users(schedule):
-        pv["num_users"] = schedule.users
-    return pv
-
-
-def _workshop_provision_parameters(param_values: dict, resourceclaim_payload: dict) -> dict:
-    """Build WorkshopProvision parameters, conditionally including num_users."""
-    params = {
-        "purpose": param_values.get('purpose', 'QA'),
-        "purpose_activity": resourceclaim_payload['metadata']['annotations'].get('demo.redhat.com/purpose-activity', 'Admin'),
-        "purpose_explanation": None,
-        "salesforce_items": "[]",
-    }
-    if "num_users" in param_values:
-        params["num_users"] = param_values["num_users"]
-    return params
-
 
 # ============================================================================
 # CONFIGURATION CLASS
@@ -218,10 +230,10 @@ def calculate_duration(start: datetime, end: datetime) -> str:
 # CSV INPUT/OUTPUT HANDLERS
 # ============================================================================
 
-def read_csv_input(filepath) -> List[WorkshopSchedule]:
+def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
     """
-    Read workshop schedules from CSV file or StringIO object.
-
+    Read workshop schedules from CSV file.
+    
     Expected CSV headers:
     - CI Name
     - CI (Catalog Item ID)
@@ -234,13 +246,13 @@ def read_csv_input(filepath) -> List[WorkshopSchedule]:
     - Provisioning Date (or Provisioning Date (UTC))
     - Auto-stop (or Auto-stop (UTC))
     - Auto-destroy (or Auto-destroy (UTC))
-
+    
     Args:
-        filepath: Path to input CSV file, or an io.StringIO object
-
+        filepath: Path to input CSV file
+        
     Returns:
         List of WorkshopSchedule objects
-
+        
     Raises:
         FileNotFoundError: If CSV file doesn't exist
         ValueError: If CSV is malformed or missing required headers
@@ -248,18 +260,14 @@ def read_csv_input(filepath) -> List[WorkshopSchedule]:
     schedules = []
     # Support both old and new header formats (with/without UTC suffix)
     required_headers = {
-        'CI Name', 'CI', 'Namespace', 'Users',
+        'CI Name', 'CI', 'Namespace', 'Users', 
         'Enable_workshop_interface', 'Password',
         'Provisioning Date', 'Auto-stop', 'Auto-destroy',
         'Provisioning Date (UTC)', 'Auto-stop (UTC)', 'Auto-destroy (UTC)'
     }
-
+    
     try:
-        if isinstance(filepath, io.StringIO):
-            f_ctx = filepath
-        else:
-            f_ctx = open(filepath, 'r', encoding='utf-8')
-        with f_ctx as f:
+        with open(filepath, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             
             if not reader.fieldnames:
@@ -317,28 +325,9 @@ def read_csv_input(filepath) -> List[WorkshopSchedule]:
                     is_multi_asset_str = row.get(header_map.get('multi_asset', 'Multi_Asset'), '').strip()
                     asset_cis = row.get(header_map.get('asset_cis', 'Asset_CIs'), '').strip()
                     multi_workshop_name = row.get(header_map.get('multi_workshop_name', 'Multi_Workshop_Name'), '').strip()
-                    is_multi_asset = is_multi_asset_str.lower() in ['true', '1', 'yes', 'y'] if is_multi_asset_str else False
-
-                    # New optional fields: concurrency, count, aws_regions
+                    instances_str = row.get(header_map.get('instances', 'Instances'), '').strip()
                     concurrency_str = row.get(header_map.get('concurrency', 'Concurrency'), '').strip()
-                    count_str = row.get(header_map.get('count', 'Count'), '').strip()
-                    aws_regions = row.get(header_map.get('aws_region', 'AWS_Region'), '').strip()
-
-                    # White-glove flag (optional, defaults to False)
-                    white_glove_str = row.get(header_map.get('white_glove', 'White_Glove'), '').strip()
-                    white_glove = white_glove_str.lower() in ['true', '1', 'yes', 'y'] if white_glove_str else False
-
-                    try:
-                        concurrency = int(concurrency_str) if concurrency_str else 1
-                    except ValueError:
-                        logger.warning(f"Row {row_num}: Invalid concurrency value '{concurrency_str}', defaulting to 1")
-                        concurrency = 1
-
-                    try:
-                        count = int(count_str) if count_str else 1
-                    except ValueError:
-                        logger.warning(f"Row {row_num}: Invalid count value '{count_str}', defaulting to 1")
-                        count = 1
+                    is_multi_asset = is_multi_asset_str.lower() in ['true', '1', 'yes', 'y'] if is_multi_asset_str else False
                     
                     # Support both old and new header formats (with/without UTC suffix)
                     # Try new format first, fall back to old format
@@ -379,15 +368,29 @@ def read_csv_input(filepath) -> List[WorkshopSchedule]:
                         logger.warning(f"Row {row_num}: Skipping incomplete record")
                         continue
                     
-                    # Parse users
+                    # Parse users (optional: empty = no override, use effective default when creating)
+                    users: Optional[int] = None
                     if users_str:
                         try:
                             users = int(users_str)
                         except ValueError:
-                            logger.warning(f"Row {row_num}: Invalid users value '{users_str}', defaulting to None")
+                            logger.warning(f"Row {row_num}: Invalid users value '{users_str}', treating as unspecified")
                             users = None
-                    else:
-                        users = None
+                    
+                    # Parse optional Instances (workshop instance/seat count for multi-asset)
+                    instances: Optional[int] = None
+                    if instances_str:
+                        try:
+                            instances = int(instances_str)
+                        except ValueError:
+                            logger.warning(f"Row {row_num}: Invalid instances value '{instances_str}', treating as unspecified")
+                    # Parse optional Concurrency (WorkshopProvision concurrency)
+                    concurrency: Optional[int] = None
+                    if concurrency_str:
+                        try:
+                            concurrency = int(concurrency_str)
+                        except ValueError:
+                            logger.warning(f"Row {row_num}: Invalid concurrency value '{concurrency_str}', treating as unspecified")
                     
                     # Parse boolean
                     enable_workshop_interface = enable_interface.lower() in ['true', '1', 'yes', 'y']
@@ -408,10 +411,8 @@ def read_csv_input(filepath) -> List[WorkshopSchedule]:
                         is_multi_asset=is_multi_asset,
                         asset_cis=asset_cis,
                         multi_workshop_name=multi_workshop_name,
-                        concurrency=concurrency,
-                        count=count,
-                        aws_regions=aws_regions,
-                        white_glove=white_glove
+                        instances=instances,
+                        concurrency=concurrency
                     )
                     
                     schedules.append(schedule)
@@ -438,40 +439,121 @@ def read_csv_input(filepath) -> List[WorkshopSchedule]:
         raise
 
 
-def load_asset_passwords(filepath) -> Dict[str, str]:
+def load_asset_passwords(filepath: str) -> Dict[str, str]:
     """
-    Load per-asset passwords from a CSV file.
-
-    Expected CSV columns: CI, Password
-
-    Args:
-        filepath: Path to passwords CSV file
-
-    Returns:
-        Dict mapping CI to password. Empty dict if file not found.
+    Load per-CI passwords from a CSV file (CI, Password columns).
+    Used for multi-asset workshops so each asset can have its own password.
+    Returns dict mapping CI -> password (e.g. "zt-ansiblebu.ansible-network-automation-basics-lab-2.prod" -> "facts1").
     """
-    if not filepath or not Path(filepath).exists():
-        return {}
-
-    passwords = {}
+    result: Dict[str, str] = {}
+    path = Path(filepath)
+    if not path.exists():
+        return result
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(path, newline='', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             if not reader.fieldnames:
-                return {}
-            header_map = {h.lower(): h for h in reader.fieldnames}
+                return result
+            header_map = {h.strip().lower(): h for h in reader.fieldnames}
             ci_key = header_map.get('ci', 'CI')
             pw_key = header_map.get('password', 'Password')
             for row in reader:
                 ci = row.get(ci_key, '').strip()
                 pw = row.get(pw_key, '').strip()
                 if ci and pw:
-                    passwords[ci] = pw
-        if passwords:
-            logger.info(f"Loaded {len(passwords)} asset password(s) from {filepath}")
+                    result[ci] = pw
+        if result:
+            logger.info(f"Loaded {len(result)} per-asset passwords from {path.name}")
     except Exception as e:
         logger.warning(f"Could not load asset passwords from {filepath}: {e}")
-    return passwords
+    return result
+
+
+def dry_run_validate_schedules(
+    schedules: List[WorkshopSchedule],
+    asset_passwords: Dict[str, str],
+    asset_num_users: Dict[str, int],
+    input_path: Path,
+    config: RHDPConfig,
+) -> None:
+    """
+    When dry-run: validate schedules, check num_users logic per asset, optionally check cluster.
+    Log warnings for: missing passwords for multi-asset, assets with no num_users (flag them).
+    """
+    logger.info("")
+    logger.info("[DRY-RUN] Validation and num_users check")
+    logger.info("=" * 70)
+    for schedule in schedules:
+        # Validate dates
+        prov = parse_date_time(schedule.provisioning_date)
+        stop = parse_date_time(schedule.auto_stop)
+        destroy = parse_date_time(schedule.auto_destroy)
+        if not prov:
+            logger.warning(f"  ⚠️  {schedule.ci_name}: Could not parse provisioning date '{schedule.provisioning_date}'")
+        if schedule.auto_stop and not stop:
+            logger.warning(f"  ⚠️  {schedule.ci_name}: Could not parse auto-stop '{schedule.auto_stop}'")
+        if schedule.auto_destroy and not destroy:
+            logger.warning(f"  ⚠️  {schedule.ci_name}: Could not parse auto-destroy '{schedule.auto_destroy}'")
+        if schedule.concurrency is not None and (schedule.concurrency < 1 or schedule.concurrency > 100):
+            logger.warning(f"  ⚠️  {schedule.ci_name}: Concurrency {schedule.concurrency} may be invalid")
+        if not schedule.is_multi_asset:
+            continue
+        # Multi-asset: list assets and num_users / password
+        asset_ci_list = [c.strip() for c in schedule.asset_cis.split(",") if c.strip()]
+        logger.info(f"  Multi-asset: {schedule.ci_name} ({len(asset_ci_list)} assets)")
+        for asset_ci in asset_ci_list:
+            has_num_users = (asset_num_users and asset_ci in asset_num_users) or (
+                _should_include_users(schedule) and schedule.users is not None
+            )
+            num_users_val = (asset_num_users or {}).get(asset_ci) if asset_num_users else (schedule.users if _should_include_users(schedule) else None)
+            has_password = (asset_ci in asset_passwords) or bool(schedule.password)
+            # Optional: check cluster if catalog item expects num_users
+            ci_expects_num_users = get_catalog_item_has_num_users(asset_ci, config)
+            if has_num_users:
+                logger.info(f"    • {asset_ci}: num_users={num_users_val}, password={'set' if has_password else 'MISSING'}")
+            else:
+                logger.info(f"    • {asset_ci}: no num_users (uses multi-workshop Instances only), password={'set' if has_password else 'MISSING'}")
+                if ci_expects_num_users is True:
+                    logger.warning(f"      ⚠️  FLAG: Catalog item in cluster expects num_users but schedule/sheet does not set it (ordering may use default or fail)")
+                elif ci_expects_num_users is False and asset_num_users and asset_ci in asset_num_users:
+                    logger.warning(f"      ⚠️  FLAG: asset_users sheet sets num_users for this CI but catalog item may not use it")
+            if not has_password:
+                logger.warning(f"      ⚠️  FLAG: No password for this asset (main CSV or _passwords.csv)")
+        logger.info("")
+    logger.info("=" * 70)
+
+
+def load_asset_num_users(filepath: str) -> Dict[str, int]:
+    """
+    Load per-CI num_users from a CSV file (CI, num_users or CI, Users columns).
+    Used for multi-asset workshops when only some assets should have num_users set.
+    Returns dict mapping CI -> num_users (e.g. "agd-v2.aap-multiinstance-workshop.event" -> 30).
+    """
+    result: Dict[str, int] = {}
+    path = Path(filepath)
+    if not path.exists():
+        return result
+    try:
+        with open(path, newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            if not reader.fieldnames:
+                return result
+            header_map = {h.strip().lower(): h for h in reader.fieldnames}
+            ci_key = header_map.get('ci', 'CI')
+            users_key = header_map.get('num_users', header_map.get('users', 'num_users'))
+            for row in reader:
+                ci = row.get(ci_key, '').strip()
+                users_str = row.get(users_key, '').strip()
+                if ci and users_str:
+                    try:
+                        result[ci] = int(users_str)
+                    except ValueError:
+                        pass
+        if result:
+            logger.info(f"Loaded {len(result)} per-asset num_users from {path.name}")
+    except Exception as e:
+        logger.warning(f"Could not load asset num_users from {filepath}: {e}")
+    return result
 
 
 def write_deployment_results(
@@ -493,7 +575,7 @@ def write_deployment_results(
         fieldnames = [
             'ci_name', 'ci', 'namespace', 'guid', 'url', 'status',
             'provisioning_date', 'auto_stop', 'auto_destroy',
-            'timestamp', 'error_message', 'log_url'
+            'timestamp', 'error_message'
         ]
         
         with open(output_file, 'w', newline='', encoding='utf-8') as f:
@@ -515,34 +597,18 @@ def write_deployment_results(
 
 def build_resource_claim_payload(
     schedule: WorkshopSchedule,
-    config: 'RHDPConfig',
     requester_email: str = ""
 ) -> Dict:
     """
     Build JSON payload for ResourceClaim based on actual cluster structure.
-
+    
     Args:
         schedule: WorkshopSchedule object
-        config: RHDPConfig object (used for catalog display name lookup)
         requester_email: Requester email (extracted from namespace if not provided)
-
+        
     Returns:
         Dictionary representing the ResourceClaim payload
     """
-    # Look up the real catalog display name
-    catalog_display_name = schedule.ci_name  # fallback
-    if config.dry_run:
-        logger.info(f"Dry-run mode: skipping catalog lookup for display name, using ci_name: {schedule.ci_name}")
-    else:
-        try:
-            catalog_info = get_catalog_item_info(schedule.ci, config)
-            if catalog_info.get('displayName'):
-                catalog_display_name = catalog_info['displayName']
-                logger.info(f"Resolved catalog display name: {catalog_display_name}")
-            else:
-                logger.warning(f"Catalog lookup returned no displayName for {schedule.ci}, falling back to ci_name: {schedule.ci_name}")
-        except Exception as e:
-            logger.warning(f"Failed to look up catalog display name for {schedule.ci}: {e}, falling back to ci_name: {schedule.ci_name}")
     # Extract email from namespace if not provided
     if not requester_email:
         # Namespace format: user-bbethell-redhat-com -> bbethell@redhat.com
@@ -590,7 +656,7 @@ def build_resource_claim_payload(
             "namespace": schedule.namespace,
             "annotations": {
                 "babylon.gpte.redhat.com/catalogDisplayName": "RHDP",
-                "babylon.gpte.redhat.com/catalogItemDisplayName": catalog_display_name,
+                "babylon.gpte.redhat.com/catalogItemDisplayName": schedule.ci_name,
                 "babylon.gpte.redhat.com/notifier": "disable",
                 "demo.redhat.com/orderedBy": requester_email,
                 "demo.redhat.com/purpose": schedule.purpose,
@@ -602,7 +668,7 @@ def build_resource_claim_payload(
             "labels": {
                 "babylon.gpte.redhat.com/catalogItemName": schedule.ci,
                 "babylon.gpte.redhat.com/catalogItemNamespace": "babylon-catalog-prod",
-                "demo.redhat.com/white-glove": "true" if schedule.white_glove else "false",
+                "demo.redhat.com/white-glove": "false",
                 "rhdp-flow.gpte.redhat.com/scheduled": "true",
                 "rhdp-flow.gpte.redhat.com/scheduled-by": "rhdp-flow"
             }
@@ -625,9 +691,6 @@ def build_resource_claim_payload(
     if schedule.password:
         payload["spec"]["accessPassword"] = schedule.password
     
-    # Thread white-glove flag through payload for create_workshop_with_ui
-    payload["_white_glove"] = schedule.white_glove
-
     # If workshop interface is enabled, store flag and workshop name for later use
     # Note: enable_workshop_ui is not a valid ResourceClaim parameter
     # The UI will be enabled by patching the Workshop after it's created
@@ -928,6 +991,18 @@ def create_workshop_with_ui(
     Returns:
         Workshop name if successful, None otherwise
     """
+    if config.dry_run:
+        ci = resourceclaim_payload['spec']['provider']['name']
+        pv = resourceclaim_payload['spec']['provider'].get('parameterValues', {})
+        has_num_users = 'num_users' in pv
+        logger.info(f"[DRY-RUN] Would create Workshop for {ci} (num_users in payload: {has_num_users})")
+        print("\n" + "=" * 70)
+        print("Workshop payload (spec only):")
+        print("=" * 70)
+        print(json.dumps(resourceclaim_payload.get('spec', resourceclaim_payload), indent=2))
+        print("=" * 70 + "\n")
+        prefix = workshop_name_or_prefix.rstrip('-') if workshop_name_or_prefix.endswith('-') else workshop_name_or_prefix
+        return f"{prefix}-dryrun-{int(time.time())}"
     try:
         # Extract information from ResourceClaim payload
         ci = resourceclaim_payload['spec']['provider']['name']
@@ -965,7 +1040,7 @@ def create_workshop_with_ui(
         workshop_metadata["labels"] = {
             "babylon.gpte.redhat.com/catalogItemName": ci,
             "babylon.gpte.redhat.com/catalogItemNamespace": "babylon-catalog-prod",
-            "demo.redhat.com/white-glove": "true" if resourceclaim_payload.get('_white_glove', False) else "false"
+            "demo.redhat.com/white-glove": "false"
         }
         
         # Build Workshop payload with UI enabled from the start
@@ -999,29 +1074,19 @@ def create_workshop_with_ui(
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp_file:
             json.dump(workshop, tmp_file, indent=2)
             tmp_file_path = tmp_file.name
-
+        
         try:
-            # Dry-run: print payload and return a mock name
-            if config.dry_run:
-                logger.info("=" * 70)
-                logger.info(f"[DRY-RUN] Workshop payload ({workshop_name_or_prefix}):")
-                logger.info("=" * 70)
-                print(json.dumps(workshop, indent=2))
-                logger.info("=" * 70)
-                mock_name = f"{workshop_name_or_prefix}dryrun-{int(time.time())}" if use_generate_name else expected_workshop_name
-                return mock_name
-
             cmd = [
                 config.oc_command,
                 "create",
                 "-f", tmp_file_path,
                 "-n", namespace
             ]
-
+            
             env = os.environ.copy()
             if config.kubeconfig_path:
                 env['KUBECONFIG'] = config.kubeconfig_path
-
+            
             logger.debug(f"Creating Workshop: {workshop_name_or_prefix} with UI enabled")
             result = subprocess.run(
                 cmd,
@@ -1091,28 +1156,25 @@ def create_workshop_provision(
     resourceclaim_payload: Dict,
     config: RHDPConfig,
     enable_workshop_ui: bool = True,
-    concurrency: int = 1,
-    count: int = 0,
-    provision_name_suffix: str = "",
-    extra_parameters: Optional[Dict] = None
+    concurrency: Optional[int] = None
 ) -> Optional[str]:
     """
     Create WorkshopProvision to enable workshop UI.
-
+    
     Args:
         workshop_name: Name of the Workshop (should already exist)
         namespace: Kubernetes namespace
         resourceclaim_payload: Original ResourceClaim payload
         config: RHDPConfig object
         enable_workshop_ui: Whether to enable the workshop user interface
-        concurrency: Deployment concurrency (how many provisions deploy simultaneously)
-        count: Override for user/provision count (0 = use payload value)
-        provision_name_suffix: Optional suffix for provision name (e.g., "-us-east-1")
-        extra_parameters: Optional extra parameters to merge into spec.parameters
-
+        
     Returns:
         WorkshopProvision name or None
     """
+    if config.dry_run:
+        concurrency_val = concurrency if concurrency is not None else 1
+        logger.info(f"[DRY-RUN] Would create WorkshopProvision: {workshop_name} (concurrency={concurrency_val})")
+        return workshop_name
     try:
         # Extract information from ResourceClaim payload
         ci = resourceclaim_payload['spec']['provider']['name']
@@ -1122,18 +1184,12 @@ def create_workshop_provision(
         # Get catalog namespace from provider (default to babylon-catalog-prod)
         catalog_namespace = resourceclaim_payload['spec']['provider'].get('namespace', 'babylon-catalog-prod')
         
-        # Determine provision name (with optional suffix for multi-region)
-        provision_name = f"{workshop_name}{provision_name_suffix}" if provision_name_suffix else workshop_name
-
-        # Determine count: use override if provided, otherwise from payload
-        effective_count = count if count > 0 else param_values.get('num_users', 0)
-
         # Build WorkshopProvision payload
         workshop_provision = {
             "apiVersion": "babylon.gpte.redhat.com/v1",
             "kind": "WorkshopProvision",
             "metadata": {
-                "name": provision_name,
+                "name": workshop_name,
                 "namespace": namespace,
                 "labels": {
                     "babylon.gpte.redhat.com/catalogItemName": ci,
@@ -1150,8 +1206,8 @@ def create_workshop_provision(
                     "namespace": catalog_namespace
                 },
                 "workshopName": workshop_name,
-                "count": effective_count,
-                "concurrency": concurrency,
+                "count": 1,
+                "concurrency": concurrency if concurrency is not None else 1,
                 "enableResourcePools": False,
                 "actionSchedule": {
                     "start": param_values.get('start_timestamp', ''),
@@ -1166,22 +1222,13 @@ def create_workshop_provision(
                 "startDelay": 30
             }
         }
-
-        # Merge extra parameters (e.g., aws_region for multi-region)
-        if extra_parameters:
-            workshop_provision["spec"]["parameters"].update(extra_parameters)
-
+        
         # Create WorkshopProvision
-        if config.dry_run:
-            logger.info(f"[DRY-RUN] WorkshopProvision payload ({provision_name}):")
-            print(json.dumps(workshop_provision, indent=2))
-            return provision_name
-
         import tempfile
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp_file:
             json.dump(workshop_provision, tmp_file, indent=2)
             tmp_file_path = tmp_file.name
-
+        
         try:
             cmd = [
                 config.oc_command,
@@ -1189,11 +1236,11 @@ def create_workshop_provision(
                 "-f", tmp_file_path,
                 "-n", namespace
             ]
-
+            
             env = os.environ.copy()
             if config.kubeconfig_path:
                 env['KUBECONFIG'] = config.kubeconfig_path
-
+            
             logger.debug(f"Creating WorkshopProvision: {workshop_name}")
             result = subprocess.run(
                 cmd,
@@ -1377,6 +1424,44 @@ def wait_for_workshop_id(workshop_name: str, namespace: str, config: RHDPConfig,
     
     return None
 
+def get_catalog_item_has_num_users(ci: str, config: RHDPConfig) -> Optional[bool]:
+    """
+    Check if the catalog item in the cluster expects a num_users parameter (for dry-run validation).
+    Returns True if CI has num_users, False if not, None if cannot determine (e.g. not connected).
+    """
+    try:
+        catalog_namespace = "babylon-catalog-event" if ci.endswith(".event") else "babylon-catalog-prod"
+        cmd = [
+            config.oc_command,
+            "get", "catalogitem", ci,
+            "-n", catalog_namespace,
+            "-o", "json"
+        ]
+        env = os.environ.copy()
+        if config.kubeconfig_path:
+            env['KUBECONFIG'] = config.kubeconfig_path
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+        if result.returncode != 0:
+            return None
+        data = json.loads(result.stdout)
+        # Common shapes: spec.parameters[].name, spec.providerSpec.parameterDefinitions, or provider template
+        spec = data.get("spec", {})
+        params = spec.get("parameters", [])
+        if isinstance(params, list):
+            for p in params:
+                name = p.get("name") if isinstance(p, dict) else p
+                if name == "num_users":
+                    return True
+        param_defs = spec.get("parameterDefinitions", []) or spec.get("providerSpec", {}).get("parameterDefinitions", [])
+        for p in param_defs:
+            name = p.get("name") if isinstance(p, dict) else p
+            if name == "num_users":
+                return True
+        return False
+    except Exception:
+        return None
+
+
 def get_catalog_item_info(ci: str, config: RHDPConfig) -> Dict[str, str]:
     """
     Get catalog item information (namespace, displayName) from the catalog.
@@ -1457,7 +1542,8 @@ def get_catalog_item_info(ci: str, config: RHDPConfig) -> Dict[str, str]:
 def create_multi_workshop(
     schedule: WorkshopSchedule,
     config: RHDPConfig,
-    asset_passwords: Optional[Dict[str, str]] = None
+    asset_passwords: Optional[Dict[str, str]] = None,
+    asset_num_users: Optional[Dict[str, int]] = None
 ) -> Optional[str]:
     """
     Create a MultiWorkshop resource with multiple asset workshops.
@@ -1478,9 +1564,54 @@ def create_multi_workshop(
         logger.error("create_multi_workshop called but is_multi_asset is False or asset_cis is empty")
         return None
     
+    # Parse asset CIs (comma-separated)
+    asset_ci_list = [ci.strip() for ci in schedule.asset_cis.split(',') if ci.strip()]
+    
+    if config.dry_run:
+        # Dry-run: report what would be created, show one sample payload, no oc create
+        logger.info("[DRY-RUN] Multi-workshop would create the following:")
+        logger.info(f"  Multi-workshop name: {schedule.multi_workshop_name or '(generated)'}")
+        logger.info(f"  Instances (numberSeats): {schedule.instances if (schedule.instances is not None and schedule.instances > 0) else schedule.users if _should_include_users(schedule) else 'not set'}")
+        logger.info(f"  Concurrency: {schedule.concurrency if schedule.concurrency is not None else 1}")
+        for asset_ci in asset_ci_list:
+            has_num = (asset_num_users and asset_ci in asset_num_users) or (_should_include_users(schedule) and schedule.users is not None)
+            val = (asset_num_users or {}).get(asset_ci) if asset_num_users else (schedule.users if _should_include_users(schedule) else None)
+            pw = "set" if ((asset_passwords or {}).get(asset_ci) or schedule.password) else "MISSING"
+            logger.info(f"  Asset: {asset_ci}  num_users={'yes (' + str(val) + ')' if has_num else 'no'}  password={pw}")
+        # Build and print one sample asset payload (first asset)
+        if asset_ci_list:
+            start_dt = parse_date_time(schedule.provisioning_date)
+            end_dt = parse_date_time(schedule.auto_destroy)
+            if start_dt and end_dt:
+                start_iso = format_iso8601(start_dt)
+                end_iso = format_iso8601(end_dt)
+                sample_ci = asset_ci_list[0]
+                catalog_info = get_catalog_item_info(sample_ci, config)
+                catalog_ns = catalog_info.get('namespace', 'babylon-catalog-prod')
+                pv: Dict = {
+                    'start_timestamp': start_iso,
+                    'stop_timestamp': format_iso8601(parse_date_time(schedule.auto_stop)) if schedule.auto_stop else end_iso,
+                }
+                if asset_num_users and sample_ci in asset_num_users:
+                    pv['num_users'] = asset_num_users[sample_ci]
+                elif _should_include_users(schedule) and schedule.users is not None:
+                    pv['num_users'] = schedule.users
+                sample_payload = {
+                    'spec': {
+                        'provider': {'name': sample_ci, 'namespace': catalog_ns, 'parameterValues': pv},
+                        'lifespan': {'end': end_iso},
+                        'accessPassword': (asset_passwords or {}).get(sample_ci, schedule.password) or schedule.password,
+                    },
+                }
+                logger.info("[DRY-RUN] Sample asset payload (first asset):")
+                print("\n" + "=" * 70)
+                print(json.dumps(sample_payload, indent=2))
+                print("=" * 70 + "\n")
+        mock_name = schedule.multi_workshop_name or "dryrun-multi"
+        logger.info(f"[DRY-RUN] Would create MultiWorkshop and {len(asset_ci_list)} asset workshops (no resources created)")
+        return mock_name
+    
     try:
-        # Parse asset CIs (comma-separated)
-        asset_ci_list = [ci.strip() for ci in schedule.asset_cis.split(',') if ci.strip()]
         if not asset_ci_list:
             logger.error("No asset CIs provided for multi-asset workshop")
             return None
@@ -1545,31 +1676,35 @@ def create_multi_workshop(
             asset_workshop_prefix = f"{multi_workshop_name}-{asset_ci_safe}-"
             
             # Build a minimal ResourceClaim payload for this asset
+            asset_param_values: Dict = {
+                'start_timestamp': start_iso,
+                'stop_timestamp': format_iso8601(parse_date_time(schedule.auto_stop)) if schedule.auto_stop else end_iso,
+            }
+            # Per-asset num_users from sheet (optional) overrides schedule-level users
+            if asset_num_users and asset_ci in asset_num_users:
+                asset_param_values['num_users'] = asset_num_users[asset_ci]
+            elif _should_include_users(schedule) and schedule.users is not None:
+                asset_param_values['num_users'] = schedule.users
             asset_payload = {
                 'spec': {
                     'provider': {
                         'name': asset_ci,
                         'namespace': catalog_namespace,
-                        'parameterValues': _provider_parameter_values(
-                            schedule,
-                            start_iso,
-                            format_iso8601(parse_date_time(schedule.auto_stop)) if schedule.auto_stop else end_iso
-                        )
+                        'parameterValues': asset_param_values
                     },
                     'lifespan': {
                         'end': end_iso
                     },
-                    'accessPassword': asset_passwords.get(asset_ci, schedule.password) if asset_passwords else schedule.password
+                    'accessPassword': (asset_passwords or {}).get(asset_ci, schedule.password) or schedule.password
                 },
-                    'metadata': {
+                'metadata': {
                     'annotations': {
                         'babylon.gpte.redhat.com/catalogItemDisplayName': display_name,
                         'demo.redhat.com/requester': schedule.namespace.replace('user-', '').replace('-redhat-com', '@redhat.com'),
                         'demo.redhat.com/purpose': schedule.purpose,
                         'demo.redhat.com/purpose-activity': schedule.activity
                     }
-                },
-                '_white_glove': schedule.white_glove
+                }
             }
             
             # Create Workshop for this asset
@@ -1581,7 +1716,7 @@ def create_multi_workshop(
             
             # Create WorkshopProvision to manage the Workshop and provision seats
             logger.info(f"Creating WorkshopProvision for asset workshop '{asset_workshop_name}'...")
-            create_workshop_provision(asset_workshop_name, schedule.namespace, asset_payload, config, enable_workshop_ui=False)
+            create_workshop_provision(asset_workshop_name, schedule.namespace, asset_payload, config, enable_workshop_ui=False, concurrency=schedule.concurrency)
             
             created_workshops.append((asset_ci, asset_workshop_name, catalog_namespace, display_name))
             logger.info(f"✅ Created Workshop '{asset_workshop_name}' with WorkshopProvision for asset {asset_ci}")
@@ -1590,34 +1725,23 @@ def create_multi_workshop(
             logger.error("No workshops were created for multi-asset workshop")
             return None
         
-        # Step 2: Wait for all workshops to get IDs (skip in dry-run)
-        if config.dry_run:
-            for asset_ci, workshop_name, catalog_ns, display_name in created_workshops:
+        # Step 2: Wait for all workshops to get IDs
+        logger.info("Waiting for all asset workshops to be ready...")
+        for asset_ci, workshop_name, catalog_ns, display_name in created_workshops:
+            workshop_id = wait_for_workshop_id(workshop_name, schedule.namespace, config, max_wait=120)
+            
+            if workshop_id:
                 assets.append({
                     'displayName': display_name,
                     'key': asset_ci,
                     'name': workshop_name,
                     'namespace': catalog_ns,
                     'type': 'Workshop',
-                    'workshopId': f"dryrun-{workshop_name}"
+                    'workshopId': workshop_id
                 })
-        else:
-            logger.info("Waiting for all asset workshops to be ready...")
-            for asset_ci, workshop_name, catalog_ns, display_name in created_workshops:
-                workshop_id = wait_for_workshop_id(workshop_name, schedule.namespace, config, max_wait=120)
-
-                if workshop_id:
-                    assets.append({
-                        'displayName': display_name,
-                        'key': asset_ci,
-                        'name': workshop_name,
-                        'namespace': catalog_ns,
-                        'type': 'Workshop',
-                        'workshopId': workshop_id
-                    })
-                    logger.info(f"Asset {asset_ci} ready with ID: {workshop_id}")
-                else:
-                    logger.warning(f"Asset {asset_ci} (Workshop {workshop_name}) did not get an ID, skipping...")
+                logger.info(f"✅ Asset {asset_ci} ready with ID: {workshop_id}")
+            else:
+                logger.warning(f"⚠️  Asset {asset_ci} (Workshop {workshop_name}) did not get an ID, skipping...")
         
         if not assets:
             logger.error("No assets with valid workshopIds for multi-asset workshop")
@@ -1641,24 +1765,23 @@ def create_multi_workshop(
                 "displayName": schedule.workshop_name or "automation",  # Display name for the multi-workshop
                 "endDate": end_iso,
                 "name": "automation",  # Event name (matches the pattern from example: bbethell-p5djq has spec.name: bbethell)
-                "numberSeats": schedule.users,
                 "purpose": schedule.purpose,
                 "purpose-activity": schedule.activity,
                 "startDate": start_iso
             }
         }
+        # Set numberSeats from Users (if set) or from Instances (e.g. 30 workshop instances)
+        if _should_include_users(schedule) and schedule.users is not None:
+            multi_workshop["spec"]["numberSeats"] = schedule.users
+        elif getattr(schedule, 'instances', None) is not None and schedule.instances > 0:
+            multi_workshop["spec"]["numberSeats"] = schedule.instances
         
         # Create MultiWorkshop
-        if config.dry_run:
-            logger.info(f"[DRY-RUN] MultiWorkshop payload ({multi_workshop_name}):")
-            print(json.dumps(multi_workshop, indent=2))
-            return multi_workshop_name
-
         import tempfile
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp_file:
             json.dump(multi_workshop, tmp_file, indent=2)
             tmp_file_path = tmp_file.name
-
+        
         try:
             cmd = [
                 config.oc_command,
@@ -1666,11 +1789,11 @@ def create_multi_workshop(
                 "-f", tmp_file_path,
                 "-n", schedule.namespace
             ]
-
+            
             env = os.environ.copy()
             if config.kubeconfig_path:
                 env['KUBECONFIG'] = config.kubeconfig_path
-
+            
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -1701,195 +1824,6 @@ def create_multi_workshop(
         import traceback
         logger.debug(traceback.format_exc())
         return None
-
-def create_multi_workshop_from_group(
-    schedules_group: List[WorkshopSchedule],
-    config: RHDPConfig
-) -> Optional[str]:
-    """
-    Create a MultiWorkshop from grouped rows sharing the same Multi_Workshop_Name.
-    Each row in the group becomes its own asset with its own CI and password.
-
-    Args:
-        schedules_group: List of WorkshopSchedule objects sharing the same multi_workshop_name
-        config: RHDPConfig object
-
-    Returns:
-        MultiWorkshop name if successful, None otherwise
-    """
-    if not schedules_group:
-        return None
-
-    # Use the first schedule for shared fields (namespace, dates, users, etc.)
-    first = schedules_group[0]
-    multi_workshop_name = first.multi_workshop_name.lower().replace(' ', '-').replace('_', '-')
-    import re
-    multi_workshop_name = re.sub(r'[^a-z0-9-]', '', multi_workshop_name)
-
-    logger.info(f"Creating grouped multi-asset workshop '{multi_workshop_name}' with {len(schedules_group)} assets (per-item passwords)")
-
-    # Parse dates from first schedule
-    start_dt = parse_date_time(first.provisioning_date)
-    end_dt = parse_date_time(first.auto_destroy)
-
-    if not start_dt or not end_dt:
-        logger.error("Invalid dates for grouped multi-asset workshop")
-        return None
-
-    start_iso = format_iso8601(start_dt)
-    end_iso = format_iso8601(end_dt)
-
-    stop_iso = end_iso
-    if first.auto_stop:
-        stop_dt = parse_date_time(first.auto_stop)
-        if stop_dt:
-            stop_iso = format_iso8601(stop_dt)
-
-    # Step 1: Create individual Workshops for each row/asset
-    assets = []
-    created_workshops = []
-
-    for sched in schedules_group:
-        asset_ci = sched.ci
-        logger.info(f"Creating Workshop for grouped asset: {asset_ci} (password: {'***' if sched.password else 'none'})")
-
-        catalog_info = get_catalog_item_info(asset_ci, config)
-        catalog_namespace = catalog_info.get('namespace', 'babylon-catalog-prod')
-        display_name = catalog_info.get('displayName', asset_ci)
-
-        asset_ci_safe = asset_ci.replace('.', '-')
-        if len(f"{multi_workshop_name}-{asset_ci_safe}") > 50:
-            asset_ci_safe = asset_ci_safe[:50-len(multi_workshop_name)-1]
-        asset_workshop_prefix = f"{multi_workshop_name}-{asset_ci_safe}-"
-
-        email = sched.namespace.replace('user-', '').replace('-redhat-com', '@redhat.com')
-        asset_payload = {
-            'spec': {
-                'provider': {
-                    'name': asset_ci,
-                    'namespace': catalog_namespace,
-                    'parameterValues': _provider_parameter_values(sched, start_iso, stop_iso)
-                },
-                'lifespan': {'end': end_iso},
-                'accessPassword': sched.password
-            },
-            'metadata': {
-                'annotations': {
-                    'babylon.gpte.redhat.com/catalogItemDisplayName': display_name,
-                    'demo.redhat.com/requester': email,
-                    'demo.redhat.com/purpose': sched.purpose,
-                    'demo.redhat.com/purpose-activity': sched.activity
-                }
-            },
-            '_white_glove': sched.white_glove
-        }
-
-        asset_workshop_name = create_workshop_with_ui(asset_workshop_prefix, sched.namespace, asset_payload, config)
-
-        if not asset_workshop_name:
-            logger.warning(f"Failed to create Workshop for grouped asset {asset_ci}, continuing...")
-            continue
-
-        create_workshop_provision(
-            asset_workshop_name, sched.namespace, asset_payload, config,
-            enable_workshop_ui=False, concurrency=sched.concurrency
-        )
-        created_workshops.append((asset_ci, asset_workshop_name, catalog_namespace, display_name))
-        logger.info(f"Created Workshop '{asset_workshop_name}' for grouped asset {asset_ci}")
-
-    if not created_workshops:
-        logger.error("No workshops were created for grouped multi-asset workshop")
-        return None
-
-    # Step 2: Wait for workshop IDs (skip in dry-run)
-    if config.dry_run:
-        for asset_ci, workshop_name, catalog_ns, display_name in created_workshops:
-            assets.append({
-                'displayName': display_name,
-                'key': asset_ci,
-                'name': workshop_name,
-                'namespace': catalog_ns,
-                'type': 'Workshop',
-                'workshopId': f"dryrun-{workshop_name}"
-            })
-    else:
-        logger.info("Waiting for grouped asset workshops to be ready...")
-        for asset_ci, workshop_name, catalog_ns, display_name in created_workshops:
-            workshop_id = wait_for_workshop_id(workshop_name, first.namespace, config, max_wait=120)
-            if workshop_id:
-                assets.append({
-                    'displayName': display_name,
-                    'key': asset_ci,
-                    'name': workshop_name,
-                    'namespace': catalog_ns,
-                    'type': 'Workshop',
-                    'workshopId': workshop_id
-                })
-                logger.info(f"Grouped asset {asset_ci} ready with ID: {workshop_id}")
-            else:
-                logger.warning(f"Grouped asset {asset_ci} (Workshop {workshop_name}) did not get an ID, skipping...")
-
-    if not assets:
-        logger.error("No assets with valid workshopIds for grouped multi-asset workshop")
-        return None
-
-    # Step 3: Create MultiWorkshop resource
-    email = first.namespace.replace('user-', '').replace('-redhat-com', '@redhat.com')
-    multi_workshop = {
-        "apiVersion": "babylon.gpte.redhat.com/v1",
-        "kind": "MultiWorkshop",
-        "metadata": {
-            "name": multi_workshop_name,
-            "namespace": first.namespace,
-            "annotations": {
-                "babylon.gpte.redhat.com/created-by": email
-            }
-        },
-        "spec": {
-            "assets": assets,
-            "displayName": first.workshop_name or "automation",
-            "endDate": end_iso,
-            "name": "automation",
-            "numberSeats": first.users,
-            "purpose": first.purpose,
-            "purpose-activity": first.activity,
-            "startDate": start_iso
-        }
-    }
-
-    import tempfile
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp_file:
-        json.dump(multi_workshop, tmp_file, indent=2)
-        tmp_file_path = tmp_file.name
-
-    try:
-        cmd = [config.oc_command, "create", "-f", tmp_file_path, "-n", first.namespace]
-        env = os.environ.copy()
-        if config.kubeconfig_path:
-            env['KUBECONFIG'] = config.kubeconfig_path
-
-        if config.dry_run:
-            logger.info(f"[DRY-RUN] Would create grouped MultiWorkshop: {multi_workshop_name}")
-            with open(tmp_file_path, 'r') as f:
-                print(json.dumps(json.load(f), indent=2))
-            return multi_workshop_name
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
-        if result.returncode == 0:
-            logger.info(f"Successfully created grouped MultiWorkshop: {multi_workshop_name}")
-            return multi_workshop_name
-        else:
-            if "already exists" in result.stderr:
-                logger.info(f"MultiWorkshop {multi_workshop_name} already exists")
-                return multi_workshop_name
-            logger.warning(f"Could not create grouped MultiWorkshop: {result.stderr}")
-            return None
-    finally:
-        try:
-            os.unlink(tmp_file_path)
-        except:
-            pass
-
 
 def enable_workshop_lab_interface(
     workshop_name: str,
@@ -2129,18 +2063,18 @@ def verify_deployment(
     namespace: str,
     ci: str,
     config: RHDPConfig
-) -> Tuple[bool, Optional[str], str]:
+) -> Tuple[bool, Optional[str]]:
     """
     Verify deployment by checking ResourceClaim status.
-
+    
     Args:
         guid: ResourceClaim name/GUID
         namespace: Kubernetes namespace
         ci: Catalog Item ID for URL construction
         config: RHDPConfig object
-
+        
     Returns:
-        Tuple of (is_healthy: bool, url: Optional[str], log_url: str)
+        Tuple of (is_healthy: bool, url: Optional[str])
     """
     if config.dry_run:
         # Extract suffix from GUID if present
@@ -2151,8 +2085,8 @@ def verify_deployment(
                 suffix = parts[-1]
         url = construct_workshop_url(ci, namespace, suffix)
         logger.info(f"[DRY-RUN] Would verify deployment: {guid} in {namespace}")
-        return (True, url, "")
-
+        return (True, url)
+    
     try:
         # Get ResourceClaim status
         cmd = [
@@ -2161,11 +2095,11 @@ def verify_deployment(
             "-n", namespace,
             "-o", "json"
         ]
-
+        
         env = os.environ.copy()
         if config.kubeconfig_path:
             env['KUBECONFIG'] = config.kubeconfig_path
-
+        
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -2173,46 +2107,40 @@ def verify_deployment(
             timeout=30,
             env=env
         )
-
+        
         if result.returncode != 0:
             logger.warning(f"Could not get ResourceClaim {guid}: {result.stderr}")
             # Still construct URL
             suffix = guid.split('-')[-1] if '-' in guid else ""
             url = construct_workshop_url(ci, namespace, suffix)
-            return (False, url, "")
-
+            return (False, url)
+        
         rc_data = json.loads(result.stdout)
         status = rc_data.get('status', {})
-
-        # Extract AAP2 provision log URL from towerJobs
-        tower_jobs = status.get('resources', [{}])[0].get('state', {}).get('status', {}).get('towerJobs', {})
-        provision_job = tower_jobs.get('provision', {})
-        tower_job_url = provision_job.get('towerJobURL', '')
-        log_url = f"https://{tower_job_url}" if tower_job_url else ""
-
+        
         # Check if healthy and ready
         healthy = status.get('healthy', False)
         ready = status.get('ready', False)
-
+        
         # Extract suffix from GUID
         suffix = guid.split('-')[-1] if '-' in guid else ""
         url = construct_workshop_url(ci, namespace, suffix)
-
+        
         if healthy and ready:
             logger.info(f"Deployment verification passed for {guid}: {url}")
-            return (True, url, log_url)
+            return (True, url)
         elif healthy:
             logger.info(f"Deployment is healthy but not ready yet for {guid}: {url}")
-            return (True, url, log_url)  # Still consider it successful if healthy
+            return (True, url)  # Still consider it successful if healthy
         else:
             logger.warning(f"Deployment verification failed for {guid}: {url} (healthy={healthy}, ready={ready})")
-            return (False, url, log_url)
-
+            return (False, url)
+        
     except Exception as e:
         logger.error(f"Verification error for {guid}: {e}")
         suffix = guid.split('-')[-1] if '-' in guid else ""
         url = construct_workshop_url(ci, namespace, suffix)
-        return (False, url, "")
+        return (False, url)
 
 # ============================================================================
 # QA FUNCTIONS
@@ -2407,19 +2335,32 @@ def qa1_verify_setup(
                         number_seats = spec.get('numberSeats', 0)
                         start_date = spec.get('startDate', '')
                         end_date = spec.get('endDate', '')
+                        # Workshop Users Assigned in UI = assigned/total; total must be numberSeats (e.g. 30)
+                        status_obj = matching_mw.get('status', {})
+                        user_count = status_obj.get('userCount', {})
+                        assigned = user_count.get('assigned', user_count.get('total', 0)) if isinstance(user_count, dict) else 0
+                        total_seats = number_seats
+                        workshop_users_assigned = f"{assigned}/{total_seats}" if total_seats else "0/0"
                         
                         # Construct multi-workshop portal URL (not individual workshop URLs)
                         url = f"https://integration.demo.redhat.com/multi-workshop/{namespace}/{mw_name}"
                         # For multi-asset workshops, landing page URL is the same as the portal URL
                         landing_page_url = url
                         
-                        # Check if matches schedule
+                        # Check if matches schedule (expected total seats = Instances or Users)
                         matches_schedule = True
                         issues = []
-                        
-                        if number_seats != schedule.users:
+                        expected_total = _expected_total_seats(schedule)
+                        expected_users = _effective_users(schedule)
+                        if expected_total is not None and number_seats != expected_total:
                             matches_schedule = False
-                            issues.append(f"User count mismatch: expected {schedule.users}, got {number_seats}")
+                            issues.append(f"Total seats mismatch: expected {expected_total} (instances/users), got numberSeats={number_seats}. UI should show x/{expected_total}, not {workshop_users_assigned}.")
+                        if number_seats == 0 and expected_total is not None and expected_total > 0:
+                            matches_schedule = False
+                            issues.append(f"Workshop Users Assigned shows 0/0; expected total seats (instances)={expected_total}. Set numberSeats on MultiWorkshop.")
+                        if expected_users is not None and number_seats != expected_users and expected_total is None:
+                            matches_schedule = False
+                            issues.append(f"User count mismatch: expected {expected_users}, got {number_seats}")
                         
                         result = {
                             "ci_name": schedule.ci_name,
@@ -2430,8 +2371,10 @@ def qa1_verify_setup(
                             "status": "✅ MULTI-WORKSHOP",
                             "matches_schedule": "Yes" if matches_schedule else "No",
                             "issues": "; ".join(issues) if issues else "",
-                            "expected_users": schedule.users,
+                            "expected_users": expected_total if expected_total is not None else expected_users,
                             "actual_count": number_seats,
+                            "workshop_users_assigned": workshop_users_assigned,
+                            "total_seats": total_seats,
                             "provisioning_date": schedule.provisioning_date,
                             "auto_stop": schedule.auto_stop,
                             "auto_destroy": schedule.auto_destroy,
@@ -2444,6 +2387,10 @@ def qa1_verify_setup(
                         }
                         results.append(result)
                         logger.info(f"✅ {schedule.ci_name} ({schedule.ci}) - MultiWorkshop: {mw_name} with {len(assets)} assets")
+                        logger.info(f"   Workshop Users Assigned (UI): {workshop_users_assigned}" + (f" (expected total: {expected_total})" if expected_total is not None else ""))
+                        if issues:
+                            for i in issues:
+                                logger.warning(f"   ⚠️  {i}")
                         continue
             except Exception as e:
                 logger.debug(f"Error checking MultiWorkshop: {e}")
@@ -2488,9 +2435,9 @@ def qa1_verify_setup(
                         
                         # Get user count from status or spec
                         user_count = status_obj.get('userCount', {}).get('total', 0)
-                        if user_count == 0:
-                            # Try to get from WorkshopProvision or estimate
-                            user_count = schedule.users
+                        if user_count == 0 and _effective_users(schedule) is not None:
+                            # Try to get from WorkshopProvision or use expected
+                            user_count = _effective_users(schedule)
                         
                         # Get both URLs
                         full_url, catalog_url = get_workshop_urls(workshop_name, namespace, schedule.ci, config)
@@ -2504,7 +2451,7 @@ def qa1_verify_setup(
                             "status": "✅ WORKSHOP (direct)",
                             "matches_schedule": "Yes",
                             "issues": "",
-                            "expected_users": schedule.users,
+                            "expected_users": _effective_users(schedule) if _effective_users(schedule) is not None else "",
                             "actual_count": user_count,
                             "provisioning_date": schedule.provisioning_date,
                             "auto_stop": schedule.auto_stop,
@@ -2531,7 +2478,7 @@ def qa1_verify_setup(
                 "scheduled": "Yes",
                 "deployed": "No",
                 "status": "❌ NOT DEPLOYED",
-                "expected_users": schedule.users,
+                "expected_users": _effective_users(schedule) if _effective_users(schedule) is not None else "",
                 "actual_count": 0,
                 "provisioning_date": schedule.provisioning_date,
                 "auto_stop": schedule.auto_stop,
@@ -2618,9 +2565,10 @@ def qa1_verify_setup(
             matches_schedule = True
             issues = []
             
-            if actual_users != schedule.users:
+            expected_users = _effective_users(schedule)
+            if expected_users is not None and actual_users != expected_users:
                 matches_schedule = False
-                issues.append(f"User count mismatch: expected {schedule.users}, got {actual_users}")
+                issues.append(f"User count mismatch: expected {expected_users}, got {actual_users}")
             
             # Parse and compare dates (all in UTC)
             expected_start = parse_date_time(schedule.provisioning_date, assume_utc=True)
@@ -2655,7 +2603,7 @@ def qa1_verify_setup(
                 "status": overall_status,
                 "matches_schedule": "Yes" if matches_schedule else "No",
                 "issues": "; ".join(issues) if issues else "",
-                "expected_users": schedule.users,
+                "expected_users": _effective_users(schedule) if _effective_users(schedule) is not None else "",
                 "actual_users": actual_users,
                 "healthy": healthy,
                 "ready": ready,
@@ -2676,7 +2624,8 @@ def qa1_verify_setup(
             logger.info(f"{status_icon} {schedule.ci_name} ({schedule.ci})")
             logger.info(f"  ResourceClaim: {name}")
             logger.info(f"  Status: {overall_status}")
-            logger.info(f"  Users: {actual_users} (expected: {schedule.users})")
+            exp_u = _effective_users(schedule)
+            logger.info(f"  Users: {actual_users}" + (f" (expected: {exp_u})" if exp_u is not None else " (users not configured)"))
             logger.info(f"  Link to Service: {full_url}")
             if catalog_url:
                 logger.info(f"  Landing Page URL: {catalog_url}")
@@ -2790,13 +2739,23 @@ def qa2_verify_deployment_status(
                         spec = matching_mw.get('spec', {})
                         assets = spec.get('assets', [])
                         number_seats = spec.get('numberSeats', 0)
+                        # Workshop Users Assigned in UI = assigned/total (e.g. 0/30)
+                        status_obj = matching_mw.get('status', {})
+                        user_count = status_obj.get('userCount', {})
+                        assigned = user_count.get('assigned', user_count.get('total', 0)) if isinstance(user_count, dict) else 0
+                        total_seats = number_seats
+                        workshop_users_assigned = f"{assigned}/{total_seats}" if total_seats else "0/0"
                         
                         # Construct multi-workshop portal URL (not individual workshop URLs)
                         url = f"https://integration.demo.redhat.com/multi-workshop/{namespace}/{mw_name}"
                         # For multi-asset workshops, landing page URL is the same as the portal URL
                         landing_page_url = url
                         
-                        seats_match = (number_seats == schedule.users)
+                        expected_total = _expected_total_seats(schedule)
+                        expected_seats = expected_total if expected_total is not None else _effective_users(schedule)
+                        seats_match = (expected_seats is None) or (number_seats == expected_seats)
+                        if number_seats == 0 and expected_seats is not None and expected_seats > 0:
+                            seats_match = False
                         
                         result = {
                             "ci_name": schedule.ci_name,
@@ -2805,8 +2764,10 @@ def qa2_verify_deployment_status(
                             "scheduled": "Yes",
                             "deployed": "Yes",
                             "status": "✅ MULTI-WORKSHOP",
-                            "expected_seats": schedule.users,
+                            "expected_seats": expected_seats if expected_seats is not None else "",
                             "actual_seats": number_seats,
+                            "workshop_users_assigned": workshop_users_assigned,
+                            "total_seats": total_seats,
                             "seats_match": "Yes" if seats_match else "No",
                             "healthy": True,
                             "ready": True,
@@ -2817,7 +2778,9 @@ def qa2_verify_deployment_status(
                         }
                         results.append(result)
                         logger.info(f"✅ {schedule.ci_name} ({schedule.ci}) - MultiWorkshop: {mw_name}")
-                        logger.info(f"   ✅ Seats: {number_seats} (expected: {schedule.users})")
+                        logger.info(f"   Workshop Users Assigned (UI): {workshop_users_assigned}" + (f" (expected total: {expected_seats})" if expected_seats is not None else ""))
+                        if not seats_match and expected_seats is not None and number_seats == 0:
+                            logger.warning(f"   ⚠️  Total seats is 0; UI shows 0/0. Expected x/{expected_seats} (instances).")
                         logger.info(f"   Assets: {len(assets)}")
                         logger.info(f"   Link to Service: {url}")
                         continue
@@ -2865,7 +2828,8 @@ def qa2_verify_deployment_status(
                         # Get both URLs
                         full_url, catalog_url = get_workshop_urls(workshop_name, namespace, schedule.ci, config)
                         
-                        seats_match = (user_count == schedule.users) if user_count > 0 else True  # If 0, assume not yet populated
+                        expected_seats = _effective_users(schedule)
+                        seats_match = (expected_seats is None) or (user_count == expected_seats) if user_count > 0 else (expected_seats is None)
                         
                         result = {
                             "ci_name": schedule.ci_name,
@@ -2874,7 +2838,7 @@ def qa2_verify_deployment_status(
                             "scheduled": "Yes",
                             "deployed": "Yes",
                             "status": "✅ WORKSHOP (direct)",
-                            "expected_seats": schedule.users,
+                            "expected_seats": expected_seats if expected_seats is not None else "",
                             "actual_seats": user_count,
                             "seats_match": "Yes" if seats_match else "No",
                             "healthy": True,
@@ -2886,7 +2850,7 @@ def qa2_verify_deployment_status(
                         }
                         results.append(result)
                         logger.info(f"✅ {schedule.ci_name} ({schedule.ci}) - Workshop: {workshop_name}")
-                        logger.info(f"   ✅ Seats: {user_count} (expected: {schedule.users})")
+                        logger.info(f"   ✅ Seats: {user_count}" + (f" (expected: {expected_seats})" if expected_seats is not None else " (users not configured)"))
                         continue
             except Exception as e:
                 logger.debug(f"Error checking Workshop: {e}")
@@ -2900,7 +2864,7 @@ def qa2_verify_deployment_status(
                 "scheduled": "Yes",
                 "deployed": "No",
                 "status": "❌ NOT DEPLOYED",
-                "expected_seats": schedule.users,
+                "expected_seats": _effective_users(schedule) if _effective_users(schedule) is not None else "",
                 "actual_seats": 0,
                 "healthy": False,
                 "ready": False,
@@ -2977,8 +2941,9 @@ def qa2_verify_deployment_status(
                 deployment_status = "❌ DEPLOYMENT FAILED"
                 provisioned = False
             
-            # Check seat count
-            seats_match = (actual_seats == schedule.users)
+            # Check seat count (skip when users not configured)
+            expected_seats = _effective_users(schedule)
+            seats_match = (expected_seats is None) or (actual_seats == expected_seats)
             seat_status = "✅" if seats_match else "❌"
             
             result = {
@@ -2990,7 +2955,7 @@ def qa2_verify_deployment_status(
                 "deployed": "Yes",
                 "provisioned": provisioned,
                 "status": deployment_status,
-                "expected_seats": schedule.users,
+                "expected_seats": expected_seats if expected_seats is not None else "",
                 "actual_seats": actual_seats,
                 "seats_match": "Yes" if seats_match else "No",
                 "healthy": healthy,
@@ -3003,7 +2968,7 @@ def qa2_verify_deployment_status(
             # Log result
             logger.info(f"{deployment_status} - {schedule.ci_name} ({schedule.ci})")
             logger.info(f"  ResourceClaim: {name}")
-            logger.info(f"  {seat_status} Seats: {actual_seats} (expected: {schedule.users})")
+            logger.info(f"  {seat_status} Seats: {actual_seats}" + (f" (expected: {expected_seats})" if expected_seats is not None else " (users not configured)"))
             logger.info(f"  Healthy: {healthy}, Ready: {ready}, Provisioned: {provisioned}")
             logger.info(f"  Link to Service: {full_url}")
             if catalog_url:
@@ -3175,352 +3140,14 @@ def export_student_landing_page_csv(
         raise
 
 # ============================================================================
-# OPERATIONAL COMMANDS (Lock, Extend, Scale)
-# ============================================================================
-
-def lock_workshops(schedules: List[WorkshopSchedule], config: RHDPConfig) -> None:
-    """
-    Lock all workshops from the CSV by setting actionSchedule.stop to now.
-    This effectively stops all workshops immediately.
-
-    Args:
-        schedules: List of WorkshopSchedule objects from CSV
-        config: RHDPConfig object
-    """
-    now_iso = format_iso8601(datetime.now(timezone.utc))
-    logger.info(f"Locking {len(schedules)} workshop(s) - setting stop time to {now_iso}")
-
-    for schedule in schedules:
-        ci = schedule.ci
-        ns = schedule.namespace
-        logger.info(f"Looking for workshops with CI={ci} in namespace={ns}")
-
-        cmd = [
-            config.oc_command, "get", "workshop", "-n", ns,
-            "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}",
-            "-o", "jsonpath={.items[*].metadata.name}"
-        ]
-
-        env = os.environ.copy()
-        if config.kubeconfig_path:
-            env['KUBECONFIG'] = config.kubeconfig_path
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
-        if result.returncode != 0 or not result.stdout.strip():
-            logger.warning(f"No workshops found for CI={ci} in namespace={ns}")
-            continue
-
-        workshop_names = result.stdout.strip().split()
-        for wname in workshop_names:
-            patch_json = json.dumps({"spec": {"actionSchedule": {"stop": now_iso}}})
-            patch_cmd = [
-                config.oc_command, "patch", "workshop", wname,
-                "-n", ns, "--type", "merge", "-p", patch_json
-            ]
-
-            if config.dry_run:
-                logger.info(f"[DRY-RUN] Would lock workshop {wname}: {patch_json}")
-                continue
-
-            patch_result = subprocess.run(patch_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
-            if patch_result.returncode == 0:
-                logger.info(f"Locked workshop: {wname}")
-            else:
-                logger.warning(f"Failed to lock workshop {wname}: {patch_result.stderr}")
-
-
-def extend_stop_time(schedules: List[WorkshopSchedule], config: RHDPConfig, days: int, hours: int) -> None:
-    """
-    Extend the auto-stop time for workshops by the specified days/hours.
-
-    Args:
-        schedules: List of WorkshopSchedule objects from CSV
-        config: RHDPConfig object
-        days: Number of days to extend
-        hours: Number of hours to extend
-    """
-    delta = timedelta(days=days, hours=hours)
-    logger.info(f"Extending stop time by {days} days, {hours} hours for {len(schedules)} schedule(s)")
-
-    for schedule in schedules:
-        ci = schedule.ci
-        ns = schedule.namespace
-
-        cmd = [
-            config.oc_command, "get", "workshop", "-n", ns,
-            "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}",
-            "-o", "json"
-        ]
-
-        env = os.environ.copy()
-        if config.kubeconfig_path:
-            env['KUBECONFIG'] = config.kubeconfig_path
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
-        if result.returncode != 0 or not result.stdout.strip():
-            logger.warning(f"No workshops found for CI={ci} in namespace={ns}")
-            continue
-
-        try:
-            data = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            logger.warning(f"Invalid JSON response for CI={ci}")
-            continue
-
-        for item in data.get('items', []):
-            wname = item['metadata']['name']
-            current_stop = item.get('spec', {}).get('actionSchedule', {}).get('stop', '')
-            if not current_stop:
-                logger.info(f"Workshop {wname} has no auto-stop set, skipping")
-                continue
-
-            current_dt = parse_date_time(current_stop)
-            if not current_dt:
-                logger.warning(f"Cannot parse stop time '{current_stop}' for workshop {wname}")
-                continue
-
-            new_dt = current_dt + delta
-            new_iso = format_iso8601(new_dt)
-
-            patch_json = json.dumps({"spec": {"actionSchedule": {"stop": new_iso}}})
-            patch_cmd = [
-                config.oc_command, "patch", "workshop", wname,
-                "-n", ns, "--type", "merge", "-p", patch_json
-            ]
-
-            if config.dry_run:
-                logger.info(f"[DRY-RUN] Would extend stop for {wname}: {current_stop} -> {new_iso}")
-                continue
-
-            patch_result = subprocess.run(patch_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
-            if patch_result.returncode == 0:
-                logger.info(f"Extended stop for {wname}: {current_stop} -> {new_iso}")
-            else:
-                logger.warning(f"Failed to extend stop for {wname}: {patch_result.stderr}")
-
-
-def extend_destroy_time(schedules: List[WorkshopSchedule], config: RHDPConfig, days: int, hours: int) -> None:
-    """
-    Extend the auto-destroy (lifespan end) time for workshops and their provisions.
-
-    Args:
-        schedules: List of WorkshopSchedule objects from CSV
-        config: RHDPConfig object
-        days: Number of days to extend
-        hours: Number of hours to extend
-    """
-    delta = timedelta(days=days, hours=hours)
-    logger.info(f"Extending destroy time by {days} days, {hours} hours for {len(schedules)} schedule(s)")
-
-    for schedule in schedules:
-        ci = schedule.ci
-        ns = schedule.namespace
-
-        env = os.environ.copy()
-        if config.kubeconfig_path:
-            env['KUBECONFIG'] = config.kubeconfig_path
-
-        # Extend Workshop lifespan.end
-        cmd = [
-            config.oc_command, "get", "workshop", "-n", ns,
-            "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}",
-            "-o", "json"
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
-        if result.returncode != 0 or not result.stdout.strip():
-            logger.warning(f"No workshops found for CI={ci} in namespace={ns}")
-            continue
-
-        try:
-            data = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            logger.warning(f"Invalid JSON response for CI={ci}")
-            continue
-
-        for item in data.get('items', []):
-            wname = item['metadata']['name']
-            current_end = item.get('spec', {}).get('lifespan', {}).get('end', '')
-            if not current_end:
-                logger.info(f"Workshop {wname} has no lifespan end set, skipping")
-                continue
-
-            current_dt = parse_date_time(current_end)
-            if not current_dt:
-                logger.warning(f"Cannot parse lifespan end '{current_end}' for workshop {wname}")
-                continue
-
-            new_dt = current_dt + delta
-            new_iso = format_iso8601(new_dt)
-
-            patch_json = json.dumps({"spec": {"lifespan": {"end": new_iso}}})
-            patch_cmd = [
-                config.oc_command, "patch", "workshop", wname,
-                "-n", ns, "--type", "merge", "-p", patch_json
-            ]
-
-            if config.dry_run:
-                logger.info(f"[DRY-RUN] Would extend destroy for {wname}: {current_end} -> {new_iso}")
-            else:
-                patch_result = subprocess.run(patch_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
-                if patch_result.returncode == 0:
-                    logger.info(f"Extended destroy for {wname}: {current_end} -> {new_iso}")
-                else:
-                    logger.warning(f"Failed to extend destroy for {wname}: {patch_result.stderr}")
-
-        # Also extend associated WorkshopProvision lifespan
-        prov_cmd = [
-            config.oc_command, "get", "workshopprovision", "-n", ns,
-            "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}",
-            "-o", "json"
-        ]
-        prov_result = subprocess.run(prov_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
-        if prov_result.returncode == 0 and prov_result.stdout.strip():
-            try:
-                prov_data = json.loads(prov_result.stdout)
-                for prov_item in prov_data.get('items', []):
-                    pname = prov_item['metadata']['name']
-                    prov_end = prov_item.get('spec', {}).get('lifespan', {}).get('end', '')
-                    if not prov_end:
-                        continue
-                    prov_dt = parse_date_time(prov_end)
-                    if not prov_dt:
-                        continue
-                    new_prov_iso = format_iso8601(prov_dt + delta)
-                    prov_patch = json.dumps({"spec": {"lifespan": {"end": new_prov_iso}}})
-                    prov_patch_cmd = [
-                        config.oc_command, "patch", "workshopprovision", pname,
-                        "-n", ns, "--type", "merge", "-p", prov_patch
-                    ]
-                    if config.dry_run:
-                        logger.info(f"[DRY-RUN] Would extend provision destroy for {pname}: {prov_end} -> {new_prov_iso}")
-                    else:
-                        pr = subprocess.run(prov_patch_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
-                        if pr.returncode == 0:
-                            logger.info(f"Extended provision destroy for {pname}: {prov_end} -> {new_prov_iso}")
-                        else:
-                            logger.warning(f"Failed to extend provision destroy for {pname}: {pr.stderr}")
-            except json.JSONDecodeError:
-                logger.warning(f"Invalid JSON for WorkshopProvision list in namespace={ns}")
-
-
-def scale_workshops(schedules: List[WorkshopSchedule], config: RHDPConfig, target_count: int) -> None:
-    """
-    Scale WorkshopProvision resources to a target count.
-
-    Args:
-        schedules: List of WorkshopSchedule objects from CSV
-        config: RHDPConfig object
-        target_count: Target count value for WorkshopProvision spec.count
-    """
-    logger.info(f"Scaling {len(schedules)} schedule(s) to count={target_count}")
-
-    for schedule in schedules:
-        ci = schedule.ci
-        ns = schedule.namespace
-
-        env = os.environ.copy()
-        if config.kubeconfig_path:
-            env['KUBECONFIG'] = config.kubeconfig_path
-
-        cmd = [
-            config.oc_command, "get", "workshopprovision", "-n", ns,
-            "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}",
-            "-o", "jsonpath={.items[*].metadata.name}"
-        ]
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
-        if result.returncode != 0 or not result.stdout.strip():
-            logger.warning(f"No WorkshopProvisions found for CI={ci} in namespace={ns}")
-            continue
-
-        provision_names = result.stdout.strip().split()
-        for pname in provision_names:
-            patch_json = json.dumps({"spec": {"count": target_count}})
-            patch_cmd = [
-                config.oc_command, "patch", "workshopprovision", pname,
-                "-n", ns, "--type", "merge", "-p", patch_json
-            ]
-
-            if config.dry_run:
-                logger.info(f"[DRY-RUN] Would scale {pname} to count={target_count}")
-                continue
-
-            patch_result = subprocess.run(patch_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
-            if patch_result.returncode == 0:
-                logger.info(f"Scaled {pname} to count={target_count}")
-            else:
-                logger.warning(f"Failed to scale {pname}: {patch_result.stderr}")
-
-
-def create_multi_region_workshop(
-    schedule: WorkshopSchedule,
-    config: RHDPConfig
-) -> Optional[str]:
-    """
-    Create a single Workshop with multiple WorkshopProvisions across AWS regions.
-    Users are distributed evenly across regions.
-
-    Args:
-        schedule: WorkshopSchedule with aws_regions set (comma-separated)
-        config: RHDPConfig object
-
-    Returns:
-        Workshop name if successful, None otherwise
-    """
-    regions = [r.strip() for r in schedule.aws_regions.split(',') if r.strip()]
-    if len(regions) < 2:
-        logger.error("Multi-region requires at least 2 regions")
-        return None
-
-    logger.info(f"Creating multi-region workshop across {len(regions)} regions: {regions}")
-
-    # Build the base payload
-    payload = build_resource_claim_payload(schedule, config)
-
-    # Create the single Workshop resource
-    ci = schedule.ci
-    generate_name = f"{ci}-"
-    workshop_name = create_workshop_with_ui(generate_name, schedule.namespace, payload, config)
-
-    if not workshop_name:
-        logger.error("Failed to create Workshop for multi-region provisioning")
-        return None
-
-    logger.info(f"Created Workshop: {workshop_name}, now creating {len(regions)} regional provisions")
-
-    # Distribute users across regions
-    base_per_region = schedule.users // len(regions)
-    remainder = schedule.users % len(regions)
-
-    for idx, region in enumerate(regions):
-        region_users = base_per_region + (1 if idx < remainder else 0)
-        region_suffix = f"-{region.replace('_', '-')}"
-
-        logger.info(f"Creating WorkshopProvision for region {region} with {region_users} users")
-
-        create_workshop_provision(
-            workshop_name=workshop_name,
-            namespace=schedule.namespace,
-            resourceclaim_payload=payload,
-            config=config,
-            enable_workshop_ui=False,
-            concurrency=schedule.concurrency,
-            count=region_users,
-            provision_name_suffix=region_suffix,
-            extra_parameters={"aws_region": region}
-        )
-
-    return workshop_name
-
-
-# ============================================================================
 # MAIN ORCHESTRATION
 # ============================================================================
 
 def process_schedule(
     schedule: WorkshopSchedule,
     config: RHDPConfig,
-    asset_passwords: Optional[Dict[str, str]] = None
+    asset_passwords: Optional[Dict[str, str]] = None,
+    asset_num_users: Optional[Dict[str, int]] = None
 ) -> DeploymentResult:
     """
     Process a single workshop schedule.
@@ -3538,7 +3165,7 @@ def process_schedule(
         # Check if this is a multi-asset workshop
         if schedule.is_multi_asset:
             logger.info(f"Multi-asset workshop detected - creating MultiWorkshop with assets: {schedule.asset_cis}")
-            multi_workshop_name = create_multi_workshop(schedule, config, asset_passwords=asset_passwords)
+            multi_workshop_name = create_multi_workshop(schedule, config, asset_passwords=asset_passwords, asset_num_users=asset_num_users)
             
             if not multi_workshop_name:
                 return DeploymentResult(
@@ -3572,29 +3199,8 @@ def process_schedule(
                 timestamp=time.strftime("%Y-%m-%d %H:%M:%S")
             )
         
-        # Check if multi-region provisioning
-        if schedule.aws_regions and ',' in schedule.aws_regions:
-            logger.info(f"Multi-region workshop detected - regions: {schedule.aws_regions}")
-            workshop_name = create_multi_region_workshop(schedule, config)
-            if workshop_name:
-                url = construct_workshop_url(schedule.ci, schedule.namespace, workshop_name.split('-')[-1] if '-' in workshop_name else "")
-                return DeploymentResult(
-                    ci_name=schedule.ci_name, ci=schedule.ci, namespace=schedule.namespace,
-                    guid=workshop_name, url=url, status="deployed_unverified",
-                    provisioning_date=schedule.provisioning_date, auto_stop=schedule.auto_stop,
-                    auto_destroy=schedule.auto_destroy, timestamp=time.strftime("%Y-%m-%d %H:%M:%S")
-                )
-            else:
-                return DeploymentResult(
-                    ci_name=schedule.ci_name, ci=schedule.ci, namespace=schedule.namespace,
-                    guid="failed", url="", status="failed",
-                    provisioning_date=schedule.provisioning_date, auto_stop=schedule.auto_stop,
-                    auto_destroy=schedule.auto_destroy, timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
-                    error_message="Failed to create multi-region workshop"
-                )
-
         # Build payload
-        payload = build_resource_claim_payload(schedule, config)
+        payload = build_resource_claim_payload(schedule)
         
         # If workshop UI is enabled, create Workshop directly without ResourceClaim to avoid duplicates
         if schedule.enable_workshop_interface:
@@ -3608,10 +3214,7 @@ def process_schedule(
                 logger.info(f"✅ Successfully created Workshop: {workshop_name} with UI enabled")
                 # Create WorkshopProvision to manage the Workshop
                 logger.info(f"Creating WorkshopProvision to manage Workshop...")
-                create_workshop_provision(
-                    workshop_name, schedule.namespace, payload, config,
-                    enable_workshop_ui=False, concurrency=schedule.concurrency
-                )
+                create_workshop_provision(workshop_name, schedule.namespace, payload, config, enable_workshop_ui=False, concurrency=schedule.concurrency)
                 # Use workshop name as guid for results
                 guid = workshop_name
                 namespace = schedule.namespace
@@ -3644,8 +3247,8 @@ def process_schedule(
             time.sleep(2)
         
         # Verify deployment
-        is_healthy, url, log_url = verify_deployment(guid, namespace or schedule.namespace, schedule.ci, config)
-
+        is_healthy, url = verify_deployment(guid, namespace or schedule.namespace, schedule.ci, config)
+        
         if is_healthy:
             status = "verified"
         elif url:
@@ -3655,7 +3258,7 @@ def process_schedule(
             # Construct URL anyway
             suffix = guid.split('-')[-1] if '-' in guid else ""
             url = construct_workshop_url(schedule.ci, schedule.namespace, suffix)
-
+        
         return DeploymentResult(
             ci_name=schedule.ci_name,
             ci=schedule.ci,
@@ -3667,8 +3270,7 @@ def process_schedule(
             auto_stop=schedule.auto_stop,
             auto_destroy=schedule.auto_destroy,
             timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
-            error_message="",
-            log_url=log_url
+            error_message=""
         )
         
     except Exception as e:
@@ -3710,7 +3312,7 @@ Examples:
     
     parser.add_argument(
         "--input-csv",
-        default="",
+        required=True,
         help="Path to input CSV file with workshop schedules"
     )
     parser.add_argument(
@@ -3749,47 +3351,7 @@ Examples:
         choices=["1", "2", "both"],
         help="Run QA verification: '1'=verify setup (times/users), '2'=verify deployment status (seats), 'both'=run both"
     )
-
-    # Operational commands
-    parser.add_argument(
-        "--lock",
-        action="store_true",
-        help="Lock all workshops from CSV (set stop time to now)"
-    )
-    parser.add_argument(
-        "--extend-stop",
-        action="store_true",
-        help="Extend auto-stop time for workshops from CSV"
-    )
-    parser.add_argument(
-        "--extend-destroy",
-        action="store_true",
-        help="Extend auto-destroy (lifespan end) time for workshops from CSV"
-    )
-    parser.add_argument(
-        "--days",
-        type=int,
-        default=0,
-        help="Number of days to extend (used with --extend-stop or --extend-destroy)"
-    )
-    parser.add_argument(
-        "--hours",
-        type=int,
-        default=0,
-        help="Number of hours to extend (used with --extend-stop or --extend-destroy)"
-    )
-    parser.add_argument(
-        "--scale",
-        type=int,
-        default=None,
-        help="Scale WorkshopProvision count to N (e.g., --scale 40)"
-    )
-    parser.add_argument(
-        "--wizard",
-        action="store_true",
-        help="Launch interactive CSV generation wizard"
-    )
-
+    
     return parser
 
 def main():
@@ -3817,51 +3379,7 @@ def main():
     logger.info("RHDP-Flow: Red Hat Demo Platform Workshop Automation")
     logger.info("=" * 70)
     logger.info(f"Dry-Run Mode: {config.dry_run}")
-
-    # Handle wizard mode
-    if args.wizard:
-        try:
-            from rhdp_flow_wizard import RHDPWizard
-            wizard = RHDPWizard(config)
-            wizard.run()
-        except ImportError:
-            logger.error("Wizard requires 'rich' library. Install with: pip install rich")
-        sys.exit(0)
-
-    # Require input-csv for all non-wizard modes
-    if not args.input_csv:
-        parser.error("--input-csv is required (unless using --wizard)")
-
-    # Handle operational commands (lock, extend, scale)
-    if args.lock or args.extend_stop or args.extend_destroy or args.scale is not None:
-        try:
-            schedules = read_csv_input(args.input_csv)
-            if args.ci:
-                schedules = [s for s in schedules if s.ci == args.ci]
-            if not schedules:
-                logger.error("No schedules found in CSV")
-                sys.exit(1)
-
-            if args.lock:
-                lock_workshops(schedules, config)
-            elif args.extend_stop:
-                if args.days == 0 and args.hours == 0:
-                    logger.error("--extend-stop requires --days and/or --hours")
-                    sys.exit(1)
-                extend_stop_time(schedules, config, args.days, args.hours)
-            elif args.extend_destroy:
-                if args.days == 0 and args.hours == 0:
-                    logger.error("--extend-destroy requires --days and/or --hours")
-                    sys.exit(1)
-                extend_destroy_time(schedules, config, args.days, args.hours)
-            elif args.scale is not None:
-                scale_workshops(schedules, config, args.scale)
-
-            sys.exit(0)
-        except Exception as e:
-            logger.error(f"Operational command failed: {e}", exc_info=True)
-            sys.exit(1)
-
+    
     # Handle QA mode
     if args.qa:
         logger.info("QA Mode: Enabled")
@@ -3948,82 +3466,42 @@ def main():
     try:
         # Read input CSV
         schedules = read_csv_input(args.input_csv)
-
-        # Auto-discover per-asset passwords file ({stem}_passwords.csv)
+        
+        # Load per-asset passwords from {stem}_passwords.csv if present (for multi-asset workshops)
         input_path = Path(args.input_csv)
         passwords_path = input_path.parent / f"{input_path.stem}_passwords.csv"
         asset_passwords = load_asset_passwords(str(passwords_path))
-        if asset_passwords:
-            logger.info(f"Loaded per-asset passwords from: {passwords_path}")
-
+        # Load per-asset num_users from {stem}_asset_users.csv if present (for multi-asset workshops)
+        asset_users_path = input_path.parent / f"{input_path.stem}_asset_users.csv"
+        asset_num_users = load_asset_num_users(str(asset_users_path))
+        
         # Filter by CI if specified
         if args.ci:
             schedules = [s for s in schedules if s.ci == args.ci]
             if not schedules:
                 logger.error(f"No schedules found for CI: {args.ci}")
                 sys.exit(1)
-
-        # Handle grouped multi-asset workshops (rows sharing Multi_Workshop_Name without Asset_CIs)
-        # These are rows that have multi_workshop_name set but NOT the old is_multi_asset+Asset_CIs format
-        grouped_multi = {}
-        regular_schedules = []
-        for s in schedules:
-            if s.multi_workshop_name and not s.is_multi_asset:
-                grouped_multi.setdefault(s.multi_workshop_name, []).append(s)
-            else:
-                regular_schedules.append(s)
-
+        
+        if config.dry_run:
+            dry_run_validate_schedules(
+                schedules, asset_passwords, asset_num_users, input_path, config
+            )
+        
+        logger.info(f"Processing {len(schedules)} schedule(s)")
+        
+        # Process each schedule
         results = []
-        for group_name, group_schedules in grouped_multi.items():
-            logger.info(f"Processing grouped multi-asset: '{group_name}' ({len(group_schedules)} assets)")
-            mw_name = create_multi_workshop_from_group(group_schedules, config)
-            first = group_schedules[0]
-            if mw_name:
-                url = f"https://integration.demo.redhat.com/multi-workshop/{first.namespace}/{mw_name}"
-                results.append(DeploymentResult(
-                    ci_name=group_name, ci=first.ci, namespace=first.namespace,
-                    guid=mw_name, url=url, status="deployed_unverified",
-                    provisioning_date=first.provisioning_date, auto_stop=first.auto_stop,
-                    auto_destroy=first.auto_destroy, timestamp=time.strftime("%Y-%m-%d %H:%M:%S")
-                ))
-            else:
-                results.append(DeploymentResult(
-                    ci_name=group_name, ci=first.ci, namespace=first.namespace,
-                    guid="failed", url="", status="failed",
-                    provisioning_date=first.provisioning_date, auto_stop=first.auto_stop,
-                    auto_destroy=first.auto_destroy, timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
-                    error_message="Failed to create grouped MultiWorkshop"
-                ))
-
-        schedules = regular_schedules
-
-        # Expand schedules with count > 1 into multiple instances
-        expanded_schedules = []
         for schedule in schedules:
-            if schedule.count > 1:
-                logger.info(f"Expanding {schedule.ci_name} into {schedule.count} instances")
-                for i in range(1, schedule.count + 1):
-                    instance = copy.deepcopy(schedule)
-                    instance.workshop_name = f"{schedule.workshop_name} (Instance {i})"
-                    instance.count = 1  # Each instance is a single deployment
-                    expanded_schedules.append(instance)
-            else:
-                expanded_schedules.append(schedule)
-
-        logger.info(f"Processing {len(expanded_schedules)} schedule(s)")
-
-        # Process each schedule (append to grouped results if any)
-        for schedule in expanded_schedules:
-            result = process_schedule(schedule, config, asset_passwords=asset_passwords)
+            result = process_schedule(schedule, config, asset_passwords=asset_passwords, asset_num_users=asset_num_users)
             results.append(result)
-
+            
             logger.info(
                 f"Schedule processed: {result.ci_name} - "
                 f"Status: {result.status} - GUID: {result.guid}"
             )
-
+            
             # Small delay between schedules
-            if not config.dry_run and len(expanded_schedules) > 1:
+            if not config.dry_run and len(schedules) > 1:
                 time.sleep(1)
         
         # Write results
