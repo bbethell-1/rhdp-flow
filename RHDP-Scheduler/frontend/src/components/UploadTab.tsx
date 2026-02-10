@@ -29,9 +29,11 @@ export const UploadTab: React.FC<Props> = ({
   dryRun, schedules, setSchedules, setResults, showToast, onClear,
 }) => {
   const fileRef = useRef<HTMLInputElement>(null);
+  const passwordFileRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
 
   const [deploying, setDeploying] = useState(false);
+  const [passwordCount, setPasswordCount] = useState<number | null>(null);
   const [progress, setProgress] = useState(0);
   const [progressMsg, setProgressMsg] = useState('');
   const [logLines, setLogLines] = useState<string[]>([]);
@@ -53,6 +55,18 @@ export const UploadTab: React.FC<Props> = ({
     }
   };
 
+  const handleUploadPasswords = async () => {
+    const file = passwordFileRef.current?.files?.[0];
+    if (!file) { showToast('Please select a passwords CSV file', 'danger'); return; }
+    try {
+      const data = await api.uploadPasswordsCSV(file);
+      setPasswordCount(data.count);
+      showToast(data.message, 'success');
+    } catch (e) {
+      showToast(`Password upload failed: ${e}`, 'danger');
+    }
+  };
+
   const handleClear = async () => {
     try {
       await api.clearSession();
@@ -60,7 +74,9 @@ export const UploadTab: React.FC<Props> = ({
       setLogLines([]);
       setProgress(0);
       setProgressMsg('');
+      setPasswordCount(null);
       if (fileRef.current) fileRef.current.value = '';
+      if (passwordFileRef.current) passwordFileRef.current.value = '';
       showToast('Session cleared', 'success');
     } catch (e) {
       showToast(`Clear failed: ${e}`, 'danger');
@@ -135,6 +151,21 @@ export const UploadTab: React.FC<Props> = ({
         <SplitItem>
           <Button variant="secondary" onClick={handleClear}>Clear / New Upload</Button>
         </SplitItem>
+      </Split>
+
+      {/* Passwords CSV upload */}
+      <Split hasGutter style={{ marginBottom: 16, alignItems: 'center' }}>
+        <SplitItem>
+          <input type="file" accept=".csv" ref={passwordFileRef} />
+        </SplitItem>
+        <SplitItem>
+          <Button variant="secondary" onClick={handleUploadPasswords}>Upload Passwords</Button>
+        </SplitItem>
+        {passwordCount !== null && (
+          <SplitItem>
+            <span>{passwordCount} asset password(s) loaded</span>
+          </SplitItem>
+        )}
       </Split>
 
       {/* Schedule preview */}

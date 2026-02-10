@@ -29,6 +29,7 @@ def reset_state():
     routes._current_filename = ""
     routes._sessions = []
     routes._session_counter = 0
+    routes._asset_passwords = None
     yield
 
 
@@ -126,6 +127,44 @@ def test_get_schedules_after_upload(uploaded_client):
     resp = uploaded_client.get("/api/schedules")
     assert resp.status_code == 200
     assert len(resp.json()) == 1
+
+
+# ---------------------------------------------------------------------------
+# Upload Passwords
+# ---------------------------------------------------------------------------
+
+PASSWORDS_CSV = "CI,Password\nci-one.prod,pass1\nci-two.prod,pass2\nci-three.prod,pass3\n"
+
+
+def test_upload_passwords(client):
+    resp = client.post(
+        "/api/schedules/upload-passwords",
+        files={"file": ("passwords.csv", PASSWORDS_CSV.encode(), "text/csv")},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["count"] == 3
+    assert "3" in data["message"]
+
+
+def test_upload_passwords_empty(client):
+    empty_csv = "CI,Password\n"
+    resp = client.post(
+        "/api/schedules/upload-passwords",
+        files={"file": ("passwords.csv", empty_csv.encode(), "text/csv")},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["count"] == 0
+
+
+def test_clear_resets_passwords(client):
+    client.post(
+        "/api/schedules/upload-passwords",
+        files={"file": ("passwords.csv", PASSWORDS_CSV.encode(), "text/csv")},
+    )
+    assert routes._asset_passwords is not None
+    client.post("/api/sessions/clear", json={})
+    assert routes._asset_passwords is None
 
 
 # ---------------------------------------------------------------------------

@@ -40,6 +40,13 @@ export const api = {
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
+  uploadPasswordsCSV: async (file: File): Promise<{count: number; message: string}> => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${API}/schedules/upload-passwords`, { method: 'POST', body: form });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
   getSchedules: () => request<WorkshopSchedule[]>('/schedules'),
 
   // Deploy

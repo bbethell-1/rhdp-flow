@@ -79,7 +79,7 @@ The frontend has five tabs: **Upload & Deploy**, **Deployments**, **Operations**
 CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Count,AWS_Region,White_Glove
 ```
 
-See `example_workshop_schedule.csv` and `examples/` for complete examples.
+See `example_workshop_schedule.csv` and `sample-csvs/` for complete examples.
 
 ## Usage
 
@@ -138,7 +138,11 @@ python3 rhdp_flow.py --input-csv workshop_schedule.csv --qa both
 
 ## Per-Asset Passwords
 
-Place a `{input_stem}_passwords.csv` alongside your input CSV to override passwords per CI:
+Override passwords per CI using a companion CSV with `CI,Password` columns.
+
+**Web UI**: Use the "Upload Passwords" button on the Upload & Deploy tab to load a passwords CSV before deploying.
+
+**CLI**: Place a `{input_stem}_passwords.csv` alongside your input CSV:
 
 ```csv
 CI,Password
@@ -146,7 +150,7 @@ openshift-cnv.ocp-virt-roadshow-multi-user.prod,VirtSecret1
 zt-ansiblebu.ansible-network-automation-basics-lab-2.event,AnsibleSecret2
 ```
 
-See `examples/asset_passwords_example.csv`.
+See `sample-csvs/asset_passwords_example.csv`.
 
 ## Command Line Arguments
 
