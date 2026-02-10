@@ -61,6 +61,81 @@ See `example_workshop_schedule.csv` for a complete example. Required and optiona
 | Count | No | 1 | Number of instances to create |
 | AWS_Region | No | - | Comma-separated AWS regions for multi-region |
 
+## Web UI
+
+A web interface is available for interactive use without the CLI.
+
+### Starting the Server
+
+```bash
+pip3 install -r requirements.txt
+uvicorn api.server:app --reload --port 8000
+```
+
+Open `http://localhost:8000` in your browser. The UI has five tabs:
+
+| Tab | Purpose |
+|-----|---------|
+| **Upload & Deploy** | Upload CSV, preview schedules, dry-run or deploy |
+| **Deployments** | View deployment results with status badges, download CSV |
+| **Operations** | Lock, extend stop/destroy, scale existing workshops |
+| **QA** | Run QA verification (QA1/QA2/both), view results |
+| **Students** | View and download student landing page URLs |
+
+The health badge in the header shows your `oc` connection status. You must be `oc login`'d to deploy (dry-run works without a cluster).
+
+## Deployment Scenarios
+
+### Scenario 1: Multi-Asset (bundle multiple services into one event)
+
+When attendees need access to multiple different services (e.g., a Virt lab + an Ansible lab as a single event):
+
+**Option A — Grouped rows** (recommended, supports per-item passwords):
+```
+CI Name,CI,...,Multi_Workshop_Name,...
+Virt Roadshow Asset,openshift-cnv...,,,summit-demo-2026,...
+Ansible Lab Asset,zt-ansiblebu...,,,summit-demo-2026,...
+```
+Rows sharing the same `Multi_Workshop_Name` are bundled into one MultiWorkshop resource.
+
+**Option B — Single row with Asset_CIs**:
+```
+CI Name,CI,...,Multi_Asset,Asset_CIs,Multi_Workshop_Name,...
+Summit Event,openshift-cnv...,,,True,"ci-1,ci-2",summit-event-2026,...
+```
+
+See `examples/multi_asset_grouped.csv` and `examples/multi_asset_single_row.csv`.
+
+### Scenario 2: Multi-user service x N clusters
+
+When a catalog item deploys a shared multi-user cluster and you want multiple instances (e.g., 4 clusters of 40 users each = 160 total seats):
+
+```
+CI Name,CI,...,Users,Enable_workshop_interface,Count,Concurrency,...
+OpenShift AI Workshop,openshift-ai...,40,True,4,3,...
+```
+
+- **Count=4** creates 4 separate Workshop instances ("Instance 1" through "Instance 4")
+- **Users=40** means each instance supports 40 users
+- **Concurrency=3** deploys 3 provisions in parallel per instance
+
+See `examples/multi_user_multiple_clusters.csv`.
+
+### Scenario 3: Dedicated cluster per user
+
+When each user gets their own isolated cluster (e.g., 10 users, each with a dedicated OCP cluster):
+
+```
+CI Name,CI,...,Users,Enable_workshop_interface,Count,...
+Dedicated OCP,my-ocp.prod,...,1,False,10,...
+```
+
+- **Users=1** each ResourceClaim is for a single user
+- **Enable_workshop_interface=False** creates ResourceClaims (not Workshops)
+- **Count=10** creates 10 separate ResourceClaims
+
+See `examples/dedicated_per_user.csv`.
+
 ## Usage
 
 ### Deploy Workshops
@@ -122,18 +197,24 @@ python3 rhdp_flow.py --input-csv workshop_schedule.csv --qa both
 
 ## Testing
 
-The test suite (`test_rhdp_flow.py`) provides comprehensive coverage of all `rhdp_flow.py` functionality. All tests run **offline** — no cluster access or `oc` login needed. Subprocess calls are mocked with a dispatcher that returns realistic OpenShift responses.
+Tests are split across two locations. All tests run **offline** — no cluster access or `oc` login needed. Subprocess calls are mocked with a dispatcher that returns realistic OpenShift responses.
 
 ### Running Tests
 
 ```bash
 cd RHDP-Scheduler
 
-# Run all tests with pytest (verbose)
+# Run all tests (159 total)
+python3 -m pytest test_rhdp_flow.py tests/ -v
+
+# Run core business logic tests (113 tests)
 python3 -m pytest test_rhdp_flow.py -v
 
-# Run all tests with unittest
-python3 -m unittest test_rhdp_flow -v
+# Run API + refactored tests (46 tests)
+python3 -m pytest tests/ -v
+
+# Run only API endpoint tests
+python3 -m pytest tests/test_api.py -v
 
 # Run a specific test group
 python3 -m pytest test_rhdp_flow.py -v -k "TestCSVParsing"
@@ -184,6 +265,40 @@ def test_my_new_feature(self, mock_run):
     schedule = make_schedule(users=50, password="NewPass")
     result = process_schedule(schedule, config)
     self.assertEqual(result.status, "verified")
+```
+
+## Project Structure
+
+```
+RHDP-Scheduler/
+  rhdp_flow.py              # Core business logic (untouched by web UI)
+  rhdp_flow_wizard.py       # Interactive CSV wizard
+  test_rhdp_flow.py         # 113 core tests
+  example_workshop_schedule.csv
+
+  api/                      # FastAPI backend
+    server.py               # App factory, CORS, static file serving
+    routes.py               # All API endpoints
+    models.py               # Pydantic request/response schemas
+    jobs.py                 # Background job manager with SSE
+
+  web/                      # Vanilla JS frontend
+    index.html              # Single-page app with 5 tabs
+    style.css               # Red Hat-inspired styling
+    app.js                  # fetch() + EventSource for SSE
+
+  tests/                    # Refactored + API tests
+    conftest.py             # Shared fixtures and CSV constants
+    test_api.py             # API endpoint tests
+    test_csv.py             # CSV parsing tests
+    test_datetime.py        # Date/time utility tests
+    test_models.py          # Data model tests
+
+  examples/                 # Scenario-specific CSV examples
+    multi_asset_grouped.csv
+    multi_asset_single_row.csv
+    multi_user_multiple_clusters.csv
+    dedicated_per_user.csv
 ```
 
 ## Requirements

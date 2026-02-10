@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RHDP-Flow</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <h1><span>RHDP</span>-Flow</h1>
+  <div class="header-controls">
+    <label>
+      <input type="checkbox" id="globalDryRun" checked>
+      Dry-Run Mode
+    </label>
+    <span id="healthBadge">--</span>
+  </div>
+</div>
+
+<!-- Tab bar -->
+<div class="tab-bar">
+  <button class="tab-btn active" data-tab="upload">Upload &amp; Deploy</button>
+  <button class="tab-btn" data-tab="deployments">Deployments</button>
+  <button class="tab-btn" data-tab="operations">Operations</button>
+  <button class="tab-btn" data-tab="qa">QA</button>
+  <button class="tab-btn" data-tab="students">Students</button>
+</div>
+
+<!-- ================================================================ -->
+<!-- TAB 1: Upload & Deploy -->
+<!-- ================================================================ -->
+<div id="tab-upload" class="tab-content active">
+  <div class="card">
+    <h3>Upload Workshop Schedule CSV</h3>
+    <div class="form-row">
+      <input type="file" id="csvFile" accept=".csv">
+      <button class="btn btn-primary" id="btnUpload">Upload</button>
+    </div>
+  </div>
+
+  <div id="schedulePreview" class="card" style="display:none">
+    <h3>Loaded Schedules (<span id="scheduleCount">0</span>)</h3>
+    <div class="table-wrap">
+      <table id="scheduleTable">
+        <thead>
+          <tr>
+            <th>CI Name</th>
+            <th>CI</th>
+            <th>Namespace</th>
+            <th>Users</th>
+            <th>Workshop UI</th>
+            <th>Prov. Date</th>
+            <th>Auto-Stop</th>
+            <th>Auto-Destroy</th>
+            <th>Count</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="form-row" style="margin-top:12px">
+      <button class="btn btn-secondary" id="btnDryRun">Dry-Run</button>
+      <button class="btn btn-danger" id="btnDeploy">Deploy</button>
+    </div>
+  </div>
+
+  <div id="deployProgress" class="card" style="display:none">
+    <h3>Deployment Progress</h3>
+    <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+    <div id="progressMsg">Waiting...</div>
+    <div class="log" id="deployLog"></div>
+  </div>
+</div>
+
+<!-- ================================================================ -->
+<!-- TAB 2: Deployments -->
+<!-- ================================================================ -->
+<div id="tab-deployments" class="tab-content">
+  <div class="card">
+    <div class="form-row">
+      <h3>Deployment Results</h3>
+      <button class="btn btn-sm btn-secondary" id="btnRefreshResults">Refresh</button>
+      <button class="btn btn-sm btn-success" id="btnDownloadResults">Download CSV</button>
+    </div>
+    <div class="table-wrap">
+      <table id="resultsTable">
+        <thead>
+          <tr>
+            <th>CI Name</th>
+            <th>CI</th>
+            <th>GUID</th>
+            <th>Status</th>
+            <th>URL</th>
+            <th>Prov. Date</th>
+            <th>Timestamp</th>
+            <th>Error</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div id="resultsEmpty" class="empty">No deployment results yet.</div>
+  </div>
+</div>
+
+<!-- ================================================================ -->
+<!-- TAB 3: Operations -->
+<!-- ================================================================ -->
+<div id="tab-operations" class="tab-content">
+  <div class="ops-grid">
+    <div class="card">
+      <h3>Lock Workshops</h3>
+      <p>Set stop time to now (stop all workshops immediately).</p>
+      <button class="btn btn-danger" id="btnLock">Lock All</button>
+    </div>
+    <div class="card">
+      <h3>Extend Stop Time</h3>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Days</label>
+          <input type="number" id="extStopDays" value="0" min="0">
+        </div>
+        <div class="form-group">
+          <label>Hours</label>
+          <input type="number" id="extStopHours" value="0" min="0">
+        </div>
+        <button class="btn btn-primary" id="btnExtendStop">Extend Stop</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Extend Destroy Time</h3>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Days</label>
+          <input type="number" id="extDestroyDays" value="0" min="0">
+        </div>
+        <div class="form-group">
+          <label>Hours</label>
+          <input type="number" id="extDestroyHours" value="0" min="0">
+        </div>
+        <button class="btn btn-primary" id="btnExtendDestroy">Extend Destroy</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Scale Workshops</h3>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Target Count</label>
+          <input type="number" id="scaleCount" value="20" min="0">
+        </div>
+        <button class="btn btn-primary" id="btnScale">Scale</button>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Operations Log</h3>
+    <div class="log" id="opsLog">Ready.</div>
+  </div>
+</div>
+
+<!-- ================================================================ -->
+<!-- TAB 4: QA -->
+<!-- ================================================================ -->
+<div id="tab-qa" class="tab-content">
+  <div class="card">
+    <h3>Run QA Verification</h3>
+    <div class="form-row">
+      <div class="form-group">
+        <label>QA Type</label>
+        <select id="qaType">
+          <option value="1">QA1 - Verify Setup</option>
+          <option value="2">QA2 - Verify Deployment</option>
+          <option value="both" selected>Both</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" id="btnRunQA">Run QA</button>
+      <button class="btn btn-sm btn-secondary" id="btnRefreshQA">Refresh</button>
+    </div>
+  </div>
+  <div class="card">
+    <h3>QA Results (<span id="qaCount">0</span>)</h3>
+    <div class="table-wrap">
+      <table id="qaTable">
+        <thead>
+          <tr>
+            <th>CI Name</th>
+            <th>CI</th>
+            <th>Status</th>
+            <th>Deployed</th>
+            <th>Healthy</th>
+            <th>Seats</th>
+            <th>Landing Page URL</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div id="qaEmpty" class="empty">No QA results yet. Run QA above.</div>
+  </div>
+</div>
+
+<!-- ================================================================ -->
+<!-- TAB 5: Students -->
+<!-- ================================================================ -->
+<div id="tab-students" class="tab-content">
+  <div class="card">
+    <div class="form-row">
+      <h3>Student Landing Pages</h3>
+      <button class="btn btn-sm btn-success" id="btnDownloadStudents">Download CSV</button>
+    </div>
+    <div class="table-wrap">
+      <table id="studentsTable">
+        <thead>
+          <tr>
+            <th>CI Name</th>
+            <th>Landing Page URL</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div id="studentsEmpty" class="empty">No student data. Run QA first to populate.</div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

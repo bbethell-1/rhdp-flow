@@ -8,6 +8,7 @@ This script uses oc commands directly (no API authentication needed if already l
 
 import copy
 import csv
+import io
 import json
 import logging
 import subprocess
@@ -184,10 +185,10 @@ def calculate_duration(start: datetime, end: datetime) -> str:
 # CSV INPUT/OUTPUT HANDLERS
 # ============================================================================
 
-def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
+def read_csv_input(filepath) -> List[WorkshopSchedule]:
     """
-    Read workshop schedules from CSV file.
-    
+    Read workshop schedules from CSV file or StringIO object.
+
     Expected CSV headers:
     - CI Name
     - CI (Catalog Item ID)
@@ -200,13 +201,13 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
     - Provisioning Date (or Provisioning Date (UTC))
     - Auto-stop (or Auto-stop (UTC))
     - Auto-destroy (or Auto-destroy (UTC))
-    
+
     Args:
-        filepath: Path to input CSV file
-        
+        filepath: Path to input CSV file, or an io.StringIO object
+
     Returns:
         List of WorkshopSchedule objects
-        
+
     Raises:
         FileNotFoundError: If CSV file doesn't exist
         ValueError: If CSV is malformed or missing required headers
@@ -214,14 +215,18 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
     schedules = []
     # Support both old and new header formats (with/without UTC suffix)
     required_headers = {
-        'CI Name', 'CI', 'Namespace', 'Users', 
+        'CI Name', 'CI', 'Namespace', 'Users',
         'Enable_workshop_interface', 'Password',
         'Provisioning Date', 'Auto-stop', 'Auto-destroy',
         'Provisioning Date (UTC)', 'Auto-stop (UTC)', 'Auto-destroy (UTC)'
     }
-    
+
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
+        if isinstance(filepath, io.StringIO):
+            f_ctx = filepath
+        else:
+            f_ctx = open(filepath, 'r', encoding='utf-8')
+        with f_ctx as f:
             reader = csv.DictReader(f)
             
             if not reader.fieldnames:

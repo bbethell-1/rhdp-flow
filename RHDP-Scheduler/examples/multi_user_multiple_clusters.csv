@@ -1,0 +1,2 @@
+CI Name,CI,Namespace,Users,Workshop_instance_count,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Count,AWS_Region
+OpenShift AI Workshop,openshift-ai.ai-workshop-multi-user.prod,user-bbethell-redhat-com,40,,True,AIWorkshop1,Admin,Training,AI Workshop,20/02/2026 09:00,20/02/2026 17:00,22/02/2026 09:00,,,,3,4,
