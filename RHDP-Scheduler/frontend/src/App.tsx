@@ -158,7 +158,7 @@ const App: React.FC = () => {
             />
           </Tab>
           <Tab eventKey="operations" title={<TabTitleText>Operations</TabTitleText>}>
-            <OperationsTab showToast={showToast} />
+            <OperationsTab showToast={showToast} schedules={schedules} />
           </Tab>
           <Tab eventKey="qa" title={<TabTitleText>QA</TabTitleText>}>
             <QATab

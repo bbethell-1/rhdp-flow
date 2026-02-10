@@ -18,6 +18,11 @@ html, body, #root {
   height: 100vh;
 }
 
+/* Let the main content section scroll vertically when content exceeds viewport */
+.pf-v6-c-page__main-section.pf-m-fill {
+  overflow-y: auto;
+}
+
 /* ── Dark masthead (always dark regardless of theme) ── */
 .pf-v6-c-masthead {
   background-color: var(--rh-dark) !important;
@@ -127,11 +132,36 @@ html, body, #root {
   white-space: nowrap;
 }
 
-/* Operations grid */
+/* Operations grid — 2 columns on wide, 1 column on narrow, no horizontal scroll */
 .ops-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: 16px;
+  max-width: 100%;
+  overflow: hidden;
+}
+@media (max-width: 768px) {
+  .ops-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Number input row inside ops cards */
+.ops-number-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+/* Prevent PF number inputs from forcing overflow */
+.ops-grid .pf-v6-c-number-input {
+  min-width: 0;
+}
+.ops-grid .pf-v6-c-card {
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* Dry-run checkbox + controls in masthead */

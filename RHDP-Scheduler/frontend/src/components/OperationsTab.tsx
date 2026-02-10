@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import {
   Button,
   PageSection,
@@ -7,74 +7,146 @@ import {
   CardBody,
   CardTitle,
   NumberInput,
+  Select,
+  SelectOption,
+  SelectList,
+  MenuToggle,
 } from '@patternfly/react-core';
+import { Table, Thead, Tbody, Tr, Th, Td } from '@patternfly/react-table';
 
 import { api } from '../services/api';
+import type { WorkshopSchedule } from '../types';
 
 interface Props {
   showToast: (msg: string, variant: 'success' | 'danger' | 'info') => void;
+  schedules: WorkshopSchedule[];
 }
 
-export const OperationsTab: React.FC<Props> = ({ showToast }) => {
+interface OpRecord {
+  timestamp: string;
+  operation: string;
+  target: string;
+  values: string;
+  status: 'success' | 'failed';
+  message: string;
+}
+
+/** Reusable CI filter dropdown for each operation card */
+const CIFilter: React.FC<{
+  options: string[];
+  value: string;
+  onChange: (val: string) => void;
+  id: string;
+}> = ({ options, value, onChange, id }) => {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <label htmlFor={id} style={{ display: 'block', marginBottom: 4, fontSize: '0.85rem', fontWeight: 600 }}>
+        Target
+      </label>
+      <Select
+        id={id}
+        isOpen={isOpen}
+        selected={value}
+        onSelect={(_e, val) => { onChange(val as string); setIsOpen(false); }}
+        onOpenChange={setIsOpen}
+        toggle={(toggleRef) => (
+          <MenuToggle
+            ref={toggleRef}
+            onClick={() => setIsOpen(prev => !prev)}
+            isExpanded={isOpen}
+            isFullWidth
+          >
+            {value || 'All Catalog Items'}
+          </MenuToggle>
+        )}
+        shouldFocusToggleOnSelect
+      >
+        <SelectList>
+          <SelectOption value="">All Catalog Items</SelectOption>
+          {options.map(ci => (
+            <SelectOption key={ci} value={ci}>{ci}</SelectOption>
+          ))}
+        </SelectList>
+      </Select>
+    </div>
+  );
+};
+
+export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
+  const [lockFilter, setLockFilter] = useState('');
+  const [extStopFilter, setExtStopFilter] = useState('');
   const [extStopDays, setExtStopDays] = useState(0);
   const [extStopHours, setExtStopHours] = useState(0);
+  const [extDestroyFilter, setExtDestroyFilter] = useState('');
   const [extDestroyDays, setExtDestroyDays] = useState(0);
   const [extDestroyHours, setExtDestroyHours] = useState(0);
+  const [scaleFilter, setScaleFilter] = useState('');
   const [scaleCount, setScaleCount] = useState(20);
-  const [logLines, setLogLines] = useState<string[]>([]);
-  const logRef = useRef<HTMLDivElement>(null);
+  const [history, setHistory] = useState<OpRecord[]>([]);
 
-  useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [logLines]);
+  const ciOptions = useMemo(() => {
+    const unique = new Set(schedules.map(s => s.ci));
+    return Array.from(unique).sort();
+  }, [schedules]);
 
-  const log = (msg: string) => {
-    const ts = new Date().toLocaleTimeString();
-    setLogLines(prev => [...prev, `[${ts}] ${msg}`]);
+  const addRecord = (operation: string, target: string, values: string, success: boolean, message: string) => {
+    setHistory(prev => [{
+      timestamp: new Date().toLocaleTimeString(),
+      operation,
+      target: target || 'All',
+      values,
+      status: success ? 'success' : 'failed',
+      message,
+    }, ...prev]);
   };
 
   const handleLock = async () => {
     try {
-      const r = await api.lock({});
-      log(r.message);
+      const r = await api.lock({ ci_filter: lockFilter || undefined });
+      addRecord('Lock', lockFilter, '--', r.success, r.message);
       showToast(r.message, r.success ? 'success' : 'danger');
     } catch (e) {
-      log(`Lock failed: ${e}`);
+      addRecord('Lock', lockFilter, '--', false, String(e));
       showToast(`Lock failed: ${e}`, 'danger');
     }
   };
 
   const handleExtendStop = async () => {
     if (extStopDays === 0 && extStopHours === 0) { showToast('Specify days or hours', 'danger'); return; }
+    const vals = `${extStopDays}d ${extStopHours}h`;
     try {
-      const r = await api.extendStop({ days: extStopDays, hours: extStopHours });
-      log(r.message);
+      const r = await api.extendStop({ days: extStopDays, hours: extStopHours, ci_filter: extStopFilter || undefined });
+      addRecord('Extend Stop', extStopFilter, vals, r.success, r.message);
       showToast(r.message, r.success ? 'success' : 'danger');
     } catch (e) {
-      log(`Extend stop failed: ${e}`);
+      addRecord('Extend Stop', extStopFilter, vals, false, String(e));
       showToast(`Extend stop failed: ${e}`, 'danger');
     }
   };
 
   const handleExtendDestroy = async () => {
     if (extDestroyDays === 0 && extDestroyHours === 0) { showToast('Specify days or hours', 'danger'); return; }
+    const vals = `${extDestroyDays}d ${extDestroyHours}h`;
     try {
-      const r = await api.extendDestroy({ days: extDestroyDays, hours: extDestroyHours });
-      log(r.message);
+      const r = await api.extendDestroy({ days: extDestroyDays, hours: extDestroyHours, ci_filter: extDestroyFilter || undefined });
+      addRecord('Extend Destroy', extDestroyFilter, vals, r.success, r.message);
       showToast(r.message, r.success ? 'success' : 'danger');
     } catch (e) {
-      log(`Extend destroy failed: ${e}`);
+      addRecord('Extend Destroy', extDestroyFilter, vals, false, String(e));
       showToast(`Extend destroy failed: ${e}`, 'danger');
     }
   };
 
   const handleScale = async () => {
+    const vals = `count: ${scaleCount}`;
     try {
-      const r = await api.scale({ target_count: scaleCount });
-      log(r.message);
+      const r = await api.scale({ target_count: scaleCount, ci_filter: scaleFilter || undefined });
+      addRecord('Scale', scaleFilter, vals, r.success, r.message);
       showToast(r.message, r.success ? 'success' : 'danger');
     } catch (e) {
-      log(`Scale failed: ${e}`);
+      addRecord('Scale', scaleFilter, vals, false, String(e));
       showToast(`Scale failed: ${e}`, 'danger');
     }
   };
@@ -83,19 +155,21 @@ export const OperationsTab: React.FC<Props> = ({ showToast }) => {
     <PageSection>
       <div className="ops-grid" style={{ marginBottom: 16 }}>
         {/* Lock */}
-        <Card>
+        <Card isFullHeight>
           <CardTitle>Lock Workshops</CardTitle>
           <CardBody>
-            <p style={{ marginBottom: 8 }}>Set stop time to now (immediate shutdown).</p>
+            <CIFilter options={ciOptions} value={lockFilter} onChange={setLockFilter} id="lock-ci-filter" />
+            <p style={{ marginBottom: 8, fontSize: '0.85rem' }}>Set stop time to now (immediate shutdown).</p>
             <Button variant="danger" onClick={handleLock}>Lock</Button>
           </CardBody>
         </Card>
 
         {/* Extend Stop */}
-        <Card>
+        <Card isFullHeight>
           <CardTitle>Extend Stop Time</CardTitle>
           <CardBody>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            <CIFilter options={ciOptions} value={extStopFilter} onChange={setExtStopFilter} id="ext-stop-ci-filter" />
+            <div className="ops-number-row">
               <NumberInput
                 value={extStopDays}
                 min={0}
@@ -122,10 +196,11 @@ export const OperationsTab: React.FC<Props> = ({ showToast }) => {
         </Card>
 
         {/* Extend Destroy */}
-        <Card>
+        <Card isFullHeight>
           <CardTitle>Extend Destroy Time</CardTitle>
           <CardBody>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            <CIFilter options={ciOptions} value={extDestroyFilter} onChange={setExtDestroyFilter} id="ext-destroy-ci-filter" />
+            <div className="ops-number-row">
               <NumberInput
                 value={extDestroyDays}
                 min={0}
@@ -152,10 +227,11 @@ export const OperationsTab: React.FC<Props> = ({ showToast }) => {
         </Card>
 
         {/* Scale */}
-        <Card>
+        <Card isFullHeight>
           <CardTitle>Scale Workshops</CardTitle>
           <CardBody>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+            <CIFilter options={ciOptions} value={scaleFilter} onChange={setScaleFilter} id="scale-ci-filter" />
+            <div className="ops-number-row">
               <NumberInput
                 value={scaleCount}
                 min={0}
@@ -172,11 +248,40 @@ export const OperationsTab: React.FC<Props> = ({ showToast }) => {
         </Card>
       </div>
 
-      {/* Operations Log */}
-      <Title headingLevel="h3" style={{ marginBottom: 8 }}>Operations Log</Title>
-      <div className="log-box" ref={logRef}>
-        {logLines.length > 0 ? logLines.join('\n') : 'No operations yet.'}
-      </div>
+      {/* Operations History Table */}
+      <Title headingLevel="h3" style={{ marginBottom: 8 }}>Operations History</Title>
+      {history.length > 0 ? (
+        <Table aria-label="Operations history" variant="compact">
+          <Thead>
+            <Tr>
+              <Th>Time</Th>
+              <Th>Operation</Th>
+              <Th>Target CI</Th>
+              <Th>Values</Th>
+              <Th>Status</Th>
+              <Th>Message</Th>
+            </Tr>
+          </Thead>
+          <Tbody>
+            {history.map((rec, i) => (
+              <Tr key={i}>
+                <Td dataLabel="Time">{rec.timestamp}</Td>
+                <Td dataLabel="Operation">{rec.operation}</Td>
+                <Td dataLabel="Target CI">{rec.target}</Td>
+                <Td dataLabel="Values">{rec.values}</Td>
+                <Td dataLabel="Status">
+                  <span className={rec.status === 'success' ? 'status-verified' : 'status-failed'}>
+                    {rec.status}
+                  </span>
+                </Td>
+                <Td dataLabel="Message">{rec.message}</Td>
+              </Tr>
+            ))}
+          </Tbody>
+        </Table>
+      ) : (
+        <div className="log-box">No operations yet.</div>
+      )}
     </PageSection>
   );
 };
