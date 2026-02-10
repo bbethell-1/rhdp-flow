@@ -3300,6 +3300,279 @@ def process_schedule(
             error_message=str(e)
         )
 
+# ============================================================================
+# OPERATIONS: LOCK, EXTEND, SCALE
+# ============================================================================
+
+def lock_workshops(schedules, config):
+    """Lock workshops by setting their stop time to now (immediate stop).
+
+    For each schedule, finds the corresponding Workshop resource via label
+    selector and patches its actionSchedule.stop to the current time.
+    """
+    env = os.environ.copy()
+    if config.kubeconfig_path:
+        env['KUBECONFIG'] = config.kubeconfig_path
+
+    now_iso = format_iso8601(datetime.now(timezone.utc))
+
+    for schedule in schedules:
+        ns = schedule.namespace
+        ci = schedule.ci
+        logger.info(f"Locking workshops for CI={ci} in namespace={ns}")
+
+        # Find workshops by catalog item label
+        get_cmd = [
+            config.oc_command, "get", "workshop",
+            "-n", ns,
+            "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}",
+            "-o", "jsonpath={.items[*].metadata.name}",
+        ]
+
+        if config.dry_run:
+            logger.info(f"[DRY-RUN] Would run: {' '.join(get_cmd)}")
+            continue
+
+        result = subprocess.run(get_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+        if result.returncode != 0:
+            logger.error(f"Failed to get workshops: {result.stderr}")
+            continue
+
+        names = result.stdout.strip().split()
+        for name in names:
+            if not name:
+                continue
+            patch_cmd = [
+                config.oc_command, "patch", "workshop", name,
+                "-n", ns,
+                "--type", "merge",
+                "-p", json.dumps({"spec": {"actionSchedule": {"stop": now_iso}}}),
+            ]
+            logger.info(f"Locking workshop {name}: setting stop={now_iso}")
+            pr = subprocess.run(patch_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+            if pr.returncode != 0:
+                logger.error(f"Failed to patch workshop {name}: {pr.stderr}")
+            else:
+                logger.info(f"Locked workshop {name}")
+
+
+def extend_stop_time(schedules, config, days, hours):
+    """Extend the auto-stop time of workshops by the given days/hours.
+
+    Reads the current actionSchedule.stop from each Workshop, adds the
+    requested timedelta, and patches the new value back.
+    """
+    env = os.environ.copy()
+    if config.kubeconfig_path:
+        env['KUBECONFIG'] = config.kubeconfig_path
+
+    delta = timedelta(days=days, hours=hours)
+
+    for schedule in schedules:
+        ns = schedule.namespace
+        ci = schedule.ci
+        logger.info(f"Extending stop time for CI={ci} in namespace={ns} by {days}d {hours}h")
+
+        get_cmd = [
+            config.oc_command, "get", "workshop",
+            "-n", ns,
+            "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}",
+            "-o", "json",
+        ]
+
+        if config.dry_run:
+            logger.info(f"[DRY-RUN] Would run: {' '.join(get_cmd)}")
+            continue
+
+        result = subprocess.run(get_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+        if result.returncode != 0:
+            logger.error(f"Failed to get workshops: {result.stderr}")
+            continue
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            logger.error(f"Invalid JSON from oc get workshop: {result.stdout[:200]}")
+            continue
+
+        items = data.get("items", [data] if "metadata" in data else [])
+        for item in items:
+            name = item.get("metadata", {}).get("name", "")
+            if not name:
+                continue
+            current_stop = (
+                item.get("spec", {}).get("actionSchedule", {}).get("stop", "")
+            )
+            dt = parse_date_time(current_stop)
+            if dt is None:
+                logger.warning(f"Cannot parse stop time '{current_stop}' for {name}, skipping")
+                continue
+            new_stop = format_iso8601(dt + delta)
+            patch_cmd = [
+                config.oc_command, "patch", "workshop", name,
+                "-n", ns,
+                "--type", "merge",
+                "-p", json.dumps({"spec": {"actionSchedule": {"stop": new_stop}}}),
+            ]
+            logger.info(f"Extending stop for {name}: {current_stop} -> {new_stop}")
+            pr = subprocess.run(patch_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+            if pr.returncode != 0:
+                logger.error(f"Failed to patch workshop {name}: {pr.stderr}")
+            else:
+                logger.info(f"Extended stop for {name}")
+
+
+def extend_destroy_time(schedules, config, days, hours):
+    """Extend the auto-destroy (lifespan.end) of workshops and their provisions.
+
+    Patches both Workshop and WorkshopProvision resources so the destroy
+    time is pushed out by the requested amount.
+    """
+    env = os.environ.copy()
+    if config.kubeconfig_path:
+        env['KUBECONFIG'] = config.kubeconfig_path
+
+    delta = timedelta(days=days, hours=hours)
+
+    for schedule in schedules:
+        ns = schedule.namespace
+        ci = schedule.ci
+        logger.info(f"Extending destroy time for CI={ci} in namespace={ns} by {days}d {hours}h")
+
+        # --- Patch Workshop lifespan.end ---
+        get_ws_cmd = [
+            config.oc_command, "get", "workshop",
+            "-n", ns,
+            "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}",
+            "-o", "json",
+        ]
+
+        if config.dry_run:
+            logger.info(f"[DRY-RUN] Would run: {' '.join(get_ws_cmd)}")
+            continue
+
+        result = subprocess.run(get_ws_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+        if result.returncode != 0:
+            logger.error(f"Failed to get workshops: {result.stderr}")
+            continue
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            logger.error(f"Invalid JSON from oc get workshop: {result.stdout[:200]}")
+            continue
+
+        items = data.get("items", [data] if "metadata" in data else [])
+        for item in items:
+            name = item.get("metadata", {}).get("name", "")
+            if not name:
+                continue
+            current_end = item.get("spec", {}).get("lifespan", {}).get("end", "")
+            dt = parse_date_time(current_end)
+            if dt is None:
+                logger.warning(f"Cannot parse lifespan end '{current_end}' for {name}, skipping")
+                continue
+            new_end = format_iso8601(dt + delta)
+            patch_cmd = [
+                config.oc_command, "patch", "workshop", name,
+                "-n", ns,
+                "--type", "merge",
+                "-p", json.dumps({"spec": {"lifespan": {"end": new_end}}}),
+            ]
+            logger.info(f"Extending destroy for workshop {name}: {current_end} -> {new_end}")
+            pr = subprocess.run(patch_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+            if pr.returncode != 0:
+                logger.error(f"Failed to patch workshop {name}: {pr.stderr}")
+
+        # --- Patch WorkshopProvision lifespan.end ---
+        get_wp_cmd = [
+            config.oc_command, "get", "workshopprovision",
+            "-n", ns,
+            "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}",
+            "-o", "json",
+        ]
+        result = subprocess.run(get_wp_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+        if result.returncode != 0:
+            logger.error(f"Failed to get workshopprovisions: {result.stderr}")
+            continue
+
+        try:
+            wp_data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            logger.error(f"Invalid JSON from oc get workshopprovision: {result.stdout[:200]}")
+            continue
+
+        wp_items = wp_data.get("items", [wp_data] if "metadata" in wp_data else [])
+        for wp in wp_items:
+            wp_name = wp.get("metadata", {}).get("name", "")
+            if not wp_name:
+                continue
+            wp_end = wp.get("spec", {}).get("lifespan", {}).get("end", "")
+            wp_dt = parse_date_time(wp_end)
+            if wp_dt is None:
+                logger.warning(f"Cannot parse lifespan end '{wp_end}' for provision {wp_name}, skipping")
+                continue
+            new_wp_end = format_iso8601(wp_dt + delta)
+            patch_cmd = [
+                config.oc_command, "patch", "workshopprovision", wp_name,
+                "-n", ns,
+                "--type", "merge",
+                "-p", json.dumps({"spec": {"lifespan": {"end": new_wp_end}}}),
+            ]
+            logger.info(f"Extending destroy for provision {wp_name}: {wp_end} -> {new_wp_end}")
+            pr = subprocess.run(patch_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+            if pr.returncode != 0:
+                logger.error(f"Failed to patch workshopprovision {wp_name}: {pr.stderr}")
+
+
+def scale_workshops(schedules, config, target_count):
+    """Scale workshop provisions to the given target count.
+
+    Finds WorkshopProvision resources and patches their spec.count.
+    """
+    env = os.environ.copy()
+    if config.kubeconfig_path:
+        env['KUBECONFIG'] = config.kubeconfig_path
+
+    for schedule in schedules:
+        ns = schedule.namespace
+        ci = schedule.ci
+        logger.info(f"Scaling provisions for CI={ci} in namespace={ns} to count={target_count}")
+
+        get_cmd = [
+            config.oc_command, "get", "workshopprovision",
+            "-n", ns,
+            "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}",
+            "-o", "jsonpath={.items[*].metadata.name}",
+        ]
+
+        if config.dry_run:
+            logger.info(f"[DRY-RUN] Would run: {' '.join(get_cmd)}")
+            continue
+
+        result = subprocess.run(get_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+        if result.returncode != 0:
+            logger.error(f"Failed to get workshopprovisions: {result.stderr}")
+            continue
+
+        names = result.stdout.strip().split()
+        for name in names:
+            if not name:
+                continue
+            patch_cmd = [
+                config.oc_command, "patch", "workshopprovision", name,
+                "-n", ns,
+                "--type", "merge",
+                "-p", json.dumps({"spec": {"count": target_count}}),
+            ]
+            logger.info(f"Scaling provision {name} to count={target_count}")
+            pr = subprocess.run(patch_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+            if pr.returncode != 0:
+                logger.error(f"Failed to patch workshopprovision {name}: {pr.stderr}")
+            else:
+                logger.info(f"Scaled provision {name} to count={target_count}")
+
+
 def create_parser() -> ArgumentParser:
     """Create argument parser"""
     parser = ArgumentParser(

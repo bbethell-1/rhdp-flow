@@ -28,13 +28,14 @@ from rhdp_flow import (
     read_csv_input,
     load_asset_passwords,
     process_schedule,
+    create_multi_workshop,
+    qa1_verify_setup,
+    qa2_verify_deployment_status,
+    export_student_landing_page_csv,
     lock_workshops,
     extend_stop_time,
     extend_destroy_time,
     scale_workshops,
-    qa1_verify_setup,
-    qa2_verify_deployment_status,
-    export_student_landing_page_csv,
 )
 
 from api.models import (
@@ -88,8 +89,8 @@ def _schedule_to_response(s: WorkshopSchedule) -> WorkshopScheduleResponse:
         auto_stop=s.auto_stop, auto_destroy=s.auto_destroy,
         is_multi_asset=s.is_multi_asset, asset_cis=s.asset_cis,
         multi_workshop_name=s.multi_workshop_name,
-        concurrency=s.concurrency, count=s.count, aws_regions=s.aws_regions,
-        white_glove=s.white_glove,
+        concurrency=s.concurrency, instances=s.instances,
+        campaign_id=s.campaign_id,
     )
 
 
@@ -248,21 +249,22 @@ async def upload_csv(file: UploadFile = File(...)):
     except UnicodeDecodeError:
         raise HTTPException(400, "File must be UTF-8 encoded CSV")
 
-    sio = io.StringIO(text)
-    try:
-        schedules = read_csv_input(sio)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-    _schedules = schedules
-    _current_filename = file.filename or "unknown.csv"
-    # Also write a temp file so QA functions can use a path
+    # Write to temp file — read_csv_input requires a file path
     import tempfile
     tmp = tempfile.NamedTemporaryFile(
         mode="w", suffix=".csv", delete=False, encoding="utf-8"
     )
     tmp.write(text)
     tmp.close()
+
+    try:
+        schedules = read_csv_input(tmp.name)
+    except ValueError as e:
+        os.unlink(tmp.name)
+        raise HTTPException(400, str(e))
+
+    _schedules = schedules
+    _current_filename = file.filename or "unknown.csv"
     _csv_filepath = tmp.name
 
     return UploadResponse(

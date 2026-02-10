@@ -18,7 +18,6 @@ class WorkshopScheduleResponse(BaseModel):
     ci_name: str
     ci: str
     namespace: str
-    users: int
     enable_workshop_interface: bool
     password: str
     activity: str
@@ -30,10 +29,10 @@ class WorkshopScheduleResponse(BaseModel):
     is_multi_asset: bool = False
     asset_cis: str = ""
     multi_workshop_name: str = ""
-    concurrency: int = 1
-    count: int = 1
-    aws_regions: str = ""
-    white_glove: bool = False
+    users: Optional[int] = None
+    instances: Optional[int] = None
+    concurrency: Optional[int] = None
+    campaign_id: str = ""
 
 
 class DeploymentResultResponse(BaseModel):
@@ -50,7 +49,6 @@ class DeploymentResultResponse(BaseModel):
     auto_destroy: str
     timestamp: str
     error_message: str = ""
-    log_url: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -67,16 +65,22 @@ class DeployRequest(BaseModel):
 
 
 class LockRequest(BaseModel):
+    """Body for POST /api/operations/lock."""
+
     ci_filter: Optional[str] = None
 
 
 class ExtendRequest(BaseModel):
+    """Body for POST /api/operations/extend-stop and extend-destroy."""
+
     days: int = Field(0, ge=0)
     hours: int = Field(0, ge=0)
     ci_filter: Optional[str] = None
 
 
 class ScaleRequest(BaseModel):
+    """Body for POST /api/operations/scale."""
+
     target_count: int = Field(..., ge=0)
     ci_filter: Optional[str] = None
 
