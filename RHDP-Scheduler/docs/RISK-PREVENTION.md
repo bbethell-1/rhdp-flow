@@ -52,39 +52,54 @@ Safeguards built into the RHDP-Flow UI to prevent user errors during workshop sc
 
 **Safeguard:** All operation buttons (Lock, Extend Stop, Extend Destroy, Scale) show loading spinners and are disabled while the request is in-flight.
 
----
-
-## Planned
-
 ### 6. Scale to Zero Warning (MEDIUM)
 
 **Risk:** Scaling to 0 instances destroys all workshop resources. The number input currently allows 0 without confirmation.
 
-**Fix:** Add confirmation modal when target count is 0, warning that this will remove all instances.
+**Safeguard:** When the user sets the scale target to 0 and clicks Scale, a confirmation modal appears warning that this will remove all workshop instances and destroy all running resources. The user must explicitly confirm before the operation proceeds.
 
 ### 7. Lock Scope Visibility (MEDIUM)
 
 **Risk:** User locks "All Catalog Items" when they intended to lock a single CI, because the confirmation modal does not show how many workshops will be affected.
 
-**Fix:** Display the CI filter value and affected workshop count in the lock confirmation modal.
+**Safeguard:** The lock confirmation modal now displays:
+
+- The exact number of workshops that will be affected (e.g., "3 workshop(s)")
+- The CI filter value being applied (or "all catalog items" if no filter)
 
 ### 8. Dry-Run Mode Visual Distinction (MEDIUM)
 
 **Risk:** User forgets they toggled off dry-run mode and accidentally deploys live.
 
-**Fix:** Add a persistent warning banner or color accent when dry-run is disabled, making live mode visually distinct.
+**Safeguard:** When dry-run is disabled (live mode), two visual indicators appear:
+
+- **Persistent danger banner** below the masthead: "LIVE MODE — Dry-run is disabled. Deployments will provision real resources."
+- **Red bottom border** on the masthead bar, making the mode change immediately visible
 
 ### 9. CSV Row Skip Reporting (MEDIUM)
 
 **Risk:** Some CSV rows fail to parse (bad values in Users, Instances, Concurrency) and are silently dropped. User sees "Loaded 7 schedules" but uploaded 10 rows.
 
-**Fix:** Return skipped row count and reasons from backend; display in upload summary.
+**Safeguard:** The upload endpoint now returns `total_rows` and `skipped_rows` counts. When rows are skipped:
+
+- Toast message shows "Loaded X of Y row(s) — Z row(s) skipped"
+- A danger alert appears above the schedule preview explaining that some rows could not be parsed
 
 ### 10. Blank Field Visual Flags (MEDIUM)
 
 **Risk:** Rows with missing passwords, blank activity/purpose fields, or empty optional fields are not visually distinguished.
 
-**Fix:** Add warning icons or color coding on rows with incomplete data in the schedule preview.
+**Safeguard:** The validation system now flags rows with:
+
+- Missing passwords
+- Blank Activity fields
+- Blank Purpose fields
+
+These appear as warnings in the validation summary alongside date warnings, with affected rows highlighted.
+
+---
+
+## Planned
 
 ### 11. Extend Operations Preview (LOW)
 
@@ -106,4 +121,4 @@ Safeguards built into the RHDP-Flow UI to prevent user errors during workshop sc
 
 ---
 
-*Last updated: 2026-02-10*
+*Last updated: 2026-02-11*

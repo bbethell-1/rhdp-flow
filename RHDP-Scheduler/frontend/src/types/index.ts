@@ -30,6 +30,8 @@ export interface WorkshopSchedule {
 
 export interface UploadResponse {
   count: number;
+  total_rows: number;
+  skipped_rows: number;
   schedules: WorkshopSchedule[];
 }
 

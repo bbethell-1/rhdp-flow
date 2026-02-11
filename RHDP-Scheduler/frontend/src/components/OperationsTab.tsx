@@ -99,10 +99,19 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
   // Lock confirmation modal
   const [showLockConfirm, setShowLockConfirm] = useState(false);
 
+  // Scale-to-zero confirmation modal
+  const [showScaleZeroConfirm, setShowScaleZeroConfirm] = useState(false);
+
   const ciOptions = useMemo(() => {
     const unique = new Set(schedules.map(s => s.ci));
     return Array.from(unique).sort();
   }, [schedules]);
+
+  /** How many workshops the current lock filter would affect */
+  const lockAffectedCount = useMemo(() => {
+    if (!lockFilter) return schedules.length;
+    return schedules.filter(s => s.ci === lockFilter).length;
+  }, [schedules, lockFilter]);
 
   const addRecord = (operation: string, target: string, values: string, success: boolean, message: string) => {
     setHistory(prev => [{
@@ -163,6 +172,12 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
   };
 
   const handleScale = async () => {
+    // Intercept scale-to-zero
+    if (scaleCount === 0 && !showScaleZeroConfirm) {
+      setShowScaleZeroConfirm(true);
+      return;
+    }
+    setShowScaleZeroConfirm(false);
     const vals = `count: ${scaleCount}`;
     setScaleLoading(true);
     try {
@@ -346,11 +361,35 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
       >
         <ModalHeader title="Confirm Lock" labelId="lock-confirm-title" titleIconVariant="warning" />
         <ModalBody>
-          This will immediately shut down workshops{lockFilter ? ` for "${lockFilter}"` : ''} by setting the stop time to now. <strong>This cannot be undone.</strong>
+          <p>
+            This will immediately shut down {lockAffectedCount > 0 ? <strong>{lockAffectedCount} workshop(s)</strong> : 'workshops'}
+            {lockFilter ? <> matching <strong>"{lockFilter}"</strong></> : <> (<strong>all catalog items</strong>)</>}
+            {' '}by setting the stop time to now.
+          </p>
+          <p style={{ marginTop: 8 }}><strong>This cannot be undone.</strong></p>
         </ModalBody>
         <ModalFooter>
           <Button variant="danger" onClick={handleLock}>Lock Now</Button>
           <Button variant="link" onClick={() => setShowLockConfirm(false)}>Cancel</Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Scale-to-zero confirmation modal */}
+      <Modal
+        variant="small"
+        isOpen={showScaleZeroConfirm}
+        onClose={() => setShowScaleZeroConfirm(false)}
+        aria-labelledby="scale-zero-title"
+      >
+        <ModalHeader title="Confirm Scale to Zero" labelId="scale-zero-title" titleIconVariant="warning" />
+        <ModalBody>
+          Scaling to <strong>0</strong> will remove all workshop instances
+          {scaleFilter ? <> for <strong>"{scaleFilter}"</strong></> : ''}.
+          This will destroy all running resources. Continue?
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="danger" onClick={handleScale}>Scale to Zero</Button>
+          <Button variant="link" onClick={() => setShowScaleZeroConfirm(false)}>Cancel</Button>
         </ModalFooter>
       </Modal>
     </PageSection>

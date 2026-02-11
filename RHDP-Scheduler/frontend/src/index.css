@@ -28,6 +28,11 @@ html, body, #root {
   background-color: var(--rh-dark) !important;
 }
 
+/* Red bottom border on masthead when live mode is active */
+.pf-v6-c-masthead.live-mode {
+  border-bottom: 3px solid var(--rh-red) !important;
+}
+
 /* Toolbar background transparent on dark masthead */
 .pf-v6-c-masthead .pf-v6-c-toolbar {
   --pf-v6-c-toolbar--BackgroundColor: transparent;

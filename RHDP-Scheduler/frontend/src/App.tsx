@@ -88,7 +88,7 @@ const App: React.FC = () => {
   const studentsCount = qaResults.filter(r => r.landing_page_url).length;
 
   const masthead = (
-    <Masthead>
+    <Masthead className={dryRun ? undefined : 'live-mode'}>
       <MastheadMain>
         <MastheadBrand>
           <MastheadLogo component="span">
@@ -121,6 +121,13 @@ const App: React.FC = () => {
 
   return (
     <Page masthead={masthead}>
+      {/* Persistent live-mode warning when dry-run is off */}
+      {!dryRun && (
+        <PageSection padding={{ default: 'noPadding' }} style={{ padding: '8px 24px 0' }}>
+          <Alert variant="danger" isInline title="LIVE MODE — Dry-run is disabled. Deployments will provision real resources." />
+        </PageSection>
+      )}
+
       {toast && (
         <PageSection padding={{ default: 'noPadding' }} style={{ padding: '8px 24px 0' }}>
           <Alert variant={toast.variant} title={toast.msg} isInline isPlain timeout={3500} onTimeout={() => setToast(null)} />

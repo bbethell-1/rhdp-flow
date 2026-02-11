@@ -135,6 +135,8 @@ class HealthResponse(BaseModel):
 
 class UploadResponse(BaseModel):
     count: int
+    total_rows: int = 0
+    skipped_rows: int = 0
     schedules: List[WorkshopScheduleResponse]
 
 

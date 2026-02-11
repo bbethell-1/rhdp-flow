@@ -257,6 +257,11 @@ async def upload_csv(file: UploadFile = File(...)):
     tmp.write(text)
     tmp.close()
 
+    # Count total data rows (non-empty, excluding header)
+    reader = csv.reader(io.StringIO(text))
+    all_rows = [row for row in reader if any(cell.strip() for cell in row)]
+    total_rows = max(0, len(all_rows) - 1)  # subtract header row
+
     try:
         schedules = read_csv_input(tmp.name)
     except ValueError as e:
@@ -267,8 +272,12 @@ async def upload_csv(file: UploadFile = File(...)):
     _current_filename = file.filename or "unknown.csv"
     _csv_filepath = tmp.name
 
+    skipped = total_rows - len(schedules)
+
     return UploadResponse(
         count=len(schedules),
+        total_rows=total_rows,
+        skipped_rows=max(0, skipped),
         schedules=[_schedule_to_response(s) for s in schedules],
     )
 

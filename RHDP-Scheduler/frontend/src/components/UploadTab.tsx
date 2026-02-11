@@ -107,6 +107,14 @@ export const UploadTab: React.FC<Props> = ({
         warns.push({ index: i, field: 'auto_stop', message: `"${s.ci_name}" is missing an auto-stop date` });
       if (!s.auto_destroy?.trim())
         warns.push({ index: i, field: 'auto_destroy', message: `"${s.ci_name}" is missing an auto-destroy date` });
+
+      // Blank optional fields (informational)
+      if (!s.password?.trim())
+        warns.push({ index: i, field: 'password', message: `"${s.ci_name}" has no password set` });
+      if (!s.activity?.trim())
+        warns.push({ index: i, field: 'activity', message: `"${s.ci_name}" has a blank Activity field` });
+      if (!s.purpose?.trim())
+        warns.push({ index: i, field: 'purpose', message: `"${s.ci_name}" has a blank Purpose field` });
     });
     return warns;
   }, [schedules]);
@@ -128,12 +136,21 @@ export const UploadTab: React.FC<Props> = ({
     });
   };
 
+  // Skipped row tracking
+  const [skippedRows, setSkippedRows] = useState<number>(0);
+  const [totalRows, setTotalRows] = useState<number>(0);
+
   const handleUpload = async () => {
     if (!csvFile) { showToast('Please select a CSV file', 'danger'); return; }
     try {
       const data = await api.uploadCSV(csvFile);
       setSchedules(data.schedules);
-      showToast(`Loaded ${data.count} schedule(s)`, 'success');
+      setSkippedRows(data.skipped_rows ?? 0);
+      setTotalRows(data.total_rows ?? 0);
+      const msg = data.skipped_rows
+        ? `Loaded ${data.count} of ${data.total_rows} row(s) — ${data.skipped_rows} row(s) skipped`
+        : `Loaded ${data.count} schedule(s)`;
+      showToast(msg, data.skipped_rows ? 'danger' : 'success');
     } catch (e) {
       showToast(`Upload failed: ${e}`, 'danger');
     }
@@ -164,6 +181,8 @@ export const UploadTab: React.FC<Props> = ({
       setPasswordFile(null);
       setPasswordFilename('');
       setExpandedRows(new Set());
+      setSkippedRows(0);
+      setTotalRows(0);
       showToast('Session cleared', 'success');
     } catch (e) {
       showToast(`Clear failed: ${e}`, 'danger');
@@ -290,6 +309,14 @@ export const UploadTab: React.FC<Props> = ({
           <Title headingLevel="h3" style={{ marginBottom: 8 }}>
             Schedule Preview ({schedules.length})
           </Title>
+
+          {/* Skipped rows warning */}
+          {skippedRows > 0 && (
+            <Alert variant="danger" isInline title={`${skippedRows} of ${totalRows} CSV row(s) were skipped`} style={{ marginBottom: 12 }}>
+              Some rows could not be parsed (bad values in Users, Instances, Concurrency, or missing required fields).
+              Review the source CSV and re-upload.
+            </Alert>
+          )}
 
           {/* Validation warnings */}
           {warnings.length > 0 && (
