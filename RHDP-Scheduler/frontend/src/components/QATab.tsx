@@ -1,6 +1,10 @@
 import { useState } from 'react';
 import {
+  Alert,
   Button,
+  Card,
+  CardBody,
+  CardTitle,
   PageSection,
   Split,
   SplitItem,
@@ -9,6 +13,7 @@ import {
   EmptyState,
   EmptyStateBody,
   Label,
+  Title,
 } from '@patternfly/react-core';
 import { Table, Thead, Tbody, Tr, Th, Td } from '@patternfly/react-table';
 import SearchIcon from '@patternfly/react-icons/dist/esm/icons/search-icon';
@@ -71,7 +76,15 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
 
   return (
     <PageSection>
-      <Split hasGutter style={{ marginBottom: 16, alignItems: 'center' }}>
+      {/* QA guidance */}
+      <Alert variant="info" isInline isPlain title="When to use QA" style={{ marginBottom: 16 }}>
+        Run QA checks after deploying workshops to verify they were created correctly and are healthy.
+        <strong> QA1</strong> should be run immediately after deployment to confirm configuration.
+        <strong> QA2</strong> should be run once workshops have had time to provision (typically 10-30 min) to verify health and collect student landing page URLs.
+      </Alert>
+
+      {/* QA type selector + run controls */}
+      <Split hasGutter style={{ marginBottom: 16, alignItems: 'flex-start' }}>
         <SplitItem>
           <div>
             <FormSelect
@@ -85,9 +98,9 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
               <FormSelectOption value="both" label="Both" />
             </FormSelect>
             <p className="qa-type-hint">
-              {qaType === '1' && 'Checks workshops are created with correct config (seats, UI, passwords)'}
-              {qaType === '2' && 'Checks deployment health, readiness, and landing page URLs'}
-              {qaType === 'both' && 'Runs both setup verification and deployment health checks'}
+              {qaType === '1' && 'Compares live workshops against your CSV schedule — checks dates, user counts, and configuration match what you uploaded.'}
+              {qaType === '2' && 'Checks that workshops are actually provisioned and healthy, verifies seat counts, and retrieves student landing page URLs.'}
+              {qaType === 'both' && 'Runs setup verification first, then checks deployment health and collects landing page URLs.'}
             </p>
           </div>
         </SplitItem>
@@ -106,43 +119,83 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
         )}
       </Split>
 
+      {/* QA type explanation cards */}
+      {qaResults.length === 0 && (
+        <div className="ops-grid" style={{ marginBottom: 16 }}>
+          <Card isCompact>
+            <CardTitle>QA1 — Verify Setup</CardTitle>
+            <CardBody style={{ fontSize: '0.85rem' }}>
+              <p><strong>When:</strong> Immediately after deploying workshops.</p>
+              <p><strong>What it checks:</strong></p>
+              <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
+                <li>Workshop resources exist in the namespace</li>
+                <li>Provisioning dates, auto-stop, and auto-destroy match the CSV</li>
+                <li>User/seat counts match what was scheduled</li>
+                <li>Workshop interface (UI) is enabled/disabled correctly</li>
+              </ul>
+              <p style={{ marginTop: 8 }}><strong>Result:</strong> Each workshop shows <span className="status-verified">verified</span> or <span className="status-failed">failed</span> with details on what mismatched.</p>
+            </CardBody>
+          </Card>
+          <Card isCompact>
+            <CardTitle>QA2 — Verify Deployment</CardTitle>
+            <CardBody style={{ fontSize: '0.85rem' }}>
+              <p><strong>When:</strong> 10-30 minutes after deployment, once workshops have provisioned.</p>
+              <p><strong>What it checks:</strong></p>
+              <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
+                <li>Workshops are actually deployed and running</li>
+                <li>Health status of each workshop instance</li>
+                <li>Expected vs actual seat counts</li>
+                <li>Student landing page URLs are available</li>
+              </ul>
+              <p style={{ marginTop: 8 }}><strong>Result:</strong> Landing page URLs appear in the <strong>Students</strong> tab for distribution.</p>
+            </CardBody>
+          </Card>
+        </div>
+      )}
+
+      {/* QA results table */}
       {qaResults.length > 0 ? (
-        <Table aria-label="QA results" variant="compact" className="fixed-table">
-          <Thead>
-            <Tr>
-              <Th width={15}>CI Name</Th>
-              <Th width={20}>CI</Th>
-              <Th width={10}>Status</Th>
-              <Th width={10}>Deployed</Th>
-              <Th width={10}>Healthy</Th>
-              <Th width={10}>Seats</Th>
-              <Th width={25}>Landing Page URL</Th>
-            </Tr>
-          </Thead>
-          <Tbody>
-            {qaResults.map((r, i) => (
-              <Tr key={i}>
-                <Td dataLabel="CI Name">{r.ci_name}</Td>
-                <Td dataLabel="CI"><span className="cell-truncate" title={r.ci}>{r.ci}</span></Td>
-                <Td dataLabel="Status"><span className={statusColorClass(r.status)}>{r.status}</span></Td>
-                <Td dataLabel="Deployed">{r.deployed || '-'}</Td>
-                <Td dataLabel="Healthy"><span className={healthyColorClass(r.healthy)}>{healthyDisplay(r.healthy)}</span></Td>
-                <Td dataLabel="Seats">{r.expected_seats ?? '-'} / {r.actual_seats ?? '-'}</Td>
-                <Td dataLabel="Landing Page URL">
-                  {r.landing_page_url ? (
-                    <a className="cell-truncate" href={r.landing_page_url} target="_blank" rel="noopener noreferrer" title={r.landing_page_url}>
-                      {r.landing_page_url}
-                    </a>
-                  ) : '-'}
-                </Td>
+        <>
+          <Title headingLevel="h3" style={{ marginBottom: 8 }}>QA Results ({qaResults.length})</Title>
+          <Table aria-label="QA results" variant="compact" className="fixed-table">
+            <Thead>
+              <Tr>
+                <Th width={15}>CI Name</Th>
+                <Th width={20}>CI</Th>
+                <Th width={10}>Status</Th>
+                <Th width={10}>Deployed</Th>
+                <Th width={10}>Healthy</Th>
+                <Th width={10}>Seats</Th>
+                <Th width={25}>Landing Page URL</Th>
               </Tr>
-            ))}
-          </Tbody>
-        </Table>
+            </Thead>
+            <Tbody>
+              {qaResults.map((r, i) => (
+                <Tr key={i}>
+                  <Td dataLabel="CI Name">{r.ci_name}</Td>
+                  <Td dataLabel="CI"><span className="cell-truncate" title={r.ci}>{r.ci}</span></Td>
+                  <Td dataLabel="Status"><span className={statusColorClass(r.status)}>{r.status}</span></Td>
+                  <Td dataLabel="Deployed">{r.deployed || '-'}</Td>
+                  <Td dataLabel="Healthy"><span className={healthyColorClass(r.healthy)}>{healthyDisplay(r.healthy)}</span></Td>
+                  <Td dataLabel="Seats">{r.expected_seats ?? '-'} / {r.actual_seats ?? '-'}</Td>
+                  <Td dataLabel="Landing Page URL">
+                    {r.landing_page_url ? (
+                      <a className="cell-truncate" href={r.landing_page_url} target="_blank" rel="noopener noreferrer" title={r.landing_page_url}>
+                        {r.landing_page_url}
+                      </a>
+                    ) : '-'}
+                  </Td>
+                </Tr>
+              ))}
+            </Tbody>
+          </Table>
+        </>
       ) : (
-        <EmptyState titleText="No QA results yet" headingLevel="h3" icon={SearchIcon}>
-          <EmptyStateBody>Run QA above to verify your deployments.</EmptyStateBody>
-        </EmptyState>
+        !qaResults.length && (
+          <EmptyState titleText="No QA results yet" headingLevel="h3" icon={SearchIcon}>
+            <EmptyStateBody>Select a QA type above and click Run QA after deploying your workshops.</EmptyStateBody>
+          </EmptyState>
+        )
       )}
     </PageSection>
   );

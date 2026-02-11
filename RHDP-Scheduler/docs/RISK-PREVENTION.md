@@ -114,15 +114,17 @@ These appear as warnings in the validation summary alongside date warnings, with
 
 **Safeguard:** The operations history table is now persisted to `sessionStorage`. Records survive page refreshes within the same browser session, preserving the audit trail of all lock, extend, and scale operations with timestamps, targets, and outcomes.
 
-### 13. QA Type Descriptions (LOW)
+### 13. QA Tab Guidance & Type Descriptions (LOW)
 
-**Risk:** User runs wrong QA check because QA1 vs QA2 purpose is unclear.
+**Risk:** User runs wrong QA check because QA1 vs QA2 purpose is unclear, or doesn't understand when/why to use QA at all.
 
-**Safeguard:** A contextual description appears below the QA type dropdown, updating as the user changes the selection:
+**Safeguard:** The QA tab now provides multiple layers of guidance:
 
-- **QA1:** "Checks workshops are created with correct config (seats, UI, passwords)"
-- **QA2:** "Checks deployment health, readiness, and landing page URLs"
-- **Both:** "Runs both setup verification and deployment health checks"
+- **Info alert banner** at top explains when to use QA: QA1 immediately after deployment, QA2 after 10-30 minutes
+- **Contextual blue description** below the QA type dropdown updates as the user changes the selection, using a visible blue color instead of muted gray
+- **Two explanation cards** (visible when no results exist) detail each QA type:
+  - **QA1 — Verify Setup:** When to run, what it checks (namespace resources, dates, seats, UI config), expected result
+  - **QA2 — Verify Deployment:** When to run, what it checks (health, running status, seat counts, landing URLs), expected result
 
 ---
 

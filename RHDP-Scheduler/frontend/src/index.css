@@ -222,10 +222,10 @@ html, body, #root {
 
 /* QA type description hint */
 .qa-type-hint {
-  font-size: 0.75rem;
-  color: var(--rh-gray);
+  font-size: 0.8rem;
+  color: var(--rh-blue);
   margin-top: 4px;
-  font-style: italic;
+  font-weight: 500;
 }
 
 /* ── Tab badge spacing ── */
