@@ -97,28 +97,35 @@ Safeguards built into the RHDP-Flow UI to prevent user errors during workshop sc
 
 These appear as warnings in the validation summary alongside date warnings, with affected rows highlighted.
 
----
-
-## Planned
-
 ### 11. Extend Operations Preview (LOW)
 
 **Risk:** User extends stop/destroy time without knowing the current values, leading to unintended schedules.
 
-**Fix:** Show "Current: X -> New: Y" preview before confirming extend operations.
+**Safeguard:** When the user enters days/hours for Extend Stop or Extend Destroy, a live preview appears below the inputs showing:
+
+- The earliest current date for the affected workshops
+- The computed new date after the extension is applied
+- Format: `DD/MM/YYYY HH:MM → DD/MM/YYYY HH:MM`
+- If multiple workshops are affected, indicates "(earliest of N)"
 
 ### 12. Operations Audit Trail (LOW)
 
 **Risk:** No record of lock/extend/scale operations after page refresh.
 
-**Fix:** Persist operations history to session storage or backend.
+**Safeguard:** The operations history table is now persisted to `sessionStorage`. Records survive page refreshes within the same browser session, preserving the audit trail of all lock, extend, and scale operations with timestamps, targets, and outcomes.
 
 ### 13. QA Type Descriptions (LOW)
 
 **Risk:** User runs wrong QA check because QA1 vs QA2 purpose is unclear.
 
-**Fix:** Add tooltip descriptions to QA type options.
+**Safeguard:** A contextual description appears below the QA type dropdown, updating as the user changes the selection:
+
+- **QA1:** "Checks workshops are created with correct config (seats, UI, passwords)"
+- **QA2:** "Checks deployment health, readiness, and landing page URLs"
+- **Both:** "Runs both setup verification and deployment health checks"
 
 ---
+
+*All risk prevention items implemented.*
 
 *Last updated: 2026-02-11*

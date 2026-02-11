@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Button,
   PageSection,
@@ -88,7 +88,17 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
   const [extDestroyHours, setExtDestroyHours] = useState(0);
   const [scaleFilter, setScaleFilter] = useState('');
   const [scaleCount, setScaleCount] = useState(20);
-  const [history, setHistory] = useState<OpRecord[]>([]);
+  const [history, setHistory] = useState<OpRecord[]>(() => {
+    try {
+      const saved = sessionStorage.getItem('rhdp-ops-history');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+
+  // Persist operations history to sessionStorage
+  useEffect(() => {
+    try { sessionStorage.setItem('rhdp-ops-history', JSON.stringify(history)); } catch { /* ignore */ }
+  }, [history]);
 
   // Loading states
   const [lockLoading, setLockLoading] = useState(false);
@@ -106,6 +116,35 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
     const unique = new Set(schedules.map(s => s.ci));
     return Array.from(unique).sort();
   }, [schedules]);
+
+  /** Compute extend preview: earliest current date -> new date after adding days/hours */
+  const extendPreview = (filter: string, field: 'auto_stop' | 'auto_destroy', days: number, hours: number) => {
+    const targets = filter ? schedules.filter(s => s.ci === filter) : schedules;
+    if (targets.length === 0 || (days === 0 && hours === 0)) return null;
+    // Find the earliest date to show as representative
+    const dates = targets
+      .map(s => s[field])
+      .filter(Boolean)
+      .sort();
+    if (dates.length === 0) return null;
+    const current = dates[0];
+    // Try to compute new date
+    const parsed = new Date(
+      current.replace(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})$/,
+        (_m, d, mo, y, h, mi) => {
+          const yr = y.length === 2 ? `20${y}` : y;
+          return `${yr}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}T${h.padStart(2, '0')}:${mi}`;
+        })
+    );
+    if (isNaN(parsed.getTime())) return null;
+    const newDate = new Date(parsed.getTime() + (days * 24 + hours) * 3600_000);
+    const fmt = (d: Date) => d.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+    const label = dates.length > 1 ? ` (earliest of ${dates.length})` : '';
+    return `${fmt(parsed)}${label} → ${fmt(newDate)}`;
+  };
+
+  const stopPreview = extendPreview(extStopFilter, 'auto_stop', extStopDays, extStopHours);
+  const destroyPreview = extendPreview(extDestroyFilter, 'auto_destroy', extDestroyDays, extDestroyHours);
 
   /** How many workshops the current lock filter would affect */
   const lockAffectedCount = useMemo(() => {
@@ -239,6 +278,9 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
               />
               <span>hours</span>
             </div>
+            {stopPreview && (
+              <p className="ops-preview">{stopPreview}</p>
+            )}
             <Button
               variant="primary"
               onClick={handleExtendStop}
@@ -277,6 +319,9 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
               />
               <span>hours</span>
             </div>
+            {destroyPreview && (
+              <p className="ops-preview">{destroyPreview}</p>
+            )}
             <Button
               variant="primary"
               onClick={handleExtendDestroy}

@@ -164,6 +164,14 @@ html, body, #root {
   flex-wrap: wrap;
 }
 
+/* Extend operations date preview */
+.ops-preview {
+  font-size: 0.8rem;
+  color: var(--rh-blue);
+  margin-bottom: 8px;
+  font-family: 'Red Hat Mono', 'Menlo', monospace;
+}
+
 /* Prevent PF number inputs from forcing overflow */
 .ops-grid .pf-v6-c-number-input {
   min-width: 0;
@@ -210,6 +218,14 @@ html, body, #root {
 /* ── Warning rows in schedule preview ── */
 .warning-row {
   border-left: 3px solid var(--rh-yellow);
+}
+
+/* QA type description hint */
+.qa-type-hint {
+  font-size: 0.75rem;
+  color: var(--rh-gray);
+  margin-top: 4px;
+  font-style: italic;
 }
 
 /* ── Tab badge spacing ── */

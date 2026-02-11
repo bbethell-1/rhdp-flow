@@ -73,16 +73,23 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
     <PageSection>
       <Split hasGutter style={{ marginBottom: 16, alignItems: 'center' }}>
         <SplitItem>
-          <FormSelect
-            value={qaType}
-            onChange={(_e, val) => setQaType(val as '1' | '2' | 'both')}
-            aria-label="QA type"
-            style={{ width: 220 }}
-          >
-            <FormSelectOption value="1" label="QA1 - Verify Setup" />
-            <FormSelectOption value="2" label="QA2 - Verify Deployment" />
-            <FormSelectOption value="both" label="Both" />
-          </FormSelect>
+          <div>
+            <FormSelect
+              value={qaType}
+              onChange={(_e, val) => setQaType(val as '1' | '2' | 'both')}
+              aria-label="QA type"
+              style={{ width: 220 }}
+            >
+              <FormSelectOption value="1" label="QA1 - Verify Setup" />
+              <FormSelectOption value="2" label="QA2 - Verify Deployment" />
+              <FormSelectOption value="both" label="Both" />
+            </FormSelect>
+            <p className="qa-type-hint">
+              {qaType === '1' && 'Checks workshops are created with correct config (seats, UI, passwords)'}
+              {qaType === '2' && 'Checks deployment health, readiness, and landing page URLs'}
+              {qaType === 'both' && 'Runs both setup verification and deployment health checks'}
+            </p>
+          </div>
         </SplitItem>
         <SplitItem>
           <Button variant="primary" onClick={handleRun} isDisabled={running} isLoading={running}>
