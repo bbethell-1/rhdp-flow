@@ -32,7 +32,7 @@ class WorkshopScheduleResponse(BaseModel):
     users: Optional[int] = None
     instances: Optional[int] = None
     concurrency: Optional[int] = None
-    campaign_id: str = ""
+    salesforce_ids: str = ""
 
 
 class DeploymentResultResponse(BaseModel):

@@ -25,7 +25,7 @@ export interface WorkshopSchedule {
   multi_workshop_name: string;
   concurrency: number | null;
   instances: number | null;
-  campaign_id: string;
+  salesforce_ids: string;
 }
 
 export interface UploadResponse {

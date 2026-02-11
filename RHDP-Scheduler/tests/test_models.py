@@ -10,14 +10,14 @@ def test_workshop_schedule_defaults():
     assert s.users == 20
     assert s.is_multi_asset is False
     assert s.concurrency == 1
-    assert s.campaign_id == ""
+    assert s.salesforce_ids == ""
 
 
 def test_workshop_schedule_overrides():
-    s = make_schedule(users=40, instances=30, campaign_id="71403328")
+    s = make_schedule(users=40, instances=30, salesforce_ids="71403328")
     assert s.users == 40
     assert s.instances == 30
-    assert s.campaign_id == "71403328"
+    assert s.salesforce_ids == "71403328"
 
 
 def test_deployment_result_fields():

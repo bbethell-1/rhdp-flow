@@ -71,9 +71,9 @@ def _provider_parameter_values(
 
 
 def _salesforce_items(schedule: "WorkshopSchedule") -> str:
-    """Format salesforce_items JSON string from campaign_id. Empty [] when not set."""
-    if schedule.campaign_id:
-        return json.dumps([{"id": schedule.campaign_id, "type": "opportunity", "required": True}])
+    """Format salesforce_items JSON string from salesforce_ids. Empty [] when not set."""
+    if schedule.salesforce_ids:
+        return json.dumps([{"id": schedule.salesforce_ids, "type": "opportunity", "required": True}])
     return "[]"
 
 
@@ -110,7 +110,7 @@ class WorkshopSchedule:
     users: Optional[int] = None  # Optional; when omitted/empty we don't set num_users
     instances: Optional[int] = None  # Optional; workshop instance/seat count for multi-asset (e.g. 30); used for numberSeats when users not set
     concurrency: Optional[int] = None  # Optional; WorkshopProvision concurrency (default 1)
-    campaign_id: str = ""  # Optional Salesforce Campaign/Opportunity ID
+    salesforce_ids: str = ""  # Optional Salesforce ID(s) for chargeback (campaign, opportunity, marketing, etc.)
 
 @dataclass
 class DeploymentResult:
@@ -335,7 +335,7 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                     multi_workshop_name = row.get(header_map.get('multi_workshop_name', 'Multi_Workshop_Name'), '').strip()
                     instances_str = row.get(header_map.get('instances', 'Instances'), '').strip()
                     concurrency_str = row.get(header_map.get('concurrency', 'Concurrency'), '').strip()
-                    campaign_id = row.get(header_map.get('campaign_id', 'Campaign_ID'), '').strip()
+                    salesforce_ids = row.get(header_map.get('salesforce ids', header_map.get('campaign_id', 'Salesforce IDs')), '').strip()
                     is_multi_asset = is_multi_asset_str.lower() in ['true', '1', 'yes', 'y'] if is_multi_asset_str else False
                     
                     # Support both old and new header formats (with/without UTC suffix)
@@ -422,7 +422,7 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                         multi_workshop_name=multi_workshop_name,
                         instances=instances,
                         concurrency=concurrency,
-                        campaign_id=campaign_id
+                        salesforce_ids=salesforce_ids
                     )
                     
                     schedules.append(schedule)
@@ -1166,24 +1166,32 @@ def create_workshop_provision(
     resourceclaim_payload: Dict,
     config: RHDPConfig,
     enable_workshop_ui: bool = True,
-    concurrency: Optional[int] = None
+    concurrency: Optional[int] = None,
+    count: Optional[int] = None,
+    provision_name_suffix: Optional[str] = None,
+    extra_parameters: Optional[Dict] = None,
 ) -> Optional[str]:
     """
     Create WorkshopProvision to enable workshop UI.
-    
+
     Args:
         workshop_name: Name of the Workshop (should already exist)
         namespace: Kubernetes namespace
         resourceclaim_payload: Original ResourceClaim payload
         config: RHDPConfig object
         enable_workshop_ui: Whether to enable the workshop user interface
-        
+        concurrency: WorkshopProvision concurrency (default 1)
+        count: Workshop Instance Count (from Instances column; default 1)
+        provision_name_suffix: Optional suffix for the WorkshopProvision name
+        extra_parameters: Optional extra parameters to merge into spec.parameters
+
     Returns:
         WorkshopProvision name or None
     """
+    count_val = count if count is not None and count > 0 else 1
+    concurrency_val = concurrency if concurrency is not None else 1
     if config.dry_run:
-        concurrency_val = concurrency if concurrency is not None else 1
-        logger.info(f"[DRY-RUN] Would create WorkshopProvision: {workshop_name} (concurrency={concurrency_val})")
+        logger.info(f"[DRY-RUN] Would create WorkshopProvision: {workshop_name} (count={count_val}, concurrency={concurrency_val})")
         return workshop_name
     try:
         # Extract information from ResourceClaim payload
@@ -1216,8 +1224,8 @@ def create_workshop_provision(
                     "namespace": catalog_namespace
                 },
                 "workshopName": workshop_name,
-                "count": 1,
-                "concurrency": concurrency if concurrency is not None else 1,
+                "count": count_val,
+                "concurrency": concurrency_val,
                 "enableResourcePools": False,
                 "actionSchedule": {
                     "start": param_values.get('start_timestamp', ''),
@@ -1727,7 +1735,7 @@ def create_multi_workshop(
             
             # Create WorkshopProvision to manage the Workshop and provision seats
             logger.info(f"Creating WorkshopProvision for asset workshop '{asset_workshop_name}'...")
-            create_workshop_provision(asset_workshop_name, schedule.namespace, asset_payload, config, enable_workshop_ui=False, concurrency=schedule.concurrency)
+            create_workshop_provision(asset_workshop_name, schedule.namespace, asset_payload, config, enable_workshop_ui=False, concurrency=schedule.concurrency, count=schedule.instances)
             
             created_workshops.append((asset_ci, asset_workshop_name, catalog_namespace, display_name))
             logger.info(f"✅ Created Workshop '{asset_workshop_name}' with WorkshopProvision for asset {asset_ci}")
@@ -3225,7 +3233,7 @@ def process_schedule(
                 logger.info(f"✅ Successfully created Workshop: {workshop_name} with UI enabled")
                 # Create WorkshopProvision to manage the Workshop
                 logger.info(f"Creating WorkshopProvision to manage Workshop...")
-                create_workshop_provision(workshop_name, schedule.namespace, payload, config, enable_workshop_ui=False, concurrency=schedule.concurrency)
+                create_workshop_provision(workshop_name, schedule.namespace, payload, config, enable_workshop_ui=False, concurrency=schedule.concurrency, count=schedule.instances)
                 # Use workshop name as guid for results
                 guid = workshop_name
                 namespace = schedule.namespace

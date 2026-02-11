@@ -276,7 +276,7 @@ export const UploadTab: React.FC<Props> = ({
                               <div><strong>Password:</strong> {s.password || '-'}</div>
                               <div><strong>Activity:</strong> {s.activity || '-'}</div>
                               <div><strong>Purpose:</strong> {s.purpose || '-'}</div>
-                              <div><strong>Campaign ID:</strong> {s.campaign_id || '-'}</div>
+                              <div><strong>Salesforce IDs:</strong> {s.salesforce_ids || '-'}</div>
                               <div><strong>Concurrency:</strong> {s.concurrency ?? '-'}</div>
                               <div><strong>Multi-Asset:</strong> {s.is_multi_asset ? 'Yes' : 'No'}</div>
                               {s.is_multi_asset && (

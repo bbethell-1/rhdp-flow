@@ -117,13 +117,13 @@ Valid Row,valid-ci,valid-ns,20,True,pass,Admin,QA,My Workshop,15/02/2026 11:00,1
         assert len(schedules) == 1
         assert schedules[0].ci_name == "Valid Row"
 
-    def test_campaign_id_parsed(self):
-        """Test that Campaign_ID column is parsed."""
+    def test_salesforce_ids_parsed(self):
+        """Test that Salesforce IDs column is parsed."""
         csv_text = """\
-CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Campaign_ID
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Salesforce IDs
 Valid Row,valid-ci,valid-ns,20,True,pass,Admin,QA,My Workshop,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,71403328
 """
         path = self._write(csv_text)
         schedules = read_csv_input(path)
         assert len(schedules) == 1
-        assert schedules[0].campaign_id == "71403328"
+        assert schedules[0].salesforce_ids == "71403328"

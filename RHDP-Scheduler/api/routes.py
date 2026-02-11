@@ -90,7 +90,7 @@ def _schedule_to_response(s: WorkshopSchedule) -> WorkshopScheduleResponse:
         is_multi_asset=s.is_multi_asset, asset_cis=s.asset_cis,
         multi_workshop_name=s.multi_workshop_name,
         concurrency=s.concurrency, instances=s.instances,
-        campaign_id=s.campaign_id,
+        salesforce_ids=s.salesforce_ids,
     )
 
 
