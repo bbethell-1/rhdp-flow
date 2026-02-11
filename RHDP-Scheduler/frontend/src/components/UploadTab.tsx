@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
+  Alert,
   Button,
   PageSection,
   Title,
@@ -19,6 +20,26 @@ import UploadIcon from '@patternfly/react-icons/dist/esm/icons/upload-icon';
 
 import { api } from '../services/api';
 import type { WorkshopSchedule, DeploymentResult } from '../types';
+
+/* ── Schedule date validation helpers ── */
+
+interface ScheduleWarning {
+  index: number;
+  field: string;
+  message: string;
+}
+
+/** Parse DD/MM/YYYY HH:MM (or DD/MM/YY HH:MM) into a Date, or null. */
+function parseScheduleDate(dateStr: string): Date | null {
+  if (!dateStr?.trim()) return null;
+  const m = dateStr.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})$/);
+  if (m) {
+    const yr = m[3].length === 2 ? 2000 + parseInt(m[3]) : parseInt(m[3]);
+    return new Date(yr, parseInt(m[2]) - 1, parseInt(m[1]), parseInt(m[4]), parseInt(m[5]));
+  }
+  const d = new Date(dateStr);
+  return isNaN(d.getTime()) ? null : d;
+}
 
 interface Props {
   dryRun: boolean;
@@ -53,6 +74,46 @@ export const UploadTab: React.FC<Props> = ({
 
   // Expandable rows state
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
+
+  // ── Schedule validation warnings ──
+  const warnings = useMemo(() => {
+    const warns: ScheduleWarning[] = [];
+    const now = new Date();
+    schedules.forEach((s, i) => {
+      const prov = parseScheduleDate(s.provisioning_date);
+      const stop = parseScheduleDate(s.auto_stop);
+      const destroy = parseScheduleDate(s.auto_destroy);
+
+      // Unparseable dates
+      if (s.provisioning_date && !prov)
+        warns.push({ index: i, field: 'provisioning_date', message: `"${s.ci_name}" has an unparseable provisioning date: "${s.provisioning_date}"` });
+      if (s.auto_stop && !stop)
+        warns.push({ index: i, field: 'auto_stop', message: `"${s.ci_name}" has an unparseable auto-stop date: "${s.auto_stop}"` });
+      if (s.auto_destroy && !destroy)
+        warns.push({ index: i, field: 'auto_destroy', message: `"${s.ci_name}" has an unparseable auto-destroy date: "${s.auto_destroy}"` });
+
+      // Past provisioning date
+      if (prov && prov < now)
+        warns.push({ index: i, field: 'provisioning_date', message: `"${s.ci_name}" provisioning date is in the past (${s.provisioning_date})` });
+
+      // Auto-destroy before auto-stop
+      if (stop && destroy && destroy < stop)
+        warns.push({ index: i, field: 'auto_destroy', message: `"${s.ci_name}" auto-destroy (${s.auto_destroy}) is before auto-stop (${s.auto_stop})` });
+
+      // Missing required dates
+      if (!s.provisioning_date?.trim())
+        warns.push({ index: i, field: 'provisioning_date', message: `"${s.ci_name}" is missing a provisioning date` });
+      if (!s.auto_stop?.trim())
+        warns.push({ index: i, field: 'auto_stop', message: `"${s.ci_name}" is missing an auto-stop date` });
+      if (!s.auto_destroy?.trim())
+        warns.push({ index: i, field: 'auto_destroy', message: `"${s.ci_name}" is missing an auto-destroy date` });
+    });
+    return warns;
+  }, [schedules]);
+
+  const warningRowIndices = useMemo(() => new Set(warnings.map(w => w.index)), [warnings]);
+  const hasMultiAsset = schedules.some(s => s.is_multi_asset);
+  const needsPasswordWarning = hasMultiAsset && passwordCount === null;
 
   // auto-scroll log
   useEffect(() => {
@@ -229,6 +290,24 @@ export const UploadTab: React.FC<Props> = ({
           <Title headingLevel="h3" style={{ marginBottom: 8 }}>
             Schedule Preview ({schedules.length})
           </Title>
+
+          {/* Validation warnings */}
+          {warnings.length > 0 && (
+            <Alert variant="warning" isInline title={`${warnings.length} validation warning(s) — review before deploying`} style={{ marginBottom: 12 }}>
+              <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+                {warnings.map((w, i) => <li key={i}>{w.message}</li>)}
+              </ul>
+            </Alert>
+          )}
+
+          {/* Multi-asset password warning */}
+          {needsPasswordWarning && (
+            <Alert variant="warning" isInline title="Multi-asset passwords not loaded" style={{ marginBottom: 12 }}>
+              Multi-asset workshop(s) detected but no password file uploaded. Each asset CI may need its own password.
+              Upload a passwords CSV above to avoid deployment failures.
+            </Alert>
+          )}
+
           <div style={{ marginBottom: 16 }}>
             <Table aria-label="Schedule preview" variant="compact" className="fixed-table">
               <Thead>
@@ -249,7 +328,7 @@ export const UploadTab: React.FC<Props> = ({
               <Tbody>
                 {schedules.map((s, i) => (
                   <>
-                    <Tr key={`row-${i}`}>
+                    <Tr key={`row-${i}`} className={warningRowIndices.has(i) ? 'warning-row' : undefined}>
                       <Td
                         expand={{
                           rowIndex: i,
@@ -337,8 +416,28 @@ export const UploadTab: React.FC<Props> = ({
       >
         <ModalHeader title="Confirm Live Deployment" labelId="deploy-confirm-title" titleIconVariant="warning" />
         <ModalBody>
-          You are about to run a <strong>live deployment</strong> for {schedules.length} schedule(s).
-          This will provision real resources. Are you sure?
+          <p>
+            You are about to run a <strong>live deployment</strong> for {schedules.length} schedule(s).
+            This will provision real resources.
+          </p>
+          {warnings.length > 0 && (
+            <Alert variant="warning" isInline isPlain title={`${warnings.length} unresolved warning(s)`} style={{ margin: '12px 0' }}>
+              Review the warnings on the schedule preview before deploying.
+            </Alert>
+          )}
+          <div style={{ marginTop: 12, fontSize: '0.85rem', maxHeight: 200, overflowY: 'auto' }}>
+            <strong>Schedules to deploy:</strong>
+            <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
+              {schedules.map((s, i) => (
+                <li key={i}>
+                  <strong>{s.ci_name}</strong> — {s.ci} in {s.namespace}
+                  {s.instances != null && ` (${s.instances} instances)`}
+                  {s.users != null && ` (${s.users} users)`}
+                  {s.is_multi_asset && ' [multi-asset]'}
+                </li>
+              ))}
+            </ul>
+          </div>
         </ModalBody>
         <ModalFooter>
           <Button variant="danger" onClick={handleDeploy}>Deploy Now</Button>

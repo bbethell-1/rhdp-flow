@@ -202,6 +202,11 @@ html, body, #root {
   }
 }
 
+/* ── Warning rows in schedule preview ── */
+.warning-row {
+  border-left: 3px solid var(--rh-yellow);
+}
+
 /* ── Tab badge spacing ── */
 .tab-badge {
   margin-left: 6px;
