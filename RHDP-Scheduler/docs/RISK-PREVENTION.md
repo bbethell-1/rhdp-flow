@@ -4,6 +4,27 @@ Safeguards built into the RHDP-Flow UI to prevent user errors during workshop sc
 
 ---
 
+## Screenshots
+
+All screenshots are in [`docs/images/`](images/) and show the features described below in action.
+
+| Screenshot | Feature |
+|-----------|---------|
+| [01-upload-empty-state.png](images/01-upload-empty-state.png) | Initial UI with drag-and-drop file upload |
+| [02-upload-validation-warnings.png](images/02-upload-validation-warnings.png) | Date validation warnings, multi-asset password warning, warning row highlight |
+| [03-expandable-row-detail.png](images/03-expandable-row-detail.png) | Schedule preview with expandable row toggle |
+| [04-expanded-row-detail-scrolled.png](images/04-expanded-row-detail-scrolled.png) | Expanded detail: password, activity, purpose, salesforce IDs, asset CIs |
+| [05-live-mode-warning.png](images/05-live-mode-warning.png) | Red masthead border + LIVE MODE danger banner (Item 8) |
+| [06-operations-tab-overview.png](images/06-operations-tab-overview.png) | Operations tab: Lock, Extend Stop/Destroy, Scale cards |
+| [07-extend-stop-preview.png](images/07-extend-stop-preview.png) | Live date preview for extend operations (Item 11) |
+| [08-lock-confirmation-modal.png](images/08-lock-confirmation-modal.png) | Lock confirmation with workshop count and scope (Items 4, 7) |
+| [09-scale-to-zero-warning.png](images/09-scale-to-zero-warning.png) | Scale-to-zero confirmation modal (Item 6) |
+| [10-qa-tab-guidance-cards.png](images/10-qa-tab-guidance-cards.png) | QA tab: info banner, blue hints, QA1/QA2 explanation cards (Item 13) |
+| [11-deployments-summary-cards.png](images/11-deployments-summary-cards.png) | Deployments: summary cards, search, status filter, auto-refresh |
+| [12-deployments-light-mode.png](images/12-deployments-light-mode.png) | Light mode theme view |
+
+---
+
 ## Implemented
 
 ### 1. Date Validation Warnings (HIGH)
@@ -18,6 +39,8 @@ Safeguards built into the RHDP-Flow UI to prevent user errors during workshop sc
 - **Missing dates** flagged (provisioning, auto-stop, auto-destroy)
 - Affected rows highlighted with a yellow left border in the preview table
 
+![Validation warnings](images/02-upload-validation-warnings.png)
+
 ### 2. Multi-Asset Password Warning (HIGH)
 
 **Risk:** Multi-asset workshops require per-asset passwords. Deploying without uploading a password file causes silent failures.
@@ -25,6 +48,8 @@ Safeguards built into the RHDP-Flow UI to prevent user errors during workshop sc
 **Safeguard:** When multi-asset schedules are detected and no password file has been uploaded, a prominent warning banner appears above the schedule table:
 
 > "Multi-asset workshop(s) detected but no password file uploaded. Each asset CI may need its own password."
+
+![Multi-asset warning](images/02-upload-validation-warnings.png)
 
 ### 3. Enriched Live Deploy Confirmation (HIGH)
 
@@ -46,17 +71,23 @@ Safeguards built into the RHDP-Flow UI to prevent user errors during workshop sc
 - **Clear session:** Confirmation modal warns that all schedules, results, and logs will be archived
 - **Lock workshops:** Confirmation modal warns this immediately shuts down workshops and cannot be undone
 
+![Lock confirmation modal](images/08-lock-confirmation-modal.png)
+
 ### 5. Loading States on Operations (MEDIUM)
 
 **Risk:** User double-clicks operations buttons, triggering duplicate requests.
 
 **Safeguard:** All operation buttons (Lock, Extend Stop, Extend Destroy, Scale) show loading spinners and are disabled while the request is in-flight.
 
+![Operations tab](images/06-operations-tab-overview.png)
+
 ### 6. Scale to Zero Warning (MEDIUM)
 
 **Risk:** Scaling to 0 instances destroys all workshop resources. The number input currently allows 0 without confirmation.
 
 **Safeguard:** When the user sets the scale target to 0 and clicks Scale, a confirmation modal appears warning that this will remove all workshop instances and destroy all running resources. The user must explicitly confirm before the operation proceeds.
+
+![Scale to zero warning](images/09-scale-to-zero-warning.png)
 
 ### 7. Lock Scope Visibility (MEDIUM)
 
@@ -67,6 +98,8 @@ Safeguards built into the RHDP-Flow UI to prevent user errors during workshop sc
 - The exact number of workshops that will be affected (e.g., "3 workshop(s)")
 - The CI filter value being applied (or "all catalog items" if no filter)
 
+![Lock scope visibility](images/08-lock-confirmation-modal.png)
+
 ### 8. Dry-Run Mode Visual Distinction (MEDIUM)
 
 **Risk:** User forgets they toggled off dry-run mode and accidentally deploys live.
@@ -75,6 +108,8 @@ Safeguards built into the RHDP-Flow UI to prevent user errors during workshop sc
 
 - **Persistent danger banner** below the masthead: "LIVE MODE — Dry-run is disabled. Deployments will provision real resources."
 - **Red bottom border** on the masthead bar, making the mode change immediately visible
+
+![Live mode warning](images/05-live-mode-warning.png)
 
 ### 9. CSV Row Skip Reporting (MEDIUM)
 
@@ -108,6 +143,8 @@ These appear as warnings in the validation summary alongside date warnings, with
 - Format: `DD/MM/YYYY HH:MM → DD/MM/YYYY HH:MM`
 - If multiple workshops are affected, indicates "(earliest of N)"
 
+![Extend stop preview](images/07-extend-stop-preview.png)
+
 ### 12. Operations Audit Trail (LOW)
 
 **Risk:** No record of lock/extend/scale operations after page refresh.
@@ -125,6 +162,8 @@ These appear as warnings in the validation summary alongside date warnings, with
 - **Two explanation cards** (visible when no results exist) detail each QA type:
   - **QA1 — Verify Setup:** When to run, what it checks (namespace resources, dates, seats, UI config), expected result
   - **QA2 — Verify Deployment:** When to run, what it checks (health, running status, seat counts, landing URLs), expected result
+
+![QA tab guidance](images/10-qa-tab-guidance-cards.png)
 
 ---
 
