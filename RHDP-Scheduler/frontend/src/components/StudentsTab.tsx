@@ -6,6 +6,7 @@ import {
   Title,
   EmptyState,
   EmptyStateBody,
+  ClipboardCopy,
 } from '@patternfly/react-core';
 import { Table, Thead, Tbody, Tr, Th, Td } from '@patternfly/react-table';
 import UsersIcon from '@patternfly/react-icons/dist/esm/icons/users-icon';
@@ -53,9 +54,7 @@ export const StudentsTab: React.FC<Props> = ({ qaResults }) => {
               <Tr key={i}>
                 <Td dataLabel="CI Name">{r.ci_name}</Td>
                 <Td dataLabel="Landing Page URL">
-                  <a className="cell-truncate" href={r.landing_page_url} target="_blank" rel="noopener noreferrer" title={r.landing_page_url}>
-                    {r.landing_page_url}
-                  </a>
+                  <ClipboardCopy variant="inline-compact" isReadOnly>{r.landing_page_url}</ClipboardCopy>
                 </Td>
                 <Td dataLabel="Status">{r.status}</Td>
               </Tr>

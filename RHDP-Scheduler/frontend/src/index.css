@@ -174,3 +174,35 @@ html, body, #root {
   align-items: center;
   gap: 16px;
 }
+
+/* ── Summary cards (DeploymentsTab) ── */
+.summary-card-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  text-align: center;
+}
+.summary-card-label {
+  font-size: 0.8rem;
+  text-align: center;
+  color: var(--rh-gray);
+  text-transform: uppercase;
+}
+
+/* ── Schedule detail grid (expandable rows) ── */
+.schedule-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px 24px;
+  padding: 8px 0;
+  font-size: 0.85rem;
+}
+@media (max-width: 768px) {
+  .schedule-detail-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Tab badge spacing ── */
+.tab-badge {
+  margin-left: 6px;
+}

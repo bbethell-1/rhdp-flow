@@ -11,7 +11,7 @@ export interface WorkshopSchedule {
   ci_name: string;
   ci: string;
   namespace: string;
-  users: number;
+  users: number | null;
   enable_workshop_interface: boolean;
   password: string;
   activity: string;
@@ -23,10 +23,9 @@ export interface WorkshopSchedule {
   is_multi_asset: boolean;
   asset_cis: string;
   multi_workshop_name: string;
-  concurrency: number;
-  count: number;
-  aws_regions: string;
-  white_glove: boolean;
+  concurrency: number | null;
+  instances: number | null;
+  campaign_id: string;
 }
 
 export interface UploadResponse {
@@ -46,7 +45,6 @@ export interface DeploymentResult {
   auto_destroy: string;
   timestamp: string;
   error_message: string;
-  log_url: string;
 }
 
 export interface JobResponse {

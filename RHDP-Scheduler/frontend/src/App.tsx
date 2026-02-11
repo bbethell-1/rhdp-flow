@@ -15,6 +15,7 @@ import {
   ToolbarItem,
   Checkbox,
   Alert,
+  Badge,
 } from '@patternfly/react-core';
 
 import type {
@@ -84,6 +85,8 @@ const App: React.FC = () => {
     setViewingSession(false);
   }, []);
 
+  const studentsCount = qaResults.filter(r => r.landing_page_url).length;
+
   const masthead = (
     <Masthead>
       <MastheadMain>
@@ -139,7 +142,10 @@ const App: React.FC = () => {
           onSelect={(_e, key) => setActiveTab(key)}
           aria-label="RHDP-Flow tabs"
         >
-          <Tab eventKey="upload" title={<TabTitleText>Upload &amp; Deploy</TabTitleText>}>
+          <Tab
+            eventKey="upload"
+            title={<TabTitleText>Upload &amp; Deploy{schedules.length > 0 && <Badge className="tab-badge" isRead>{schedules.length}</Badge>}</TabTitleText>}
+          >
             <UploadTab
               dryRun={dryRun}
               schedules={schedules}
@@ -150,7 +156,10 @@ const App: React.FC = () => {
               onClear={handleClear}
             />
           </Tab>
-          <Tab eventKey="deployments" title={<TabTitleText>Deployments</TabTitleText>}>
+          <Tab
+            eventKey="deployments"
+            title={<TabTitleText>Deployments{results.length > 0 && <Badge className="tab-badge" isRead>{results.length}</Badge>}</TabTitleText>}
+          >
             <DeploymentsTab
               results={results}
               setResults={setResults}
@@ -160,14 +169,20 @@ const App: React.FC = () => {
           <Tab eventKey="operations" title={<TabTitleText>Operations</TabTitleText>}>
             <OperationsTab showToast={showToast} schedules={schedules} />
           </Tab>
-          <Tab eventKey="qa" title={<TabTitleText>QA</TabTitleText>}>
+          <Tab
+            eventKey="qa"
+            title={<TabTitleText>QA{qaResults.length > 0 && <Badge className="tab-badge" isRead>{qaResults.length}</Badge>}</TabTitleText>}
+          >
             <QATab
               qaResults={qaResults}
               setQAResults={setQAResults}
               showToast={showToast}
             />
           </Tab>
-          <Tab eventKey="students" title={<TabTitleText>Students</TabTitleText>}>
+          <Tab
+            eventKey="students"
+            title={<TabTitleText>Students{studentsCount > 0 && <Badge className="tab-badge" isRead>{studentsCount}</Badge>}</TabTitleText>}
+          >
             <StudentsTab qaResults={qaResults} />
           </Tab>
         </Tabs>

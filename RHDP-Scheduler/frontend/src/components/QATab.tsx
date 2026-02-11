@@ -28,6 +28,20 @@ function healthyDisplay(h: boolean | string | null | undefined): string {
   return String(h ?? '-');
 }
 
+function statusColorClass(status: string): string {
+  if (!status) return '';
+  const s = status.toLowerCase();
+  if (s.includes('verified') && !s.includes('unverified')) return 'status-verified';
+  if (s.includes('failed') || s.includes('error')) return 'status-failed';
+  return '';
+}
+
+function healthyColorClass(h: boolean | string | null | undefined): string {
+  if (h === true || h === 'Yes') return 'status-verified';
+  if (h === false || h === 'No') return 'status-failed';
+  return '';
+}
+
 export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) => {
   const [qaType, setQaType] = useState<'1' | '2' | 'both'>('both');
   const [running, setRunning] = useState(false);
@@ -103,9 +117,9 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
               <Tr key={i}>
                 <Td dataLabel="CI Name">{r.ci_name}</Td>
                 <Td dataLabel="CI"><span className="cell-truncate" title={r.ci}>{r.ci}</span></Td>
-                <Td dataLabel="Status">{r.status}</Td>
+                <Td dataLabel="Status"><span className={statusColorClass(r.status)}>{r.status}</span></Td>
                 <Td dataLabel="Deployed">{r.deployed || '-'}</Td>
-                <Td dataLabel="Healthy">{healthyDisplay(r.healthy)}</Td>
+                <Td dataLabel="Healthy"><span className={healthyColorClass(r.healthy)}>{healthyDisplay(r.healthy)}</span></Td>
                 <Td dataLabel="Seats">{r.expected_seats ?? '-'} / {r.actual_seats ?? '-'}</Td>
                 <Td dataLabel="Landing Page URL">
                   {r.landing_page_url ? (

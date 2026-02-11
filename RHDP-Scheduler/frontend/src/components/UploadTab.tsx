@@ -8,8 +8,13 @@ import {
   SplitItem,
   EmptyState,
   EmptyStateBody,
+  FileUpload,
+  Modal,
+  ModalBody,
+  ModalHeader,
+  ModalFooter,
 } from '@patternfly/react-core';
-import { Table, Thead, Tbody, Tr, Th, Td } from '@patternfly/react-table';
+import { Table, Thead, Tbody, Tr, Th, Td, ExpandableRowContent } from '@patternfly/react-table';
 import UploadIcon from '@patternfly/react-icons/dist/esm/icons/upload-icon';
 
 import { api } from '../services/api';
@@ -28,8 +33,6 @@ interface Props {
 export const UploadTab: React.FC<Props> = ({
   dryRun, schedules, setSchedules, setResults, showToast, onClear,
 }) => {
-  const fileRef = useRef<HTMLInputElement>(null);
-  const passwordFileRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
 
   const [deploying, setDeploying] = useState(false);
@@ -38,16 +41,36 @@ export const UploadTab: React.FC<Props> = ({
   const [progressMsg, setProgressMsg] = useState('');
   const [logLines, setLogLines] = useState<string[]>([]);
 
+  // FileUpload state
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvFilename, setCsvFilename] = useState('');
+  const [passwordFile, setPasswordFile] = useState<File | null>(null);
+  const [passwordFilename, setPasswordFilename] = useState('');
+
+  // Confirmation modal state
+  const [showDeployConfirm, setShowDeployConfirm] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+
+  // Expandable rows state
+  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
+
   // auto-scroll log
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logLines]);
 
+  const toggleExpanded = (idx: number) => {
+    setExpandedRows(prev => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx); else next.add(idx);
+      return next;
+    });
+  };
+
   const handleUpload = async () => {
-    const file = fileRef.current?.files?.[0];
-    if (!file) { showToast('Please select a CSV file', 'danger'); return; }
+    if (!csvFile) { showToast('Please select a CSV file', 'danger'); return; }
     try {
-      const data = await api.uploadCSV(file);
+      const data = await api.uploadCSV(csvFile);
       setSchedules(data.schedules);
       showToast(`Loaded ${data.count} schedule(s)`, 'success');
     } catch (e) {
@@ -56,10 +79,9 @@ export const UploadTab: React.FC<Props> = ({
   };
 
   const handleUploadPasswords = async () => {
-    const file = passwordFileRef.current?.files?.[0];
-    if (!file) { showToast('Please select a passwords CSV file', 'danger'); return; }
+    if (!passwordFile) { showToast('Please select a passwords CSV file', 'danger'); return; }
     try {
-      const data = await api.uploadPasswordsCSV(file);
+      const data = await api.uploadPasswordsCSV(passwordFile);
       setPasswordCount(data.count);
       showToast(data.message, 'success');
     } catch (e) {
@@ -68,6 +90,7 @@ export const UploadTab: React.FC<Props> = ({
   };
 
   const handleClear = async () => {
+    setShowClearConfirm(false);
     try {
       await api.clearSession();
       onClear();
@@ -75,8 +98,11 @@ export const UploadTab: React.FC<Props> = ({
       setProgress(0);
       setProgressMsg('');
       setPasswordCount(null);
-      if (fileRef.current) fileRef.current.value = '';
-      if (passwordFileRef.current) passwordFileRef.current.value = '';
+      setCsvFile(null);
+      setCsvFilename('');
+      setPasswordFile(null);
+      setPasswordFilename('');
+      setExpandedRows(new Set());
       showToast('Session cleared', 'success');
     } catch (e) {
       showToast(`Clear failed: ${e}`, 'danger');
@@ -99,6 +125,13 @@ export const UploadTab: React.FC<Props> = ({
   }, []);
 
   const handleDeploy = async () => {
+    // If live deploy (not dry-run), require confirmation
+    if (!dryRun && !showDeployConfirm) {
+      setShowDeployConfirm(true);
+      return;
+    }
+    setShowDeployConfirm(false);
+
     if (schedules.length === 0) { showToast('Upload a CSV first', 'danger'); return; }
     setDeploying(true);
     setProgress(0);
@@ -138,25 +171,47 @@ export const UploadTab: React.FC<Props> = ({
     }
   };
 
+  const columnCount = 10;
+
   return (
     <PageSection>
-      {/* Upload controls */}
+      {/* CSV Upload */}
       <Split hasGutter style={{ marginBottom: 16, alignItems: 'center' }}>
-        <SplitItem>
-          <input type="file" accept=".csv" ref={fileRef} />
+        <SplitItem isFilled>
+          <FileUpload
+            id="csv-file-upload"
+            filename={csvFilename}
+            filenamePlaceholder="Drag & drop or browse for a CSV file"
+            browseButtonText="Browse"
+            clearButtonText="Clear"
+            onFileInputChange={(_e, file) => { setCsvFile(file); setCsvFilename(file.name); }}
+            onClearClick={() => { setCsvFile(null); setCsvFilename(''); }}
+            dropzoneProps={{ accept: { 'text/csv': ['.csv'] } }}
+            hideDefaultPreview
+          />
         </SplitItem>
         <SplitItem>
           <Button variant="primary" onClick={handleUpload}>Upload</Button>
         </SplitItem>
         <SplitItem>
-          <Button variant="secondary" onClick={handleClear}>Clear / New Upload</Button>
+          <Button variant="secondary" onClick={() => setShowClearConfirm(true)}>Clear / New Upload</Button>
         </SplitItem>
       </Split>
 
       {/* Passwords CSV upload */}
       <Split hasGutter style={{ marginBottom: 16, alignItems: 'center' }}>
-        <SplitItem>
-          <input type="file" accept=".csv" ref={passwordFileRef} />
+        <SplitItem isFilled>
+          <FileUpload
+            id="password-file-upload"
+            filename={passwordFilename}
+            filenamePlaceholder="Drag & drop or browse for a passwords CSV"
+            browseButtonText="Browse"
+            clearButtonText="Clear"
+            onFileInputChange={(_e, file) => { setPasswordFile(file); setPasswordFilename(file.name); }}
+            onClearClick={() => { setPasswordFile(null); setPasswordFilename(''); }}
+            dropzoneProps={{ accept: { 'text/csv': ['.csv'] } }}
+            hideDefaultPreview
+          />
         </SplitItem>
         <SplitItem>
           <Button variant="secondary" onClick={handleUploadPasswords}>Upload Passwords</Button>
@@ -178,32 +233,64 @@ export const UploadTab: React.FC<Props> = ({
             <Table aria-label="Schedule preview" variant="compact" className="fixed-table">
               <Thead>
                 <Tr>
+                  <Th />
                   <Th width={10}>CI Name</Th>
-                  <Th width={15}>CI</Th>
-                  <Th width={15}>Namespace</Th>
+                  <Th width={10}>CI</Th>
+                  <Th width={10}>Workshop Name</Th>
+                  <Th width={10}>Namespace</Th>
                   <Th width={10}>Users</Th>
+                  <Th width={10}>Instances</Th>
                   <Th width={10}>UI</Th>
                   <Th width={10}>Prov. Date</Th>
                   <Th width={10}>Auto-Stop</Th>
                   <Th width={10}>Auto-Destroy</Th>
-                  <Th width={10}>Count</Th>
-                  <Th width={10}>WG</Th>
                 </Tr>
               </Thead>
               <Tbody>
                 {schedules.map((s, i) => (
-                  <Tr key={i}>
-                    <Td dataLabel="CI Name">{s.ci_name}</Td>
-                    <Td dataLabel="CI"><span className="cell-truncate" title={s.ci}>{s.ci}</span></Td>
-                    <Td dataLabel="Namespace"><span className="cell-truncate" title={s.namespace}>{s.namespace}</span></Td>
-                    <Td dataLabel="Users">{s.users}</Td>
-                    <Td dataLabel="UI">{s.enable_workshop_interface ? 'Yes' : 'No'}</Td>
-                    <Td dataLabel="Prov. Date">{s.provisioning_date}</Td>
-                    <Td dataLabel="Auto-Stop">{s.auto_stop}</Td>
-                    <Td dataLabel="Auto-Destroy">{s.auto_destroy}</Td>
-                    <Td dataLabel="Count">{s.count}</Td>
-                    <Td dataLabel="WG">{s.white_glove ? 'Yes' : 'No'}</Td>
-                  </Tr>
+                  <>
+                    <Tr key={`row-${i}`}>
+                      <Td
+                        expand={{
+                          rowIndex: i,
+                          isExpanded: expandedRows.has(i),
+                          onToggle: () => toggleExpanded(i),
+                        }}
+                      />
+                      <Td dataLabel="CI Name">{s.ci_name}</Td>
+                      <Td dataLabel="CI"><span className="cell-truncate" title={s.ci}>{s.ci}</span></Td>
+                      <Td dataLabel="Workshop Name"><span className="cell-truncate" title={s.workshop_name}>{s.workshop_name}</span></Td>
+                      <Td dataLabel="Namespace"><span className="cell-truncate" title={s.namespace}>{s.namespace}</span></Td>
+                      <Td dataLabel="Users">{s.users ?? '-'}</Td>
+                      <Td dataLabel="Instances">{s.instances ?? '-'}</Td>
+                      <Td dataLabel="UI">{s.enable_workshop_interface ? 'Yes' : 'No'}</Td>
+                      <Td dataLabel="Prov. Date">{s.provisioning_date}</Td>
+                      <Td dataLabel="Auto-Stop">{s.auto_stop}</Td>
+                      <Td dataLabel="Auto-Destroy">{s.auto_destroy}</Td>
+                    </Tr>
+                    {expandedRows.has(i) && (
+                      <Tr key={`detail-${i}`} isExpanded>
+                        <Td colSpan={columnCount + 1}>
+                          <ExpandableRowContent>
+                            <div className="schedule-detail-grid">
+                              <div><strong>Password:</strong> {s.password || '-'}</div>
+                              <div><strong>Activity:</strong> {s.activity || '-'}</div>
+                              <div><strong>Purpose:</strong> {s.purpose || '-'}</div>
+                              <div><strong>Campaign ID:</strong> {s.campaign_id || '-'}</div>
+                              <div><strong>Concurrency:</strong> {s.concurrency ?? '-'}</div>
+                              <div><strong>Multi-Asset:</strong> {s.is_multi_asset ? 'Yes' : 'No'}</div>
+                              {s.is_multi_asset && (
+                                <>
+                                  <div><strong>Asset CIs:</strong> {s.asset_cis || '-'}</div>
+                                  <div><strong>Multi Workshop Name:</strong> {s.multi_workshop_name || '-'}</div>
+                                </>
+                              )}
+                            </div>
+                          </ExpandableRowContent>
+                        </Td>
+                      </Tr>
+                    )}
+                  </>
                 ))}
               </Tbody>
             </Table>
@@ -240,6 +327,41 @@ export const UploadTab: React.FC<Props> = ({
           {logLines.join('\n')}
         </div>
       )}
+
+      {/* Deploy confirmation modal (live mode only) */}
+      <Modal
+        variant="small"
+        isOpen={showDeployConfirm}
+        onClose={() => setShowDeployConfirm(false)}
+        aria-labelledby="deploy-confirm-title"
+      >
+        <ModalHeader title="Confirm Live Deployment" labelId="deploy-confirm-title" titleIconVariant="warning" />
+        <ModalBody>
+          You are about to run a <strong>live deployment</strong> for {schedules.length} schedule(s).
+          This will provision real resources. Are you sure?
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="danger" onClick={handleDeploy}>Deploy Now</Button>
+          <Button variant="link" onClick={() => setShowDeployConfirm(false)}>Cancel</Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Clear confirmation modal */}
+      <Modal
+        variant="small"
+        isOpen={showClearConfirm}
+        onClose={() => setShowClearConfirm(false)}
+        aria-labelledby="clear-confirm-title"
+      >
+        <ModalHeader title="Confirm Clear Session" labelId="clear-confirm-title" />
+        <ModalBody>
+          This will archive the current session and reset all schedules, results, and logs. Continue?
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="primary" onClick={handleClear}>Clear Session</Button>
+          <Button variant="link" onClick={() => setShowClearConfirm(false)}>Cancel</Button>
+        </ModalFooter>
+      </Modal>
     </PageSection>
   );
 };
