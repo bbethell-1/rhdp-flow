@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import copy
 import csv
 import io
 import logging
@@ -29,6 +28,7 @@ from rhdp_flow import (
     load_asset_passwords,
     process_schedule,
     create_multi_workshop,
+    create_multi_workshop_from_group,
     qa1_verify_setup,
     qa2_verify_deployment_status,
     export_student_landing_page_csv,
@@ -325,13 +325,10 @@ async def deploy(body: DeployRequest = DeployRequest()):
                     regular_schedules.append(s)
 
             results = []
-            total = len(grouped_multi) + sum(
-                s.count if s.count > 1 else 1 for s in regular_schedules
-            )
+            total = len(grouped_multi) + len(regular_schedules)
             done = 0
 
             # Grouped multi-asset
-            from rhdp_flow import create_multi_workshop_from_group
             for group_name, group_scheds in grouped_multi.items():
                 mw_name = create_multi_workshop_from_group(group_scheds, config)
                 first = group_scheds[0]
@@ -357,21 +354,7 @@ async def deploy(body: DeployRequest = DeployRequest()):
                 pct = int(done / total * 100) if total else 100
                 jobs.update_job(job.job_id, progress=pct, message=f"Processed group: {group_name}")
 
-            # Expand count > 1
-            expanded = []
             for s in regular_schedules:
-                if s.count > 1:
-                    for i in range(1, s.count + 1):
-                        inst = copy.deepcopy(s)
-                        inst.workshop_name = f"{s.workshop_name} (Instance {i})"
-                        inst.count = 1
-                        expanded.append(inst)
-                else:
-                    expanded.append(s)
-
-            total = done + len(expanded)
-
-            for s in expanded:
                 result = process_schedule(s, config, asset_passwords=_asset_passwords)
                 results.append(result)
                 done += 1
@@ -380,7 +363,7 @@ async def deploy(body: DeployRequest = DeployRequest()):
                     job.job_id, progress=pct,
                     message=f"Deployed {result.ci_name}: {result.status}",
                 )
-                if not config.dry_run and len(expanded) > 1:
+                if not config.dry_run and len(regular_schedules) > 1:
                     await asyncio.sleep(1)
 
             global _deployment_results
@@ -413,8 +396,6 @@ def deploy_dry_run(body: DeployRequest = DeployRequest()):
     config = _get_config(dry_run=True)
 
     # Replicate main() grouping logic for accurate preview
-    from rhdp_flow import create_multi_workshop_from_group
-
     grouped_multi = {}
     regular_schedules = []
     for s in schedules:
@@ -446,19 +427,7 @@ def deploy_dry_run(body: DeployRequest = DeployRequest()):
                 error_message="Failed to create grouped MultiWorkshop",
             ))
 
-    # Expand count > 1
-    expanded = []
     for s in regular_schedules:
-        if s.count > 1:
-            for i in range(1, s.count + 1):
-                inst = copy.deepcopy(s)
-                inst.workshop_name = f"{s.workshop_name} (Instance {i})"
-                inst.count = 1
-                expanded.append(inst)
-        else:
-            expanded.append(s)
-
-    for s in expanded:
         result = process_schedule(s, config, asset_passwords=_asset_passwords)
         results.append(result)
 

@@ -1557,6 +1557,63 @@ def get_catalog_item_info(ci: str, config: RHDPConfig) -> Dict[str, str]:
             'displayName': ci
         }
 
+def create_multi_workshop_from_group(
+    group_schedules: List[WorkshopSchedule],
+    config: RHDPConfig,
+) -> Optional[str]:
+    """
+    Create a MultiWorkshop from a group of schedules sharing the same
+    multi_workshop_name.  Each schedule in the group represents one asset CI.
+
+    This synthesises a single WorkshopSchedule with is_multi_asset=True and
+    comma-separated asset_cis, then delegates to create_multi_workshop().
+    Per-asset passwords and num_users are forwarded when they differ across
+    the group rows.
+    """
+    if not group_schedules:
+        return None
+
+    first = group_schedules[0]
+
+    # Collect per-asset passwords and num_users from individual rows
+    asset_cis = ",".join(s.ci for s in group_schedules)
+    asset_passwords: Dict[str, str] = {}
+    asset_num_users: Dict[str, int] = {}
+    for s in group_schedules:
+        if s.password:
+            asset_passwords[s.ci] = s.password
+        if s.users is not None and s.users > 0:
+            asset_num_users[s.ci] = s.users
+
+    # Build a synthetic schedule that create_multi_workshop expects
+    synth = WorkshopSchedule(
+        ci_name=first.ci_name,
+        ci=first.ci,
+        namespace=first.namespace,
+        users=first.users,
+        enable_workshop_interface=first.enable_workshop_interface,
+        password=first.password,
+        activity=first.activity,
+        purpose=first.purpose,
+        workshop_name=first.workshop_name,
+        provisioning_date=first.provisioning_date,
+        auto_stop=first.auto_stop,
+        auto_destroy=first.auto_destroy,
+        is_multi_asset=True,
+        asset_cis=asset_cis,
+        multi_workshop_name=first.multi_workshop_name,
+        instances=first.instances,
+        concurrency=first.concurrency,
+        salesforce_ids=first.salesforce_ids,
+    )
+
+    return create_multi_workshop(
+        synth, config,
+        asset_passwords=asset_passwords or None,
+        asset_num_users=asset_num_users or None,
+    )
+
+
 def create_multi_workshop(
     schedule: WorkshopSchedule,
     config: RHDPConfig,
