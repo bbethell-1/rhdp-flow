@@ -76,6 +76,7 @@ export const UploadTab: React.FC<Props> = ({
   const [resourceLock, setResourceLock] = useState(true);
   const [enableResourcePools, setEnableResourcePools] = useState(false);
   const [whiteGlove, setWhiteGlove] = useState(true);
+  const [redirect, setRedirect] = useState(true);
 
   // Confirmation modal state
   const [showDeployConfirm, setShowDeployConfirm] = useState(false);
@@ -200,7 +201,7 @@ export const UploadTab: React.FC<Props> = ({
   const handleDryRun = async () => {
     if (schedules.length === 0) { showToast('Upload a CSV first', 'danger'); return; }
     try {
-      const data = await api.dryRun({ dry_run: true, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove });
+      const data = await api.dryRun({ dry_run: true, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect });
       setResults(data);
       showToast(`Dry-run: ${data.length} result(s)`, 'success');
     } catch (e) {
@@ -227,7 +228,7 @@ export const UploadTab: React.FC<Props> = ({
     setLogLines([]);
 
     try {
-      const job = await api.deploy({ dry_run: dryRun, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove });
+      const job = await api.deploy({ dry_run: dryRun, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect });
       const es = api.deployStream(job.job_id);
 
       es.addEventListener('status', (e: MessageEvent) => {
@@ -437,6 +438,14 @@ export const UploadTab: React.FC<Props> = ({
                     label="White Glove"
                     isChecked={whiteGlove}
                     onChange={(_e, checked) => setWhiteGlove(checked)}
+                  />
+                </SplitItem>
+                <SplitItem>
+                  <Switch
+                    id="redirect-switch"
+                    label="Redirect"
+                    isChecked={redirect}
+                    onChange={(_e, checked) => setRedirect(checked)}
                   />
                 </SplitItem>
               </Split>

@@ -65,6 +65,7 @@ export interface DeployRequest {
   resource_lock?: boolean;
   enable_resource_pools?: boolean;
   white_glove?: boolean;
+  redirect?: boolean;
 }
 
 export interface OperationResponse {

@@ -106,6 +106,7 @@ def _get_config(
     resource_lock: bool = True,
     enable_resource_pools: bool = False,
     white_glove: bool = True,
+    redirect: bool = True,
 ) -> RHDPConfig:
     config = RHDPConfig()
     config.dry_run = dry_run
@@ -113,6 +114,7 @@ def _get_config(
     config.resource_lock = resource_lock
     config.enable_resource_pools = enable_resource_pools
     config.white_glove = white_glove
+    config.redirect = redirect
     config.base_domain = _detect_and_cache_base_domain()
     return config
 
@@ -368,6 +370,7 @@ async def deploy(body: DeployRequest = DeployRequest()):
                 resource_lock=body.resource_lock,
                 enable_resource_pools=body.enable_resource_pools,
                 white_glove=body.white_glove,
+                redirect=body.redirect,
             )
             jobs.update_job(job.job_id, status=jobs.Status.running, message="Starting deployment")
 
@@ -454,6 +457,7 @@ def deploy_dry_run(body: DeployRequest = DeployRequest()):
         resource_lock=body.resource_lock,
         enable_resource_pools=body.enable_resource_pools,
         white_glove=body.white_glove,
+        redirect=body.redirect,
     )
 
     # Replicate main() grouping logic for accurate preview

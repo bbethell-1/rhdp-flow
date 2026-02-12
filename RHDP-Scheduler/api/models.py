@@ -65,6 +65,7 @@ class DeployRequest(BaseModel):
     resource_lock: bool = Field(True, description="Apply lock-enabled label")
     enable_resource_pools: bool = Field(False, description="Enable Poolboy resource pools")
     white_glove: bool = Field(True, description="White-glove mode")
+    redirect: bool = Field(True, description="Enable workshop UI redirect (labUserInterface.redirect)")
 
 
 class LockRequest(BaseModel):

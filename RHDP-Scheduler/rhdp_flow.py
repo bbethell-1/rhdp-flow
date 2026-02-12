@@ -149,6 +149,7 @@ class RHDPConfig:
         self.resource_lock = True
         self.enable_resource_pools = False
         self.white_glove = True
+        self.redirect = True
         self.base_domain = "integration.demo.redhat.com"
         
     def validate(self) -> bool:
@@ -1132,7 +1133,7 @@ def create_workshop_with_ui(
                     "relativeMaximum": "30d"
                 },
                 "labUserInterface": {
-                    "redirect": True
+                    "redirect": config.redirect
                 },
                 "multiuserServices": "num_users" in param_values,
                 "openRegistration": True
@@ -2065,15 +2066,15 @@ def enable_workshop_lab_interface(
                 workshop_data = json.loads(result.stdout)
                 current_redirect = workshop_data.get('spec', {}).get('labUserInterface', {}).get('redirect', False)
                 
-                if current_redirect:
-                    logger.info(f"✅ Workshop '{workshop_name}' already has labUserInterface.redirect enabled (Enable workshop user interface: ON)")
+                if current_redirect == config.redirect:
+                    logger.info(f"✅ Workshop '{workshop_name}' already has labUserInterface.redirect={'true' if config.redirect else 'false'} (Enable workshop user interface: {'ON' if config.redirect else 'OFF'})")
                     return True
-                
-                # Patch it to enable labUserInterface
+
+                # Patch it to set labUserInterface
                 patch = {
                     "spec": {
                         "labUserInterface": {
-                            "redirect": True
+                            "redirect": config.redirect
                         }
                     }
                 }
@@ -2095,7 +2096,7 @@ def enable_workshop_lab_interface(
                 )
                 
                 if patch_result.returncode == 0:
-                    logger.info(f"✅ Enabled labUserInterface.redirect (Enable workshop user interface: ON) for Workshop: {workshop_name}")
+                    logger.info(f"✅ Set labUserInterface.redirect={'true' if config.redirect else 'false'} (Enable workshop user interface: {'ON' if config.redirect else 'OFF'}) for Workshop: {workshop_name}")
                     return True
                 else:
                     logger.warning(f"Could not patch Workshop: {patch_result.stderr}")
