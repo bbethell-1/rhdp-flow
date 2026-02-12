@@ -100,6 +100,16 @@ html, body, #root {
   background: rgba(255,255,255,0.1);
 }
 
+.tz-indicator {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.75rem;
+  font-family: 'Red Hat Mono', 'Menlo', monospace;
+  white-space: nowrap;
+  padding: 2px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
 /* ── Log display ── */
 .log-box {
   background: #1e1e1e;

@@ -135,12 +135,12 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
       current.replace(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})$/,
         (_m, d, mo, y, h, mi) => {
           const yr = y.length === 2 ? `20${y}` : y;
-          return `${yr}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}T${h.padStart(2, '0')}:${mi}`;
+          return `${yr}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}T${h.padStart(2, '0')}:${mi}:00Z`;
         })
     );
     if (isNaN(parsed.getTime())) return null;
     const newDate = new Date(parsed.getTime() + (days * 24 + hours) * 3600_000);
-    const fmt = (d: Date) => d.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+    const fmt = (d: Date) => d.toLocaleString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' }) + ' UTC';
     const label = dates.length > 1 ? ` (earliest of ${dates.length})` : '';
     return `${fmt(parsed)}${label} → ${fmt(newDate)}`;
   };
@@ -156,7 +156,7 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
 
   const addRecord = (operation: string, target: string, values: string, success: boolean, message: string) => {
     setHistory(prev => [{
-      timestamp: new Date().toLocaleTimeString(),
+      timestamp: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'UTC' }) + ' UTC',
       operation,
       target: target || 'All',
       values,
@@ -398,7 +398,7 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
         <Table aria-label="Operations history" variant="compact">
           <Thead>
             <Tr>
-              <Th>Time</Th>
+              <Th>Time (UTC)</Th>
               <Th>Operation</Th>
               <Th>Target CI</Th>
               <Th>Values</Th>
@@ -409,7 +409,7 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
           <Tbody>
             {history.map((rec, i) => (
               <Tr key={i}>
-                <Td dataLabel="Time">{rec.timestamp}</Td>
+                <Td dataLabel="Time (UTC)">{rec.timestamp}</Td>
                 <Td dataLabel="Operation">{rec.operation}</Td>
                 <Td dataLabel="Target CI">{rec.target}</Td>
                 <Td dataLabel="Values">{rec.values}</Td>

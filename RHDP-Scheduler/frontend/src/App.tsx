@@ -108,6 +108,9 @@ const App: React.FC = () => {
                   id="globalDryRun"
                 />
                 <HealthBadge />
+                <span className="tz-indicator">
+                  Times in UTC | You: {Intl.DateTimeFormat().resolvedOptions().timeZone}
+                </span>
                 <button className="theme-toggle" onClick={toggleTheme}>
                   {theme === 'dark' ? 'Light mode' : 'Dark mode'}
                 </button>

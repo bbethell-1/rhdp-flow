@@ -295,6 +295,10 @@ def calculate_duration(start: datetime, end: datetime) -> str:
     hours = int(delta.total_seconds() / 3600)
     return f"{hours}h"
 
+def utc_timestamp_str() -> str:
+    """Return current UTC time as 'YYYY-MM-DD HH:MM:SS UTC'."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
 # ============================================================================
 # CSV INPUT/OUTPUT HANDLERS
 # ============================================================================
@@ -3408,7 +3412,7 @@ def process_schedule(
                     provisioning_date=schedule.provisioning_date,
                     auto_stop=schedule.auto_stop,
                     auto_destroy=schedule.auto_destroy,
-                    timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+                    timestamp=utc_timestamp_str(),
                     error_message="Failed to create MultiWorkshop"
                 )
             
@@ -3427,7 +3431,7 @@ def process_schedule(
                 provisioning_date=schedule.provisioning_date,
                 auto_stop=schedule.auto_stop,
                 auto_destroy=schedule.auto_destroy,
-                timestamp=time.strftime("%Y-%m-%d %H:%M:%S")
+                timestamp=utc_timestamp_str()
             )
         
         # Check if this is a multi-region workshop
@@ -3447,7 +3451,7 @@ def process_schedule(
                     provisioning_date=schedule.provisioning_date,
                     auto_stop=schedule.auto_stop,
                     auto_destroy=schedule.auto_destroy,
-                    timestamp=time.strftime("%Y-%m-%d %H:%M:%S")
+                    timestamp=utc_timestamp_str()
                 )
             else:
                 return DeploymentResult(
@@ -3460,7 +3464,7 @@ def process_schedule(
                     provisioning_date=schedule.provisioning_date,
                     auto_stop=schedule.auto_stop,
                     auto_destroy=schedule.auto_destroy,
-                    timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+                    timestamp=utc_timestamp_str(),
                     error_message="Failed to create multi-region workshop"
                 )
 
@@ -3503,7 +3507,7 @@ def process_schedule(
                 provisioning_date=schedule.provisioning_date,
                 auto_stop=schedule.auto_stop,
                 auto_destroy=schedule.auto_destroy,
-                timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+                timestamp=utc_timestamp_str(),
                 error_message=error or "Unknown error"
             )
         
@@ -3534,7 +3538,7 @@ def process_schedule(
             provisioning_date=schedule.provisioning_date,
             auto_stop=schedule.auto_stop,
             auto_destroy=schedule.auto_destroy,
-            timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+            timestamp=utc_timestamp_str(),
             error_message=""
         )
         
@@ -3550,7 +3554,7 @@ def process_schedule(
             provisioning_date=schedule.provisioning_date,
             auto_stop=schedule.auto_stop,
             auto_destroy=schedule.auto_destroy,
-            timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+            timestamp=utc_timestamp_str(),
             error_message=str(e)
         )
 

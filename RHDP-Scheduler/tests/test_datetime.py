@@ -1,8 +1,10 @@
-"""Tests for parse_date_time, format_iso8601, calculate_duration."""
+"""Tests for parse_date_time, format_iso8601, calculate_duration, utc_timestamp_str."""
 
+import re
 from datetime import datetime, timezone
+from unittest.mock import patch
 
-from rhdp_flow import parse_date_time, format_iso8601, calculate_duration
+from rhdp_flow import parse_date_time, format_iso8601, calculate_duration, utc_timestamp_str
 
 
 def test_parse_dd_mm_yyyy():
@@ -64,3 +66,23 @@ def test_calculate_duration_multi_day():
     start = datetime(2026, 2, 15, 11, 0, tzinfo=timezone.utc)
     end = datetime(2026, 2, 17, 11, 0, tzinfo=timezone.utc)
     assert calculate_duration(start, end) == "48h"
+
+
+def test_utc_timestamp_str_format():
+    result = utc_timestamp_str()
+    assert re.match(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC$", result)
+
+
+def test_utc_timestamp_str_is_utc():
+    """Verify the timestamp uses UTC regardless of system timezone."""
+    fixed = datetime(2026, 7, 4, 15, 30, 45, tzinfo=timezone.utc)
+    with patch("rhdp_flow.datetime") as mock_dt:
+        mock_dt.now.return_value = fixed
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        result = utc_timestamp_str()
+    assert result == "2026-07-04 15:30:45 UTC"
+
+
+def test_utc_timestamp_str_ends_with_utc():
+    result = utc_timestamp_str()
+    assert result.endswith(" UTC")

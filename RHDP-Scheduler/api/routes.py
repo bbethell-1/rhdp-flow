@@ -7,7 +7,6 @@ import csv
 import io
 import logging
 import subprocess
-import time
 from dataclasses import asdict
 from typing import Dict, List, Optional
 
@@ -40,6 +39,7 @@ from rhdp_flow import (
     update_passwords,
     import_namespace_to_csv,
     derive_base_domain,
+    utc_timestamp_str,
 )
 
 from api.models import (
@@ -163,7 +163,7 @@ def _archive_current_session():
         "csv_filepath": _csv_filepath,
         "schedule_count": len(_schedules),
         "result_count": len(_deployment_results),
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "timestamp": utc_timestamp_str(),
     }
     _sessions.append(session)
 
@@ -425,7 +425,7 @@ async def deploy(body: DeployRequest = DeployRequest()):
                         guid=mw_name, url=url, status="deployed_unverified",
                         provisioning_date=first.provisioning_date,
                         auto_stop=first.auto_stop, auto_destroy=first.auto_destroy,
-                        timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+                        timestamp=utc_timestamp_str(),
                     ))
                 else:
                     results.append(DeploymentResult(
@@ -433,7 +433,7 @@ async def deploy(body: DeployRequest = DeployRequest()):
                         guid="failed", url="", status="failed",
                         provisioning_date=first.provisioning_date,
                         auto_stop=first.auto_stop, auto_destroy=first.auto_destroy,
-                        timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+                        timestamp=utc_timestamp_str(),
                         error_message="Failed to create grouped MultiWorkshop",
                     ))
                 done += 1
@@ -507,7 +507,7 @@ def deploy_dry_run(body: DeployRequest = DeployRequest()):
                 guid=mw_name, url=url, status="deployed_unverified",
                 provisioning_date=first.provisioning_date,
                 auto_stop=first.auto_stop, auto_destroy=first.auto_destroy,
-                timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+                timestamp=utc_timestamp_str(),
             ))
         else:
             results.append(DeploymentResult(
@@ -515,7 +515,7 @@ def deploy_dry_run(body: DeployRequest = DeployRequest()):
                 guid="failed", url="", status="failed",
                 provisioning_date=first.provisioning_date,
                 auto_stop=first.auto_stop, auto_destroy=first.auto_destroy,
-                timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+                timestamp=utc_timestamp_str(),
                 error_message="Failed to create grouped MultiWorkshop",
             ))
 

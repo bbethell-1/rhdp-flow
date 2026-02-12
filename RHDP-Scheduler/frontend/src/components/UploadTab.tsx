@@ -39,7 +39,7 @@ function parseScheduleDate(dateStr: string): Date | null {
   const m = dateStr.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})$/);
   if (m) {
     const yr = m[3].length === 2 ? 2000 + parseInt(m[3]) : parseInt(m[3]);
-    return new Date(yr, parseInt(m[2]) - 1, parseInt(m[1]), parseInt(m[4]), parseInt(m[5]));
+    return new Date(Date.UTC(yr, parseInt(m[2]) - 1, parseInt(m[1]), parseInt(m[4]), parseInt(m[5])));
   }
   const d = new Date(dateStr);
   return isNaN(d.getTime()) ? null : d;
@@ -390,6 +390,10 @@ export const UploadTab: React.FC<Props> = ({
             </Alert>
           )}
 
+          <Alert variant="info" isInline isPlain title="All schedule times are in UTC" style={{ marginBottom: 8 }}>
+            Your local timezone: {Intl.DateTimeFormat().resolvedOptions().timeZone}. Ensure CSV dates are entered in UTC.
+          </Alert>
+
           <div className="table-scroll-wrapper">
             <Table aria-label="Schedule preview" variant="compact" className="fixed-table">
               <Thead>
@@ -402,9 +406,9 @@ export const UploadTab: React.FC<Props> = ({
                   <Th>Users</Th>
                   <Th>Instances</Th>
                   <Th>UI</Th>
-                  <Th>Prov. Date</Th>
-                  <Th>Auto-Stop</Th>
-                  <Th>Auto-Destroy</Th>
+                  <Th>Prov. Date (UTC)</Th>
+                  <Th>Auto-Stop (UTC)</Th>
+                  <Th>Auto-Destroy (UTC)</Th>
                 </Tr>
               </Thead>
               <Tbody>
@@ -425,9 +429,9 @@ export const UploadTab: React.FC<Props> = ({
                       <Td dataLabel="Users">{s.users ?? '-'}</Td>
                       <Td dataLabel="Instances">{s.instances ?? '-'}</Td>
                       <Td dataLabel="UI">{s.enable_workshop_interface ? 'Yes' : 'No'}</Td>
-                      <Td dataLabel="Prov. Date">{s.provisioning_date}</Td>
-                      <Td dataLabel="Auto-Stop">{s.auto_stop}</Td>
-                      <Td dataLabel="Auto-Destroy">{s.auto_destroy}</Td>
+                      <Td dataLabel="Prov. Date (UTC)">{s.provisioning_date}</Td>
+                      <Td dataLabel="Auto-Stop (UTC)">{s.auto_stop}</Td>
+                      <Td dataLabel="Auto-Destroy (UTC)">{s.auto_destroy}</Td>
                     </Tr>
                     {expandedRows.has(i) && (
                       <Tr key={`detail-${i}`} isExpanded>

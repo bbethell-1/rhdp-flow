@@ -220,10 +220,10 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
               <Th>GUID</Th>
               <Th>Status</Th>
               <Th>URL</Th>
-              <Th>Prov. Date</Th>
-              <Th>Auto-Stop</Th>
-              <Th>Auto-Destroy</Th>
-              <Th>Timestamp</Th>
+              <Th>Prov. Date (UTC)</Th>
+              <Th>Auto-Stop (UTC)</Th>
+              <Th>Auto-Destroy (UTC)</Th>
+              <Th>Timestamp (UTC)</Th>
               <Th>Error</Th>
             </Tr>
           </Thead>
@@ -253,10 +253,10 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
                     </span>
                   ) : '-'}
                 </Td>
-                <Td dataLabel="Prov. Date">{r.provisioning_date}</Td>
-                <Td dataLabel="Auto-Stop">{r.auto_stop || '-'}</Td>
-                <Td dataLabel="Auto-Destroy">{r.auto_destroy || '-'}</Td>
-                <Td dataLabel="Timestamp">{r.timestamp}</Td>
+                <Td dataLabel="Prov. Date (UTC)">{r.provisioning_date}</Td>
+                <Td dataLabel="Auto-Stop (UTC)">{r.auto_stop || '-'}</Td>
+                <Td dataLabel="Auto-Destroy (UTC)">{r.auto_destroy || '-'}</Td>
+                <Td dataLabel="Timestamp (UTC)">{r.timestamp}</Td>
                 <Td dataLabel="Error">{r.error_message || ''}</Td>
               </Tr>
             ))}
