@@ -8,7 +8,7 @@ validate csv when uploaded?
 
 ensure namespace exists / validate it 
 
-
+lock when deploying didn't work
 
 ## Testing
 
