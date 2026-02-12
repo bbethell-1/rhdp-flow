@@ -1,2 +1,2 @@
 CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),AWS_Region
-AWS Workshop Multi-Region,aws.rosa-workshop.prod,user-jdoe-redhat-com,60,True,rosa2026,Admin,QA,ROSA Workshop,"18/03/2026 08:00",18/03/2026 20:00,20/03/2026 08:00,"us-east-1,eu-west-1,ap-southeast-1"
+AWS Workshop Multi-Region,aws.rosa-workshop.prod,user-bbethell-redhat-com,60,True,rosa2026,Admin,QA,ROSA Workshop,"18/03/2026 08:00",18/03/2026 20:00,20/03/2026 08:00,"us-east-1,eu-west-1,ap-southeast-1"
