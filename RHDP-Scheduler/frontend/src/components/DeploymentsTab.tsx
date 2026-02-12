@@ -236,8 +236,8 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
                 <Td dataLabel="Status"><span className={statusClass(r.status)}>{formatStatus(r.status)}</span></Td>
                 <Td dataLabel="URL">
                   {r.url ? (
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      <a href={r.url} target="_blank" rel="noopener noreferrer" className="cell-truncate" title={r.url}>{r.url}</a>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, maxWidth: '100%', minWidth: 0 }}>
+                      <a href={r.url} target="_blank" rel="noopener noreferrer" className="cell-truncate" style={{ minWidth: 0 }} title={r.url}>{r.url}</a>
                       <Tooltip content="Copy URL">
                         <Button
                           variant="plain"

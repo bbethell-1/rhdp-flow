@@ -30,12 +30,11 @@ All screenshots are in [`docs/images/`](images/) and show the features described
 
 ### 1. Date Validation Warnings (HIGH)
 
-**Risk:** Deploying workshops with past dates, unparseable dates, or auto-destroy before auto-stop causes incorrect resource lifecycles.
+**Risk:** Deploying workshops with past dates or unparseable dates causes incorrect resource lifecycles.
 
 **Safeguard:** After CSV upload, the schedule preview automatically validates all date fields and displays inline warnings:
 
 - **Past provisioning dates** flagged with specific date shown
-- **Auto-destroy before auto-stop** flagged as contradictory lifecycle
 - **Unparseable dates** flagged with the raw string so user can correct the CSV
 - **Missing dates** flagged (provisioning, auto-stop, auto-destroy)
 - Affected rows highlighted with a yellow left border in the preview table
