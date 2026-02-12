@@ -49,6 +49,7 @@ try:
         get_workshop_urls,
         get_workshop_id,
         export_student_landing_page_csv,
+        derive_base_domain,
     )
 except ImportError:
     print("Error: Could not import rhdp_flow.py")
@@ -2213,6 +2214,218 @@ class TestPerAssetPasswordOverride(unittest.TestCase):
                 if len(calls) > 1:
                     second_payload = calls[1][0][2]
                     self.assertEqual(second_payload["spec"]["accessPassword"], schedule.password)
+
+
+# ============================================================================
+# DERIVE BASE DOMAIN TESTS
+# ============================================================================
+
+
+class TestDeriveBaseDomain(unittest.TestCase):
+    """Tests for derive_base_domain()."""
+
+    def test_standard_api_url(self):
+        """Standard API URL: strips https://, port, and api. prefix."""
+        result = derive_base_domain("https://api.integration.demo.redhat.com:6443")
+        self.assertEqual(result, "integration.demo.redhat.com")
+
+    def test_api_url_without_port(self):
+        """API URL without port."""
+        result = derive_base_domain("https://api.integration.demo.redhat.com")
+        self.assertEqual(result, "integration.demo.redhat.com")
+
+    def test_non_api_url(self):
+        """URL without api. prefix keeps the host as-is."""
+        result = derive_base_domain("https://cluster.example.com:6443")
+        self.assertEqual(result, "cluster.example.com")
+
+    def test_http_scheme(self):
+        """HTTP scheme is stripped correctly."""
+        result = derive_base_domain("http://api.demo.redhat.com:6443")
+        self.assertEqual(result, "demo.redhat.com")
+
+    def test_no_scheme(self):
+        """URL without scheme still works."""
+        result = derive_base_domain("api.integration.demo.redhat.com:6443")
+        self.assertEqual(result, "integration.demo.redhat.com")
+
+    def test_empty_string_returns_fallback(self):
+        """Empty string returns the fallback domain."""
+        result = derive_base_domain("")
+        self.assertEqual(result, "integration.demo.redhat.com")
+
+    def test_none_returns_fallback(self):
+        """None returns the fallback domain."""
+        result = derive_base_domain(None)
+        self.assertEqual(result, "integration.demo.redhat.com")
+
+    def test_trailing_slash(self):
+        """Trailing slash is stripped."""
+        result = derive_base_domain("https://api.demo.redhat.com:6443/")
+        self.assertEqual(result, "demo.redhat.com")
+
+    def test_different_cluster(self):
+        """Different cluster URL produces correct domain."""
+        result = derive_base_domain("https://api.ocp-integration.infra.open.redhat.com:6443")
+        self.assertEqual(result, "ocp-integration.infra.open.redhat.com")
+
+
+# ============================================================================
+# RESOURCE LOCK LABEL TESTS
+# ============================================================================
+
+
+class TestResourceLockLabel(unittest.TestCase):
+    """Tests for resource-lock label in payloads."""
+
+    def test_resource_lock_true_by_default(self):
+        """Config defaults resource_lock=True, label is 'true'."""
+        schedule = make_schedule()
+        config = make_config(dry_run=True)
+        payload = build_resource_claim_payload(schedule, config)
+        self.assertEqual(
+            payload["metadata"]["labels"]["demo.redhat.com/resource-lock"], "true"
+        )
+
+    def test_resource_lock_false(self):
+        """When resource_lock=False, label is 'false'."""
+        schedule = make_schedule()
+        config = make_config(dry_run=True)
+        config.resource_lock = False
+        payload = build_resource_claim_payload(schedule, config)
+        self.assertEqual(
+            payload["metadata"]["labels"]["demo.redhat.com/resource-lock"], "false"
+        )
+
+    def test_resource_lock_label_present_in_payload(self):
+        """resource-lock label is always present in the payload."""
+        schedule = make_schedule()
+        config = make_config(dry_run=True)
+        payload = build_resource_claim_payload(schedule, config)
+        self.assertIn("demo.redhat.com/resource-lock", payload["metadata"]["labels"])
+
+
+# ============================================================================
+# ENABLE RESOURCE POOLS TESTS
+# ============================================================================
+
+
+class TestEnableResourcePools(unittest.TestCase):
+    """Tests for enable_resource_pools and pool annotation."""
+
+    def test_pools_disabled_by_default(self):
+        """Default config disables pools: annotation set to 'disable'."""
+        schedule = make_schedule()
+        config = make_config(dry_run=True)
+        payload = build_resource_claim_payload(schedule, config)
+        self.assertEqual(
+            payload["metadata"]["annotations"]["poolboy.gpte.redhat.com/resource-pool-name"],
+            "disable",
+        )
+
+    def test_pools_enabled_removes_disable_annotation(self):
+        """When enable_resource_pools=True, the 'disable' annotation is absent."""
+        schedule = make_schedule()
+        config = make_config(dry_run=True)
+        config.enable_resource_pools = True
+        payload = build_resource_claim_payload(schedule, config)
+        self.assertNotIn(
+            "poolboy.gpte.redhat.com/resource-pool-name",
+            payload["metadata"]["annotations"],
+        )
+
+    def test_pools_disabled_explicitly(self):
+        """Explicitly setting enable_resource_pools=False adds disable annotation."""
+        schedule = make_schedule()
+        config = make_config(dry_run=True)
+        config.enable_resource_pools = False
+        payload = build_resource_claim_payload(schedule, config)
+        self.assertEqual(
+            payload["metadata"]["annotations"]["poolboy.gpte.redhat.com/resource-pool-name"],
+            "disable",
+        )
+
+
+# ============================================================================
+# BASE DOMAIN URL CONSTRUCTION TESTS
+# ============================================================================
+
+
+class TestBaseDomainUrlConstruction(unittest.TestCase):
+    """Tests for base_domain parameter on URL construction functions."""
+
+    def test_construct_workshop_url_custom_domain(self):
+        """construct_workshop_url uses custom base_domain."""
+        url = construct_workshop_url(
+            "openshift-cnv.ocp-virt-roadshow-multi-user.prod",
+            "user-bbethell-redhat-com",
+            "vt958",
+            base_domain="ocp-production.demo.redhat.com",
+        )
+        self.assertEqual(
+            url,
+            "https://ocp-production.demo.redhat.com/workshops/user-bbethell-redhat-com/openshift-cnv.ocp-virt-roadshow-multi-user.prod-vt958",
+        )
+
+    def test_construct_workshop_url_default_domain(self):
+        """construct_workshop_url uses default domain when not specified."""
+        url = construct_workshop_url(
+            "openshift-cnv.ocp-virt-roadshow-multi-user.prod",
+            "user-bbethell-redhat-com",
+        )
+        self.assertIn("integration.demo.redhat.com", url)
+
+    def test_construct_workshop_url_custom_domain_no_suffix(self):
+        """construct_workshop_url with custom domain and no suffix."""
+        url = construct_workshop_url(
+            "openshift-cnv.ocp-virt-roadshow-multi-user.prod",
+            "user-bbethell-redhat-com",
+            base_domain="staging.demo.redhat.com",
+        )
+        self.assertEqual(
+            url,
+            "https://staging.demo.redhat.com/workshops/user-bbethell-redhat-com/openshift-cnv.ocp-virt-roadshow-multi-user.prod",
+        )
+
+    def test_landing_page_url_custom_domain(self):
+        """get_landing_page_url uses custom base_domain."""
+        url = get_landing_page_url("m5hzmw", base_domain="ocp-production.demo.redhat.com")
+        self.assertEqual(url, "https://ocp-production.demo.redhat.com/workshop/m5hzmw")
+
+    def test_landing_page_url_default_domain(self):
+        """get_landing_page_url uses default domain when not specified."""
+        url = get_landing_page_url("m5hzmw")
+        self.assertIn("integration.demo.redhat.com", url)
+
+    def test_landing_page_url_empty_id_returns_empty(self):
+        """get_landing_page_url returns empty string for empty workshop_id."""
+        url = get_landing_page_url("", base_domain="custom.domain.com")
+        self.assertEqual(url, "")
+
+
+# ============================================================================
+# CONFIG DEFAULTS TESTS
+# ============================================================================
+
+
+class TestRHDPConfigDefaults(unittest.TestCase):
+    """Tests for new RHDPConfig default field values."""
+
+    def test_resource_lock_default_true(self):
+        config = RHDPConfig()
+        self.assertTrue(config.resource_lock)
+
+    def test_enable_resource_pools_default_false(self):
+        config = RHDPConfig()
+        self.assertFalse(config.enable_resource_pools)
+
+    def test_white_glove_default_true(self):
+        config = RHDPConfig()
+        self.assertTrue(config.white_glove)
+
+    def test_base_domain_default(self):
+        config = RHDPConfig()
+        self.assertEqual(config.base_domain, "integration.demo.redhat.com")
 
 
 # ============================================================================

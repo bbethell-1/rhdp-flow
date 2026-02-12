@@ -30,6 +30,7 @@ def reset_state():
     routes._sessions = []
     routes._session_counter = 0
     routes._asset_passwords = None
+    routes._cached_base_domain = None
     yield
 
 
@@ -73,6 +74,26 @@ def test_health_connected(mock_run, client):
     assert data["user"] == "admin"
     assert "cluster.example.com" in data["cluster_url"]
     assert data["status"] == "ok"
+
+
+@patch("subprocess.run")
+def test_health_returns_base_domain(mock_run, client):
+    """Health endpoint returns base_domain derived from cluster URL."""
+    routes._cached_base_domain = None  # clear cache
+    def dispatcher(*args, **kwargs):
+        cmd = args[0] if args else kwargs.get("args", [])
+        if "version" in cmd:
+            return MagicMock(returncode=0, stdout="Client Version: 4.14.0\n", stderr="")
+        if "whoami" in cmd and "--show-server" in cmd:
+            return MagicMock(returncode=0, stdout="https://api.integration.demo.redhat.com:6443\n", stderr="")
+        if "whoami" in cmd:
+            return MagicMock(returncode=0, stdout="admin\n", stderr="")
+        return MagicMock(returncode=0, stdout="", stderr="")
+    mock_run.side_effect = dispatcher
+    resp = client.get("/api/health")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["base_domain"] == "integration.demo.redhat.com"
 
 
 @patch("subprocess.run")
@@ -354,3 +375,71 @@ def test_multiple_sessions(uploaded_client):
     assert len(resp.json()) == 2
     assert resp.json()[0]["session_id"] == "1"
     assert resp.json()[1]["session_id"] == "2"
+
+
+# ---------------------------------------------------------------------------
+# Detect and Cache Base Domain
+# ---------------------------------------------------------------------------
+
+@patch("api.routes.subprocess.run")
+def test_detect_and_cache_base_domain(mock_run):
+    """_detect_and_cache_base_domain derives domain from oc whoami."""
+    routes._cached_base_domain = None  # clear cache
+    mock_run.return_value = MagicMock(
+        returncode=0, stdout="https://api.staging.demo.redhat.com:6443\n"
+    )
+    from api.routes import _detect_and_cache_base_domain
+    result = _detect_and_cache_base_domain()
+    assert result == "staging.demo.redhat.com"
+    routes._cached_base_domain = None  # cleanup
+
+
+@patch("api.routes.subprocess.run")
+def test_detect_and_cache_base_domain_caches(mock_run):
+    """Second call returns cached value without calling oc."""
+    routes._cached_base_domain = None
+    mock_run.return_value = MagicMock(
+        returncode=0, stdout="https://api.prod.demo.redhat.com:6443\n"
+    )
+    from api.routes import _detect_and_cache_base_domain
+    first = _detect_and_cache_base_domain()
+    assert first == "prod.demo.redhat.com"
+    mock_run.reset_mock()
+    second = _detect_and_cache_base_domain()
+    assert second == "prod.demo.redhat.com"
+    mock_run.assert_not_called()  # cache hit, no subprocess call
+    routes._cached_base_domain = None
+
+
+@patch("api.routes.subprocess.run")
+def test_detect_and_cache_base_domain_fallback(mock_run):
+    """Fallback to default domain when oc fails."""
+    routes._cached_base_domain = None
+    mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
+    from api.routes import _detect_and_cache_base_domain
+    result = _detect_and_cache_base_domain()
+    assert result == "integration.demo.redhat.com"
+    routes._cached_base_domain = None
+
+
+# ---------------------------------------------------------------------------
+# Deploy Settings Passthrough
+# ---------------------------------------------------------------------------
+
+def test_dry_run_deploy_settings_default(uploaded_client):
+    """Dry-run deploy with default settings produces results."""
+    resp = uploaded_client.post("/api/deploy/dry-run", json={})
+    assert resp.status_code == 200
+    assert len(resp.json()) >= 1
+
+
+def test_dry_run_deploy_with_custom_settings(uploaded_client):
+    """Dry-run deploy accepts resource_lock, enable_resource_pools, white_glove."""
+    resp = uploaded_client.post("/api/deploy/dry-run", json={
+        "resource_lock": False,
+        "enable_resource_pools": True,
+        "white_glove": False,
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) >= 1
