@@ -102,12 +102,14 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
 
   // Loading states
   const [lockLoading, setLockLoading] = useState(false);
+  const [unlockLoading, setUnlockLoading] = useState(false);
   const [extStopLoading, setExtStopLoading] = useState(false);
   const [extDestroyLoading, setExtDestroyLoading] = useState(false);
   const [scaleLoading, setScaleLoading] = useState(false);
 
-  // Lock confirmation modal
+  // Lock / Unlock confirmation modals
   const [showLockConfirm, setShowLockConfirm] = useState(false);
+  const [showUnlockConfirm, setShowUnlockConfirm] = useState(false);
 
   // Scale-to-zero confirmation modal
   const [showScaleZeroConfirm, setShowScaleZeroConfirm] = useState(false);
@@ -178,6 +180,21 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
     }
   };
 
+  const handleUnlock = async () => {
+    setShowUnlockConfirm(false);
+    setUnlockLoading(true);
+    try {
+      const r = await api.unlock({ ci_filter: lockFilter || undefined });
+      addRecord('Unlock', lockFilter, '--', r.success, r.message);
+      showToast(r.message, r.success ? 'success' : 'danger');
+    } catch (e) {
+      addRecord('Unlock', lockFilter, '--', false, String(e));
+      showToast(`Unlock failed: ${e}`, 'danger');
+    } finally {
+      setUnlockLoading(false);
+    }
+  };
+
   const handleExtendStop = async () => {
     if (extStopDays === 0 && extStopHours === 0) { showToast('Specify days or hours', 'danger'); return; }
     const vals = `${extStopDays}d ${extStopHours}h`;
@@ -234,20 +251,33 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
   return (
     <PageSection>
       <div className="ops-grid" style={{ marginBottom: 16 }}>
-        {/* Lock */}
+        {/* Resource Lock */}
         <Card isFullHeight>
-          <CardTitle>Lock Workshops</CardTitle>
+          <CardTitle>Resource Lock</CardTitle>
           <CardBody>
             <CIFilter options={ciOptions} value={lockFilter} onChange={setLockFilter} id="lock-ci-filter" />
-            <p style={{ marginBottom: 8, fontSize: '0.85rem' }}>Set stop time to now (immediate shutdown).</p>
-            <Button
-              variant="danger"
-              onClick={() => setShowLockConfirm(true)}
-              isLoading={lockLoading}
-              isDisabled={lockLoading}
-            >
-              Lock
-            </Button>
+            <p style={{ marginBottom: 8, fontSize: '0.85rem' }}>
+              Toggle the <code>demo.redhat.com/resource-lock</code> label on existing workshops.
+              When locked, non-admin users cannot make changes in the RHDP UI.
+            </p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button
+                variant="warning"
+                onClick={() => setShowLockConfirm(true)}
+                isLoading={lockLoading}
+                isDisabled={lockLoading || unlockLoading}
+              >
+                Lock
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => setShowUnlockConfirm(true)}
+                isLoading={unlockLoading}
+                isDisabled={lockLoading || unlockLoading}
+              >
+                Unlock
+              </Button>
+            </div>
           </CardBody>
         </Card>
 
@@ -407,15 +437,37 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
         <ModalHeader title="Confirm Lock" labelId="lock-confirm-title" titleIconVariant="warning" />
         <ModalBody>
           <p>
-            This will immediately shut down {lockAffectedCount > 0 ? <strong>{lockAffectedCount} workshop(s)</strong> : 'workshops'}
-            {lockFilter ? <> matching <strong>"{lockFilter}"</strong></> : <> (<strong>all catalog items</strong>)</>}
-            {' '}by setting the stop time to now.
+            This will set the <code>demo.redhat.com/resource-lock</code> label to <strong>true</strong> on{' '}
+            {lockAffectedCount > 0 ? <strong>{lockAffectedCount} workshop(s)</strong> : 'workshops'}
+            {lockFilter ? <> matching <strong>"{lockFilter}"</strong></> : <> (<strong>all catalog items</strong>)</>}.
           </p>
-          <p style={{ marginTop: 8 }}><strong>This cannot be undone.</strong></p>
+          <p style={{ marginTop: 8 }}>Non-admin users will not be able to modify these resources in the RHDP UI.</p>
         </ModalBody>
         <ModalFooter>
-          <Button variant="danger" onClick={handleLock}>Lock Now</Button>
+          <Button variant="warning" onClick={handleLock}>Lock</Button>
           <Button variant="link" onClick={() => setShowLockConfirm(false)}>Cancel</Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Unlock confirmation modal */}
+      <Modal
+        variant="small"
+        isOpen={showUnlockConfirm}
+        onClose={() => setShowUnlockConfirm(false)}
+        aria-labelledby="unlock-confirm-title"
+      >
+        <ModalHeader title="Confirm Unlock" labelId="unlock-confirm-title" />
+        <ModalBody>
+          <p>
+            This will set the <code>demo.redhat.com/resource-lock</code> label to <strong>false</strong> on{' '}
+            {lockAffectedCount > 0 ? <strong>{lockAffectedCount} workshop(s)</strong> : 'workshops'}
+            {lockFilter ? <> matching <strong>"{lockFilter}"</strong></> : <> (<strong>all catalog items</strong>)</>}.
+          </p>
+          <p style={{ marginTop: 8 }}>Non-admin users will be able to modify these resources again.</p>
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="primary" onClick={handleUnlock}>Unlock</Button>
+          <Button variant="link" onClick={() => setShowUnlockConfirm(false)}>Cancel</Button>
         </ModalFooter>
       </Modal>
 

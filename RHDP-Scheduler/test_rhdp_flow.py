@@ -38,6 +38,7 @@ try:
         create_multi_workshop_from_group,
         create_multi_region_workshop,
         lock_workshops,
+        unlock_workshops,
         extend_stop_time,
         extend_destroy_time,
         scale_workshops,
@@ -901,7 +902,7 @@ class TestMultiRegionWorkshop(unittest.TestCase):
 
 
 class TestLockWorkshops(unittest.TestCase):
-    """Tests for lock_workshops."""
+    """Tests for lock_workshops (resource-lock label)."""
 
     def test_dry_run_logs_without_patching(self):
         config = make_config(dry_run=True)
@@ -910,41 +911,89 @@ class TestLockWorkshops(unittest.TestCase):
         lock_workshops(schedules, config)
 
     @patch("rhdp_flow.subprocess.run")
-    def test_patches_stop_to_now(self, mock_run):
-        workshop_json = {
-            "items": [{
-                "metadata": {"name": "test-ws", "namespace": "user-ns"},
-                "spec": {
-                    "actionSchedule": {
-                        "start": "2026-02-15T11:00:00Z",
-                        "stop": "2026-02-15T19:00:00Z"
-                    }
-                }
-            }]
-        }
+    def test_patches_resource_lock_label(self, mock_run):
         mock_run.side_effect = make_oc_dispatcher(overrides={
             ("get", "workshop"): subprocess.CompletedProcess(
-                [], 0, stdout=json.dumps(workshop_json), stderr=""
+                [], 0, stdout="test-ws", stderr=""
             ),
         })
         config = make_config(dry_run=False)
         schedules = [make_schedule()]
         lock_workshops(schedules, config)
-        # Verify a patch call was made
+        # Verify a patch call was made with resource-lock label
         patch_calls = [c for c in mock_run.call_args_list if "patch" in c[0][0]]
         self.assertGreater(len(patch_calls), 0)
+        # Extract the patch JSON and verify it targets the resource-lock label
+        patch_cmd = patch_calls[0][0][0]
+        patch_json_str = None
+        for i, arg in enumerate(patch_cmd):
+            if arg == "-p" and i + 1 < len(patch_cmd):
+                patch_json_str = patch_cmd[i + 1]
+        self.assertIsNotNone(patch_json_str)
+        patch_data = json.loads(patch_json_str)
+        self.assertEqual(
+            patch_data["metadata"]["labels"]["demo.redhat.com/resource-lock"],
+            "true",
+        )
 
     @patch("rhdp_flow.subprocess.run")
     def test_no_workshops_found(self, mock_run):
         mock_run.side_effect = make_oc_dispatcher(overrides={
             ("get", "workshop"): subprocess.CompletedProcess(
-                [], 0, stdout=json.dumps({"items": []}), stderr=""
+                [], 0, stdout="", stderr=""
             ),
         })
         config = make_config(dry_run=False)
         schedules = [make_schedule()]
         # Should not raise even with no workshops
         lock_workshops(schedules, config)
+
+
+class TestUnlockWorkshops(unittest.TestCase):
+    """Tests for unlock_workshops (resource-lock label)."""
+
+    def test_dry_run_logs_without_patching(self):
+        config = make_config(dry_run=True)
+        schedules = [make_schedule()]
+        # Should not raise
+        unlock_workshops(schedules, config)
+
+    @patch("rhdp_flow.subprocess.run")
+    def test_patches_resource_lock_false(self, mock_run):
+        mock_run.side_effect = make_oc_dispatcher(overrides={
+            ("get", "workshop"): subprocess.CompletedProcess(
+                [], 0, stdout="test-ws", stderr=""
+            ),
+        })
+        config = make_config(dry_run=False)
+        schedules = [make_schedule()]
+        unlock_workshops(schedules, config)
+        # Verify a patch call was made with resource-lock=false
+        patch_calls = [c for c in mock_run.call_args_list if "patch" in c[0][0]]
+        self.assertGreater(len(patch_calls), 0)
+        patch_cmd = patch_calls[0][0][0]
+        patch_json_str = None
+        for i, arg in enumerate(patch_cmd):
+            if arg == "-p" and i + 1 < len(patch_cmd):
+                patch_json_str = patch_cmd[i + 1]
+        self.assertIsNotNone(patch_json_str)
+        patch_data = json.loads(patch_json_str)
+        self.assertEqual(
+            patch_data["metadata"]["labels"]["demo.redhat.com/resource-lock"],
+            "false",
+        )
+
+    @patch("rhdp_flow.subprocess.run")
+    def test_no_workshops_found(self, mock_run):
+        mock_run.side_effect = make_oc_dispatcher(overrides={
+            ("get", "workshop"): subprocess.CompletedProcess(
+                [], 0, stdout="", stderr=""
+            ),
+        })
+        config = make_config(dry_run=False)
+        schedules = [make_schedule()]
+        # Should not raise even with no workshops
+        unlock_workshops(schedules, config)
 
 
 # ============================================================================

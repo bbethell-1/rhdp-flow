@@ -61,6 +61,8 @@ export const api = {
   // Operations
   lock: (body: LockRequest) =>
     request<OperationResponse>('/operations/lock', { method: 'POST', body: JSON.stringify(body) }),
+  unlock: (body: LockRequest) =>
+    request<OperationResponse>('/operations/unlock', { method: 'POST', body: JSON.stringify(body) }),
   extendStop: (body: ExtendRequest) =>
     request<OperationResponse>('/operations/extend-stop', { method: 'POST', body: JSON.stringify(body) }),
   extendDestroy: (body: ExtendRequest) =>

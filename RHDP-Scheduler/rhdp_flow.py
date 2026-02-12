@@ -3523,24 +3523,23 @@ def process_schedule(
 # OPERATIONS: LOCK, EXTEND, SCALE
 # ============================================================================
 
-def lock_workshops(schedules, config):
-    """Lock workshops by setting their stop time to now (immediate stop).
+def _set_resource_lock(schedules, config, locked: bool):
+    """Toggle the demo.redhat.com/resource-lock label on Workshop resources.
 
-    For each schedule, finds the corresponding Workshop resource via label
-    selector and patches its actionSchedule.stop to the current time.
+    When locked=True non-admin users cannot modify the resource in the RHDP UI.
     """
     env = os.environ.copy()
     if config.kubeconfig_path:
         env['KUBECONFIG'] = config.kubeconfig_path
 
-    now_iso = format_iso8601(datetime.now(timezone.utc))
+    label_value = "true" if locked else "false"
+    action = "Locking" if locked else "Unlocking"
 
     for schedule in schedules:
         ns = schedule.namespace
         ci = schedule.ci
-        logger.info(f"Locking workshops for CI={ci} in namespace={ns}")
+        logger.info(f"{action} workshops for CI={ci} in namespace={ns}")
 
-        # Find workshops by catalog item label
         get_cmd = [
             config.oc_command, "get", "workshop",
             "-n", ns,
@@ -3565,14 +3564,30 @@ def lock_workshops(schedules, config):
                 config.oc_command, "patch", "workshop", name,
                 "-n", ns,
                 "--type", "merge",
-                "-p", json.dumps({"spec": {"actionSchedule": {"stop": now_iso}}}),
+                "-p", json.dumps({"metadata": {"labels": {"demo.redhat.com/resource-lock": label_value}}}),
             ]
-            logger.info(f"Locking workshop {name}: setting stop={now_iso}")
+            logger.info(f"{action} workshop {name}: resource-lock={label_value}")
             pr = subprocess.run(patch_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
             if pr.returncode != 0:
                 logger.error(f"Failed to patch workshop {name}: {pr.stderr}")
             else:
-                logger.info(f"Locked workshop {name}")
+                logger.info(f"{'Locked' if locked else 'Unlocked'} workshop {name}")
+
+
+def lock_workshops(schedules, config):
+    """Lock workshops by setting the resource-lock label to true.
+
+    When locked, non-admin users cannot modify the resource in the RHDP UI.
+    """
+    _set_resource_lock(schedules, config, locked=True)
+
+
+def unlock_workshops(schedules, config):
+    """Unlock workshops by setting the resource-lock label to false.
+
+    Removes the resource lock so non-admin users can modify the resource again.
+    """
+    _set_resource_lock(schedules, config, locked=False)
 
 
 def extend_stop_time(schedules, config, days, hours):

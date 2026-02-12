@@ -33,6 +33,7 @@ from rhdp_flow import (
     qa2_verify_deployment_status,
     export_student_landing_page_csv,
     lock_workshops,
+    unlock_workshops,
     extend_stop_time,
     extend_destroy_time,
     scale_workshops,
@@ -536,6 +537,16 @@ def op_lock(body: LockRequest = LockRequest()):
     config = _get_config()
     lock_workshops(schedules, config)
     return OperationResponse(success=True, message=f"Locked {len(schedules)} schedule(s)")
+
+
+@router.post("/operations/unlock", response_model=OperationResponse)
+def op_unlock(body: LockRequest = LockRequest()):
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+    schedules = _filter_schedules(body.ci_filter)
+    config = _get_config()
+    unlock_workshops(schedules, config)
+    return OperationResponse(success=True, message=f"Unlocked {len(schedules)} schedule(s)")
 
 
 @router.post("/operations/extend-stop", response_model=OperationResponse)

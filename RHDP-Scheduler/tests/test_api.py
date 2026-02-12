@@ -241,6 +241,20 @@ def test_lock_with_schedules(mock_run, uploaded_client):
     assert resp.json()["success"] is True
 
 
+def test_unlock_no_schedules(client):
+    resp = client.post("/api/operations/unlock", json={})
+    assert resp.status_code == 400
+
+
+@patch("rhdp_flow.subprocess.run")
+def test_unlock_with_schedules(mock_run, uploaded_client):
+    mock_run.side_effect = make_oc_dispatcher()
+    resp = uploaded_client.post("/api/operations/unlock", json={})
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+    assert "Unlocked" in resp.json()["message"]
+
+
 def test_extend_stop_no_days_hours(uploaded_client):
     resp = uploaded_client.post(
         "/api/operations/extend-stop", json={"days": 0, "hours": 0}
