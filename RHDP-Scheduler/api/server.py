@@ -16,6 +16,32 @@ from starlette.responses import Response
 # Ensure parent dir is on path for rhdp_flow imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+
+def configure_logging() -> None:
+    """Set up structured JSON logging when LOG_FORMAT=json, otherwise human-readable."""
+    log_format = os.environ.get("LOG_FORMAT", "").lower()
+    if log_format == "json":
+        try:
+            from pythonjsonlogger import jsonlogger
+
+            handler = logging.StreamHandler()
+            handler.setFormatter(jsonlogger.JsonFormatter(
+                "%(asctime)s %(name)s %(levelname)s %(message)s",
+                rename_fields={"asctime": "timestamp", "levelname": "level"},
+            ))
+            logging.root.handlers = [handler]
+            logging.root.setLevel(logging.INFO)
+        except ImportError:
+            logging.basicConfig(level=logging.INFO)
+            logging.getLogger("rhdp_flow.api").warning(
+                "python-json-logger not installed; falling back to text logging"
+            )
+    else:
+        logging.basicConfig(level=logging.INFO)
+
+
+configure_logging()
+
 from api.routes import router
 
 logger = logging.getLogger("rhdp_flow.api")
@@ -27,19 +53,21 @@ app = FastAPI(
 )
 
 # ---------------------------------------------------------------------------
-# Rate limiting via SlowAPI
+# Rate limiting via SlowAPI (shared limiter from api.limiter)
 # ---------------------------------------------------------------------------
-try:
-    from slowapi import Limiter, _rate_limit_exceeded_handler
-    from slowapi.util import get_remote_address
-    from slowapi.errors import RateLimitExceeded
+from api.limiter import limiter as _limiter
 
-    limiter = Limiter(key_func=get_remote_address, default_limits=["120/minute"])
-    app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
-except ImportError:
-    limiter = None  # type: ignore[assignment]
-    logger.warning("slowapi not installed — rate limiting disabled")
+if _limiter:
+    app.state.limiter = _limiter
+    try:
+        from slowapi import _rate_limit_exceeded_handler
+        from slowapi.errors import RateLimitExceeded
+
+        app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
+    except ImportError:
+        pass
+else:
+    logger.warning("Rate limiting disabled (slowapi not available)")
 
 # ---------------------------------------------------------------------------
 # CORS — configurable via CORS_ORIGINS env var

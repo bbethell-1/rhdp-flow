@@ -26,7 +26,7 @@ export const SessionHistory: React.FC<Props> = ({ onView, onBack, viewingSession
     try {
       const s = await api.getSessions();
       setSessions(s);
-    } catch { /* ignore */ }
+    } catch (e) { console.warn('Failed to fetch sessions', e); }
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);

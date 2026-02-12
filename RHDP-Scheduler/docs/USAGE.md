@@ -150,7 +150,26 @@ In the Deployments tab:
 
 ### Search & Filter
 
-All data tables have search inputs that filter across CI name, GUID, namespace, and other fields. The Deployments tab also has toggle buttons to filter by status (All / Verified / Unverified / Failed).
+All data tables have search inputs that filter across CI name, GUID, namespace, and other fields. The Deployments and QA tabs have toggle buttons to filter by status (All / Verified / Unverified / Failed). Search and filter selections persist across tab switches via `sessionStorage`.
+
+### Select All Across Pages
+
+In the Deployments tab, when all rows on the current page are selected, a banner appears offering to select all matching filtered results across all pages. A "Clear selection" banner appears when all filtered results are selected.
+
+### QA Results Export
+
+In the QA tab, click **Download Filtered CSV** to export the currently filtered QA results as a CSV file. The filename reflects the active status filter (e.g., `qa-results-all.csv`).
+
+### Copy to Clipboard
+
+Click the link icon on any deployment row to copy the workshop URL. A toast notification confirms the copy.
+
+### Status Icons
+
+Status cells display color-coded icons alongside text for accessibility:
+- Green checkmark for verified/success
+- Yellow warning triangle for unverified/no URL
+- Red exclamation for failed/error
 
 ### URL Tab Routing
 
@@ -158,6 +177,19 @@ The current tab is synced to the URL hash (e.g., `http://localhost:8000/#deploym
 - Bookmark specific tabs
 - Use browser back/forward to navigate between tabs
 - Share direct links to specific tabs
+
+---
+
+## Structured Logging
+
+Enable JSON-formatted log output for production environments:
+
+```bash
+export LOG_FORMAT=json
+uvicorn api.server:app --port 8000
+```
+
+Requires `python-json-logger` (included in `requirements.txt`). When unset, logs use human-readable text format.
 
 ---
 

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, lazy, Suspense } from 'react';
 import {
   Page,
   Masthead,
@@ -19,6 +19,7 @@ import {
   Modal,
   ModalBody,
   ModalHeader,
+  Spinner,
   Tooltip,
 } from '@patternfly/react-core';
 
@@ -29,15 +30,17 @@ import type {
 } from './types';
 
 import { api } from './services/api';
+import { TOAST_DURATION_MS } from './constants';
 import { useTheme } from './hooks/useTheme';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { HealthBadge } from './components/HealthBadge';
 import { SessionHistory } from './components/SessionHistory';
-import { UploadTab } from './components/UploadTab';
-import { DeploymentsTab } from './components/DeploymentsTab';
-import { OperationsTab } from './components/OperationsTab';
-import { QATab } from './components/QATab';
-import { StudentsTab } from './components/StudentsTab';
+
+const UploadTab = lazy(() => import('./components/UploadTab').then(m => ({ default: m.UploadTab })));
+const DeploymentsTab = lazy(() => import('./components/DeploymentsTab').then(m => ({ default: m.DeploymentsTab })));
+const OperationsTab = lazy(() => import('./components/OperationsTab').then(m => ({ default: m.OperationsTab })));
+const QATab = lazy(() => import('./components/QATab').then(m => ({ default: m.QATab })));
+const StudentsTab = lazy(() => import('./components/StudentsTab').then(m => ({ default: m.StudentsTab })));
 
 const VALID_TABS = ['upload', 'deployments', 'operations', 'qa', 'students'];
 
@@ -62,7 +65,7 @@ const App: React.FC = () => {
   const showToast = useCallback((msg: string, variant: 'success' | 'danger' | 'info' = 'info') => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast({ msg, variant });
-    toastTimer.current = setTimeout(() => setToast(null), 4000);
+    toastTimer.current = setTimeout(() => setToast(null), TOAST_DURATION_MS);
   }, []);
 
   const handleSessionView = useCallback((data: { schedules: WorkshopSchedule[]; results: DeploymentResult[]; qa_results: QAResult[] }) => {
@@ -83,7 +86,8 @@ const App: React.FC = () => {
       setSchedules(sched);
       setResults(res);
       setQAResults(qa.results);
-    } catch {
+    } catch (e) {
+      console.warn('Failed to restore current session', e);
       setSchedules([]);
       setResults([]);
       setQAResults([]);
@@ -176,11 +180,13 @@ const App: React.FC = () => {
         </PageSection>
       )}
 
-      {toast && (
-        <PageSection padding={{ default: 'noPadding' }} style={{ padding: '8px 24px 0' }}>
-          <Alert variant={toast.variant} title={toast.msg} isInline isPlain timeout={3500} onTimeout={() => setToast(null)} />
-        </PageSection>
-      )}
+      <div aria-live="polite" role="status">
+        {toast && (
+          <PageSection padding={{ default: 'noPadding' }} style={{ padding: '8px 24px 0' }}>
+            <Alert variant={toast.variant} title={toast.msg} isInline isPlain timeout={3500} onTimeout={() => setToast(null)} />
+          </PageSection>
+        )}
+      </div>
 
       <PageSection padding={{ default: 'noPadding' }} style={{ padding: '0 24px' }}>
         <SessionHistory
@@ -201,44 +207,54 @@ const App: React.FC = () => {
             eventKey="upload"
             title={<TabTitleText>Upload &amp; Deploy{schedules.length > 0 && <Badge className="tab-badge" isRead>{schedules.length}</Badge>}</TabTitleText>}
           >
-            <UploadTab
-              dryRun={dryRun}
-              schedules={schedules}
-              setSchedules={setSchedules}
-              results={results}
-              setResults={setResults}
-              showToast={showToast}
-              onClear={handleClear}
-            />
+            <Suspense fallback={<Spinner />}>
+              <UploadTab
+                dryRun={dryRun}
+                schedules={schedules}
+                setSchedules={setSchedules}
+                results={results}
+                setResults={setResults}
+                showToast={showToast}
+                onClear={handleClear}
+              />
+            </Suspense>
           </Tab>
           <Tab
             eventKey="deployments"
             title={<TabTitleText>Deployments{results.length > 0 && <Badge className="tab-badge" isRead>{results.length}</Badge>}</TabTitleText>}
           >
-            <DeploymentsTab
-              results={results}
-              setResults={setResults}
-              showToast={showToast}
-            />
+            <Suspense fallback={<Spinner />}>
+              <DeploymentsTab
+                results={results}
+                setResults={setResults}
+                showToast={showToast}
+              />
+            </Suspense>
           </Tab>
           <Tab eventKey="operations" title={<TabTitleText>Operations</TabTitleText>}>
-            <OperationsTab showToast={showToast} schedules={schedules} />
+            <Suspense fallback={<Spinner />}>
+              <OperationsTab showToast={showToast} schedules={schedules} />
+            </Suspense>
           </Tab>
           <Tab
             eventKey="qa"
             title={<TabTitleText>QA{qaResults.length > 0 && <Badge className="tab-badge" isRead>{qaResults.length}</Badge>}</TabTitleText>}
           >
-            <QATab
-              qaResults={qaResults}
-              setQAResults={setQAResults}
-              showToast={showToast}
-            />
+            <Suspense fallback={<Spinner />}>
+              <QATab
+                qaResults={qaResults}
+                setQAResults={setQAResults}
+                showToast={showToast}
+              />
+            </Suspense>
           </Tab>
           <Tab
             eventKey="students"
             title={<TabTitleText>Students{studentsCount > 0 && <Badge className="tab-badge" isRead>{studentsCount}</Badge>}</TabTitleText>}
           >
-            <StudentsTab qaResults={qaResults} />
+            <Suspense fallback={<Spinner />}>
+              <StudentsTab qaResults={qaResults} showToast={showToast} />
+            </Suspense>
           </Tab>
         </Tabs>
       </PageSection>

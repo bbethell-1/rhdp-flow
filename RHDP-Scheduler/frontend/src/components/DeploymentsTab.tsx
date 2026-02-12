@@ -1,5 +1,6 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
+  Alert,
   Button,
   PageSection,
   Title,
@@ -25,6 +26,8 @@ import RedoIcon from '@patternfly/react-icons/dist/esm/icons/redo-icon';
 
 import { api } from '../services/api';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
+import { AUTO_REFRESH_INTERVAL_MS, DEFAULT_PER_PAGE, RETRY_DELAY_MS } from '../constants';
+import { statusColorClass, statusIcon } from '../utils/statusColors';
 import type { DeploymentResult } from '../types';
 
 function isFailed(status: string): boolean {
@@ -51,38 +54,34 @@ function formatStatus(raw: string) {
   return STATUS_LABELS[raw.toLowerCase()] || raw.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
-function statusClass(status: string) {
-  if (!status) return '';
-  const s = status.toLowerCase();
-  if (s.includes('verified') && !s.includes('unverified')) return 'status-verified';
-  if (s.includes('unverified') || s.includes('no_url')) return 'status-deployed_unverified';
-  if (s.includes('failed') || s.includes('error')) return 'status-failed';
-  return '';
-}
-
 type StatusFilter = 'all' | 'verified' | 'unverified' | 'failed';
 
 type SortableColumn = 'ci_name' | 'ci' | 'namespace' | 'status' | 'timestamp';
 
 export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast }) => {
-  const [searchText, setSearchText] = useState('');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [searchText, setSearchText] = useState(() => sessionStorage.getItem('rhdp-deploy-search') || '');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => (sessionStorage.getItem('rhdp-deploy-filter') as StatusFilter) || 'all');
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(20);
+  const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const [sortBy, setSortBy] = useState<SortableColumn | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [retrying, setRetrying] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Persist search and filter to sessionStorage
+  useEffect(() => { sessionStorage.setItem('rhdp-deploy-search', searchText); }, [searchText]);
+  useEffect(() => { sessionStorage.setItem('rhdp-deploy-filter', statusFilter); }, [statusFilter]);
 
   const refreshResults = useCallback(async () => {
     try {
       const r = await api.deployResults();
       setResults(r);
-    } catch { /* ignore */ }
+    } catch (e) { console.warn('Auto-refresh deploy results failed', e); }
   }, [setResults]);
 
-  useAutoRefresh(refreshResults, 15000, autoRefresh);
+  useAutoRefresh(refreshResults, AUTO_REFRESH_INTERVAL_MS, autoRefresh);
 
   // Summary counts
   const statusCounts = useMemo(() => {
@@ -134,12 +133,16 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
   }, [filteredResults, page, perPage]);
 
   const handleRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
     try {
       const r = await api.deployResults();
       setResults(r);
       showToast(`Refreshed: ${r.length} result(s)`, 'success');
     } catch (e) {
       showToast(`Refresh failed: ${e}`, 'danger');
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -155,9 +158,9 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
           const r = await api.deployResults();
           setResults(r);
           setSelectedRows(new Set());
-        } catch { /* ignore */ }
+        } catch (e) { console.warn('Refresh after retry failed', e); }
         setRetrying(false);
-      }, 3000);
+      }, RETRY_DELAY_MS);
     } catch (e) {
       showToast(`Retry failed: ${e}`, 'danger');
       setRetrying(false);
@@ -193,6 +196,14 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
       });
     }
   };
+
+  const selectAllFiltered = () => {
+    setSelectedRows(new Set(filteredResults.map(r => r.ci_name)));
+  };
+
+  const allPageSelected = paginatedResults.length > 0 && paginatedResults.every(r => selectedRows.has(r.ci_name));
+  const allFilteredSelected = filteredResults.length > 0 && filteredResults.every(r => selectedRows.has(r.ci_name));
+  const showSelectAllBanner = allPageSelected && !allFilteredSelected && filteredResults.length > perPage;
 
   const getSortParams = (col: SortableColumn): ThProps['sort'] => ({
     sortBy: sortBy === col ? { index: 0, direction: sortDir } : { index: 0, direction: 'asc', defaultDirection: 'asc' },
@@ -299,7 +310,7 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
         </SplitItem>
         <SplitItem isFilled />
         <SplitItem>
-          <Button variant="secondary" onClick={handleRefresh}>Refresh</Button>
+          <Button variant="secondary" onClick={handleRefresh} isLoading={refreshing} isDisabled={refreshing}>Refresh</Button>
         </SplitItem>
         <SplitItem>
           <Button
@@ -328,6 +339,20 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
 
       {filteredResults.length > 0 ? (
         <>
+          {showSelectAllBanner && (
+            <Alert variant="info" isInline isPlain title={`All ${paginatedResults.length} on this page are selected.`} style={{ marginBottom: 8 }}>
+              <Button variant="link" isInline onClick={selectAllFiltered}>
+                Select all {filteredResults.length} filtered results
+              </Button>
+            </Alert>
+          )}
+          {allFilteredSelected && filteredResults.length > perPage && (
+            <Alert variant="info" isInline isPlain title={`All ${filteredResults.length} filtered results are selected.`} style={{ marginBottom: 8 }}>
+              <Button variant="link" isInline onClick={() => setSelectedRows(new Set())}>
+                Clear selection
+              </Button>
+            </Alert>
+          )}
           <div className="table-sticky-wrapper">
           <Table aria-label="Deployment results" variant="compact" className="fixed-table" isStickyHeader>
             <Thead>
@@ -366,7 +391,7 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
                   <Td dataLabel="CI">{r.ci}</Td>
                   <Td dataLabel="Namespace">{r.namespace}</Td>
                   <Td dataLabel="GUID">{r.guid}</Td>
-                  <Td dataLabel="Status"><span className={statusClass(r.status)}>{formatStatus(r.status)}</span></Td>
+                  <Td dataLabel="Status"><span className={statusColorClass(r.status)}>{(() => { const Icon = statusIcon(r.status); return Icon ? <Icon style={{ marginRight: 4 }} /> : null; })()}{formatStatus(r.status)}</span></Td>
                   <Td dataLabel="URL">
                     {r.url ? (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -376,7 +401,7 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
                             variant="plain"
                             size="sm"
                             style={{ padding: '2px 4px' }}
-                            onClick={() => navigator.clipboard.writeText(r.url)}
+                            onClick={() => navigator.clipboard.writeText(r.url).then(() => showToast('URL copied to clipboard', 'success'))}
                             aria-label="Copy URL"
                           >
                             <CopyIcon />

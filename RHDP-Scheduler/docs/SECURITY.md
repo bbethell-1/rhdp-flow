@@ -50,11 +50,22 @@ All responses include CSP headers that restrict resource loading:
 
 ## Rate Limiting
 
-POST endpoints: 60 requests/minute per IP
-GET endpoints: 120 requests/minute per IP (default)
+Mutation endpoints (deploy, deploy/dry-run, deploy/retry, upload, QA run): **10 requests/minute** per IP
+Other endpoints: default SlowAPI limits
 
 Rate limits are enforced via SlowAPI when installed. Exceeding limits returns
 HTTP 429 (Too Many Requests).
+
+## Upload Size Limit
+
+CSV file uploads are capped at **10 MB**. Requests exceeding this limit receive
+HTTP 413 (Request Entity Too Large). This applies to schedule CSV uploads,
+password file uploads, and schedule diff uploads.
+
+## Input Validation Caps
+
+- **Extend days**: Maximum 30 days per extension request
+- **Extend hours**: Maximum 720 hours per extension request
 
 ## KUBECONFIG Handling
 
@@ -70,6 +81,7 @@ HTTP 429 (Too Many Requests).
 | `CORS_ORIGINS` | localhost only | Comma-separated allowed origins |
 | `RHDP_API_KEY` | *(unset = no auth)* | API key for mutation endpoints |
 | `KUBECONFIG` | `~/.kube/config` | Path to kubeconfig file |
+| `LOG_FORMAT` | *(unset = text)* | Set to `json` for structured JSON logging |
 
 ## API Versioning
 

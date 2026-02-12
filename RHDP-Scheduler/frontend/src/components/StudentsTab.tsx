@@ -18,11 +18,12 @@ import type { QAResult } from '../types';
 
 interface Props {
   qaResults: QAResult[];
+  showToast: (msg: string, variant: 'success' | 'danger' | 'info') => void;
 }
 
 type SortableStudentColumn = 'ci_name' | 'status';
 
-export const StudentsTab: React.FC<Props> = ({ qaResults }) => {
+export const StudentsTab: React.FC<Props> = ({ qaResults, showToast }) => {
   const students = qaResults.filter(r => r.landing_page_url);
 
   const [sortBy, setSortBy] = useState<SortableStudentColumn | null>(null);
@@ -94,7 +95,7 @@ export const StudentsTab: React.FC<Props> = ({ qaResults }) => {
                         variant="plain"
                         size="sm"
                         style={{ padding: '2px 4px' }}
-                        onClick={() => navigator.clipboard.writeText(r.landing_page_url)}
+                        onClick={() => navigator.clipboard.writeText(r.landing_page_url).then(() => showToast('URL copied to clipboard', 'success'))}
                         aria-label="Copy URL"
                       >
                         <CopyIcon />

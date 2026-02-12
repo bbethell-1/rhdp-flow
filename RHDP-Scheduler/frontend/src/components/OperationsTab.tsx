@@ -23,6 +23,7 @@ import {
 import { Table, Thead, Tbody, Tr, Th, Td } from '@patternfly/react-table';
 
 import { api } from '../services/api';
+import { statusIcon } from '../utils/statusColors';
 import type { WorkshopSchedule } from '../types';
 
 interface Props {
@@ -96,12 +97,12 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
     try {
       const saved = sessionStorage.getItem('rhdp-ops-history');
       return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
+    } catch (e) { console.warn('Failed to load ops history from sessionStorage', e); return []; }
   });
 
   // Persist operations history to sessionStorage
   useEffect(() => {
-    try { sessionStorage.setItem('rhdp-ops-history', JSON.stringify(history)); } catch { /* ignore */ }
+    try { sessionStorage.setItem('rhdp-ops-history', JSON.stringify(history)); } catch (e) { console.warn('Failed to persist ops history', e); }
   }, [history]);
 
   // Loading states
@@ -458,7 +459,7 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
                 <Td dataLabel="Values">{rec.values}</Td>
                 <Td dataLabel="Status">
                   <span className={rec.status === 'success' ? 'status-verified' : 'status-failed'}>
-                    {rec.status}
+                    {(() => { const Icon = statusIcon(rec.status); return Icon ? <Icon style={{ marginRight: 4 }} /> : null; })()}{rec.status}
                   </span>
                 </Td>
                 <Td dataLabel="Message">{rec.message}</Td>

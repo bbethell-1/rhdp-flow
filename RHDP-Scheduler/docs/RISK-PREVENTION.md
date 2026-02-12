@@ -187,6 +187,38 @@ These appear as warnings in the validation summary alongside date warnings, with
 
 ---
 
+### 16. Error Boundary (MEDIUM)
+
+**Risk:** An unhandled JavaScript error in any tab crashes the entire application, leaving the user with a blank white screen.
+
+**Safeguard:** A React Error Boundary wraps the entire application. If any component throws an unhandled error, a friendly "Something went wrong" fallback screen appears with a "Try Again" button that resets the error state and re-renders the app.
+
+### 17. Upload File Size Limit (HIGH)
+
+**Risk:** Uploading extremely large files could exhaust server memory or cause timeouts.
+
+**Safeguard:** All CSV upload endpoints enforce a 10 MB size limit. Files exceeding this limit are rejected with HTTP 413 before processing. Applies to schedule uploads, password file uploads, and schedule diff uploads.
+
+### 18. Extend Time Validation Cap (MEDIUM)
+
+**Risk:** User accidentally enters an extremely large extension value (e.g., 365 days), causing workshops to run far longer and more expensively than intended.
+
+**Safeguard:** The Extend API validates that days does not exceed 30 and hours does not exceed 720. Requests exceeding these caps are rejected with HTTP 422 (validation error).
+
+### 19. Request Deduplication (LOW)
+
+**Risk:** User clicks Refresh or Run QA multiple times rapidly, sending duplicate API requests.
+
+**Safeguard:** Refresh and Run QA buttons show a loading spinner and are disabled while a request is in-flight, preventing duplicate submissions.
+
+### 20. Accessible Toast Notifications (LOW)
+
+**Risk:** Screen reader users miss toast feedback for copy-to-clipboard, deploy results, and operation outcomes.
+
+**Safeguard:** The toast notification region uses `aria-live="polite"` and `role="status"` so screen readers announce dynamic toast messages automatically.
+
+---
+
 *All risk prevention items implemented.*
 
 *Last updated: 2026-02-12*

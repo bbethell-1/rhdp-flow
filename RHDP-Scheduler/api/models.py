@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -77,8 +77,8 @@ class LockRequest(BaseModel):
 class ExtendRequest(BaseModel):
     """Body for POST /api/operations/extend-stop and extend-destroy."""
 
-    days: int = Field(0, ge=0)
-    hours: int = Field(0, ge=0)
+    days: int = Field(0, ge=0, le=30)
+    hours: int = Field(0, ge=0, le=720)
     ci_filter: Optional[str] = None
 
 

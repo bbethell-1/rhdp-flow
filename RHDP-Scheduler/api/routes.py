@@ -10,7 +10,7 @@ import subprocess
 from dataclasses import asdict
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 
@@ -62,6 +62,7 @@ from api.models import (
     WorkshopScheduleResponse,
 )
 from api import jobs
+from api.limiter import limiter as _route_limiter
 
 logger = logging.getLogger("rhdp_flow.api")
 
@@ -80,9 +81,18 @@ _asset_passwords: Optional[Dict[str, str]] = None
 # Session history — each completed upload+deploy cycle gets archived here
 _sessions: List[dict] = []
 _session_counter: int = 0
+MAX_SESSIONS = 50
+MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 # Cached base domain derived from the connected cluster
 _cached_base_domain: Optional[str] = None
+
+
+def _rate_limit(limit_string: str):
+    """Apply per-route rate limit if slowapi is available, otherwise no-op."""
+    if _route_limiter:
+        return _route_limiter.limit(limit_string)
+    return lambda f: f
 
 
 def _detect_and_cache_base_domain() -> str:
@@ -103,7 +113,8 @@ def _detect_and_cache_base_domain() -> str:
             _cached_base_domain = derive_base_domain(r.stdout.strip())
         else:
             _cached_base_domain = "integration.demo.redhat.com"
-    except Exception:
+    except Exception as exc:
+        logger.warning("Base domain detection failed, using fallback: %s", exc)
         _cached_base_domain = "integration.demo.redhat.com"
     return _cached_base_domain
 
@@ -171,6 +182,8 @@ def _archive_current_session():
         "timestamp": utc_timestamp_str(),
     }
     _sessions.append(session)
+    if len(_sessions) > MAX_SESSIONS:
+        _sessions[:] = _sessions[-MAX_SESSIONS:]
 
 
 # ---------------------------------------------------------------------------
@@ -267,8 +280,8 @@ def health():
                     capture_output=True, text=True, timeout=10, env=env,
                 )
                 rhdp_ok = r_cat.returncode == 0
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("RHDP catalog probe failed: %s", exc)
             return HealthResponse(
                 status="ok",
                 oc_installed=True,
@@ -304,9 +317,12 @@ def health():
 # ---------------------------------------------------------------------------
 
 @router.post("/schedules/upload", response_model=UploadResponse)
-async def upload_csv(file: UploadFile = File(...)):
+@_rate_limit("10/minute")
+async def upload_csv(request: Request, file: UploadFile = File(...)):
     global _schedules, _csv_filepath, _current_filename
     content = await file.read()
+    if len(content) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(413, "File exceeds 10 MB size limit")
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError:
@@ -346,10 +362,12 @@ async def upload_csv(file: UploadFile = File(...)):
 
 
 @router.post("/schedules/upload-passwords")
-async def upload_passwords(file: UploadFile = File(...)):
+async def upload_passwords(request: Request, file: UploadFile = File(...)):
     """Upload a per-asset passwords CSV (columns: CI, Password)."""
     global _asset_passwords
     content = await file.read()
+    if len(content) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(413, "File exceeds 10 MB size limit")
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError:
@@ -389,19 +407,22 @@ def validate_namespaces():
                 capture_output=True, text=True, timeout=10, env=env,
             )
             results[ns] = r.returncode == 0
-        except Exception:
+        except Exception as exc:
+            logger.warning("Namespace validation failed for %s: %s", ns, exc)
             results[ns] = False
     missing = [ns for ns, ok in results.items() if not ok]
     return {"namespaces": results, "missing": missing}
 
 
 @router.post("/schedules/diff", response_model=DiffResponse)
-async def diff_schedules(file: UploadFile = File(...)):
+async def diff_schedules(request: Request, file: UploadFile = File(...)):
     """Compare a new CSV against the currently loaded schedules."""
     if not _schedules:
         raise HTTPException(400, "No schedules loaded to compare against.")
 
     content = await file.read()
+    if len(content) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(413, "File exceeds 10 MB size limit")
     try:
         text = content.decode("utf-8")
     except UnicodeDecodeError:
@@ -461,7 +482,8 @@ async def diff_schedules(file: UploadFile = File(...)):
 # ---------------------------------------------------------------------------
 
 @router.post("/deploy", response_model=JobResponse)
-async def deploy(body: DeployRequest = DeployRequest(), _key=Depends(verify_api_key)):
+@_rate_limit("10/minute")
+async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=Depends(verify_api_key)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded. Upload a CSV first.")
 
@@ -552,7 +574,8 @@ async def deploy(body: DeployRequest = DeployRequest(), _key=Depends(verify_api_
 
 
 @router.post("/deploy/dry-run", response_model=List[DeploymentResultResponse])
-def deploy_dry_run(body: DeployRequest = DeployRequest(), _key=Depends(verify_api_key)):
+@_rate_limit("10/minute")
+def deploy_dry_run(request: Request, body: DeployRequest = DeployRequest(), _key=Depends(verify_api_key)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded. Upload a CSV first.")
 
@@ -635,7 +658,8 @@ def get_deploy_results():
 
 
 @router.post("/deploy/retry", response_model=JobResponse)
-async def deploy_retry(body: RetryRequest, _key=Depends(verify_api_key)):
+@_rate_limit("10/minute")
+async def deploy_retry(request: Request, body: RetryRequest, _key=Depends(verify_api_key)):
     """Re-deploy specific workshops by CI name (typically failed ones)."""
     if not _schedules:
         raise HTTPException(400, "No schedules loaded. Upload a CSV first.")
@@ -804,7 +828,8 @@ def op_import_namespace(namespace: str):
 # ---------------------------------------------------------------------------
 
 @router.post("/qa/run")
-def qa_run(body: QARequest = QARequest()):
+@_rate_limit("10/minute")
+def qa_run(request: Request, body: QARequest = QARequest()):
     global _qa_results
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")

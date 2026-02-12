@@ -7,6 +7,7 @@ import {
   CardTitle,
   PageSection,
   Pagination,
+  SearchInput,
   Split,
   SplitItem,
   FormSelect,
@@ -16,6 +17,8 @@ import {
   Label,
   Switch,
   Title,
+  ToggleGroup,
+  ToggleGroupItem,
   Tooltip,
 } from '@patternfly/react-core';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
@@ -23,6 +26,8 @@ import { Table, Thead, Tbody, Tr, Th, Td, ThProps } from '@patternfly/react-tabl
 import SearchIcon from '@patternfly/react-icons/dist/esm/icons/search-icon';
 
 import { api } from '../services/api';
+import { AUTO_REFRESH_INTERVAL_MS, DEFAULT_PER_PAGE } from '../constants';
+import { statusColorClass, statusIcon } from '../utils/statusColors';
 import type { QAResult } from '../types';
 
 interface Props {
@@ -37,14 +42,6 @@ function healthyDisplay(h: boolean | string | null | undefined): string {
   return String(h ?? '-');
 }
 
-function statusColorClass(status: string): string {
-  if (!status) return '';
-  const s = status.toLowerCase();
-  if (s.includes('verified') && !s.includes('unverified')) return 'status-verified';
-  if (s.includes('failed') || s.includes('error')) return 'status-failed';
-  return '';
-}
-
 function healthyColorClass(h: boolean | string | null | undefined): string {
   if (h === true || h === 'Yes') return 'status-verified';
   if (h === false || h === 'No') return 'status-failed';
@@ -53,23 +50,28 @@ function healthyColorClass(h: boolean | string | null | undefined): string {
 
 type SortableQAColumn = 'ci_name' | 'ci' | 'status';
 
+type QAStatusFilter = 'all' | 'verified' | 'failed';
+
 export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) => {
   const [qaType, setQaType] = useState<'1' | '2' | 'both'>('both');
   const [running, setRunning] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(20);
+  const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const [sortBy, setSortBy] = useState<SortableQAColumn | null>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [qaSearch, setQaSearch] = useState('');
+  const [qaStatusFilter, setQaStatusFilter] = useState<QAStatusFilter>('all');
 
   const refreshQA = useCallback(async () => {
     try {
       const data = await api.qaResults();
       setQAResults(data.results);
-    } catch { /* ignore */ }
+    } catch (e) { console.warn('Auto-refresh QA results failed', e); }
   }, [setQAResults]);
 
-  useAutoRefresh(refreshQA, 15000, autoRefresh);
+  useAutoRefresh(refreshQA, AUTO_REFRESH_INTERVAL_MS, autoRefresh);
 
   const handleRun = async () => {
     setRunning(true);
@@ -85,13 +87,59 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
   };
 
   const handleRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
     try {
       const data = await api.qaResults();
       setQAResults(data.results);
       showToast(`Refreshed: ${data.count} QA result(s)`, 'success');
     } catch (e) {
       showToast(`Refresh failed: ${e}`, 'danger');
+    } finally {
+      setRefreshing(false);
     }
+  };
+
+  const filteredQAResults = useMemo(() => {
+    let filtered = qaResults;
+    if (qaStatusFilter !== 'all') {
+      filtered = filtered.filter(r => {
+        const s = (r.status || '').toLowerCase();
+        if (qaStatusFilter === 'verified') return s.includes('verified') && !s.includes('unverified');
+        return s.includes('failed') || s.includes('error');
+      });
+    }
+    if (qaSearch) {
+      const q = qaSearch.toLowerCase();
+      filtered = filtered.filter(r =>
+        r.ci_name.toLowerCase().includes(q) ||
+        r.ci.toLowerCase().includes(q) ||
+        (r.status || '').toLowerCase().includes(q)
+      );
+    }
+    return filtered;
+  }, [qaResults, qaStatusFilter, qaSearch]);
+
+  const isQAFiltered = qaStatusFilter !== 'all' || qaSearch.length > 0;
+  const qaTitle = isQAFiltered
+    ? `QA Results (${filteredQAResults.length} of ${qaResults.length})`
+    : `QA Results (${qaResults.length})`;
+
+  const handleDownloadFilteredCSV = () => {
+    const headers = ['CI Name', 'CI', 'Status', 'Deployed', 'Healthy', 'Expected Seats', 'Actual Seats', 'Landing Page URL'];
+    const rows = filteredQAResults.map(r => [
+      r.ci_name, r.ci, r.status, r.deployed,
+      String(r.healthy ?? ''), String(r.expected_seats ?? ''),
+      String(r.actual_seats ?? ''), r.landing_page_url || '',
+    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
+    const csv = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `qa-results-${qaStatusFilter}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -130,7 +178,7 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
           </Button>
         </SplitItem>
         <SplitItem>
-          <Button variant="secondary" onClick={handleRefresh}>Refresh</Button>
+          <Button variant="secondary" onClick={handleRefresh} isLoading={refreshing} isDisabled={refreshing}>Refresh</Button>
         </SplitItem>
         <SplitItem>
           <Tooltip content="Automatically poll for updated QA results every 15 seconds">
@@ -148,6 +196,34 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
           </SplitItem>
         )}
       </Split>
+
+      {/* QA search + status filter toolbar */}
+      {qaResults.length > 0 && (
+        <Split hasGutter style={{ marginBottom: 16, alignItems: 'center' }}>
+          <SplitItem>
+            <Button variant="secondary" onClick={handleDownloadFilteredCSV} isDisabled={filteredQAResults.length === 0}>
+              Download{isQAFiltered ? ' Filtered' : ''} CSV
+            </Button>
+          </SplitItem>
+          <SplitItem isFilled />
+          <SplitItem>
+            <SearchInput
+              placeholder="Search CI name, CI..."
+              value={qaSearch}
+              onChange={(_e, val) => { setQaSearch(val); setPage(1); }}
+              onClear={() => { setQaSearch(''); setPage(1); }}
+              style={{ width: 250 }}
+            />
+          </SplitItem>
+          <SplitItem>
+            <ToggleGroup aria-label="QA status filter">
+              <ToggleGroupItem text="All" isSelected={qaStatusFilter === 'all'} onChange={() => { setQaStatusFilter('all'); setPage(1); }} />
+              <ToggleGroupItem text="Verified" isSelected={qaStatusFilter === 'verified'} onChange={() => { setQaStatusFilter('verified'); setPage(1); }} />
+              <ToggleGroupItem text="Failed" isSelected={qaStatusFilter === 'failed'} onChange={() => { setQaStatusFilter('failed'); setPage(1); }} />
+            </ToggleGroup>
+          </SplitItem>
+        </Split>
+      )}
 
       {/* QA type explanation cards */}
       {qaResults.length === 0 && (
@@ -186,7 +262,8 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
       {/* QA results table */}
       {qaResults.length > 0 ? (
         <QAResultsTable
-          qaResults={qaResults}
+          qaResults={filteredQAResults}
+          title={qaTitle}
           page={page}
           setPage={setPage}
           perPage={perPage}
@@ -197,11 +274,9 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
           setSortDir={setSortDir}
         />
       ) : (
-        !qaResults.length && (
-          <EmptyState titleText="No QA results yet" headingLevel="h3" icon={SearchIcon}>
-            <EmptyStateBody>Select a QA type above and click Run QA after deploying your workshops.</EmptyStateBody>
-          </EmptyState>
-        )
+        <EmptyState titleText="No QA results yet" headingLevel="h3" icon={SearchIcon}>
+          <EmptyStateBody>Select a QA type above and click Run QA after deploying your workshops.</EmptyStateBody>
+        </EmptyState>
       )}
     </PageSection>
   );
@@ -210,6 +285,7 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
 /** Extracted QA results table with sorting + pagination */
 const QAResultsTable: React.FC<{
   qaResults: QAResult[];
+  title: string;
   page: number;
   setPage: (p: number) => void;
   perPage: number;
@@ -218,7 +294,7 @@ const QAResultsTable: React.FC<{
   setSortBy: (c: SortableQAColumn) => void;
   sortDir: 'asc' | 'desc';
   setSortDir: (d: 'asc' | 'desc') => void;
-}> = ({ qaResults, page, setPage, perPage, setPerPage, sortBy, setSortBy, sortDir, setSortDir }) => {
+}> = ({ qaResults, title, page, setPage, perPage, setPerPage, sortBy, setSortBy, sortDir, setSortDir }) => {
   const sorted = useMemo(() => {
     if (!sortBy) return qaResults;
     return [...qaResults].sort((a, b) => {
@@ -250,7 +326,7 @@ const QAResultsTable: React.FC<{
 
   return (
     <>
-      <Title headingLevel="h3" style={{ marginBottom: 8 }}>QA Results ({qaResults.length})</Title>
+      <Title headingLevel="h3" style={{ marginBottom: 8 }}>{title}</Title>
       <div className="table-sticky-wrapper">
       <Table aria-label="QA results" variant="compact" className="fixed-table" isStickyHeader>
         <Thead>
@@ -269,7 +345,7 @@ const QAResultsTable: React.FC<{
             <Tr key={i}>
               <Td dataLabel="CI Name">{r.ci_name}</Td>
               <Td dataLabel="CI">{r.ci}</Td>
-              <Td dataLabel="Status"><span className={statusColorClass(r.status)}>{r.status}</span></Td>
+              <Td dataLabel="Status"><span className={statusColorClass(r.status)}>{(() => { const Icon = statusIcon(r.status); return Icon ? <Icon style={{ marginRight: 4 }} /> : null; })()}{r.status}</span></Td>
               <Td dataLabel="Deployed">{r.deployed || '-'}</Td>
               <Td dataLabel="Healthy"><span className={healthyColorClass(r.healthy)}>{healthyDisplay(r.healthy)}</span></Td>
               <Td dataLabel="Seats">{r.expected_seats ?? '-'} / {r.actual_seats ?? '-'}</Td>

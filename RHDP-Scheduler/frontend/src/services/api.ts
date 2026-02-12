@@ -40,8 +40,23 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   return res.json();
 }
 
+// ── Response cache (5s TTL) for GET endpoints ──
+const _cache = new Map<string, { data: unknown; expiry: number }>();
+
+async function cachedRequest<T>(path: string, ttlMs = 5000): Promise<T> {
+  const entry = _cache.get(path);
+  if (entry && Date.now() < entry.expiry) return entry.data as T;
+  const data = await request<T>(path);
+  _cache.set(path, { data, expiry: Date.now() + ttlMs });
+  return data;
+}
+
+export function clearApiCache() {
+  _cache.clear();
+}
+
 export const api = {
-  health: () => request<HealthResponse>('/health'),
+  health: () => cachedRequest<HealthResponse>('/health'),
 
   // Schedules
   uploadCSV: async (file: File): Promise<UploadResponse> => {
@@ -58,7 +73,7 @@ export const api = {
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
-  getSchedules: () => request<WorkshopSchedule[]>('/schedules'),
+  getSchedules: () => cachedRequest<WorkshopSchedule[]>('/schedules'),
   validateNamespaces: () =>
     request<{ namespaces: Record<string, boolean>; missing: string[] }>('/schedules/validate-namespaces', { method: 'POST', body: '{}' }),
   diffSchedules: async (file: File): Promise<import('../types').DiffResponse> => {
@@ -75,7 +90,7 @@ export const api = {
   dryRun: (body: DeployRequest) =>
     request<DeploymentResult[]>('/deploy/dry-run', { method: 'POST', body: JSON.stringify(body) }),
   deployStatus: (jobId: string) => request<JobResponse>(`/deploy/status/${jobId}`),
-  deployResults: () => request<DeploymentResult[]>('/deploy/results'),
+  deployResults: () => cachedRequest<DeploymentResult[]>('/deploy/results'),
   deployStream: (jobId: string) => new EventSource(`${API}/deploy/stream/${jobId}`),
   retry: (body: RetryRequest) =>
     request<JobResponse>('/deploy/retry', { method: 'POST', body: JSON.stringify(body) }),
@@ -95,7 +110,7 @@ export const api = {
   // QA
   runQA: (body: QARequest) =>
     request<QAResponse>('/qa/run', { method: 'POST', body: JSON.stringify(body) }),
-  qaResults: () => request<QAResponse>('/qa/results'),
+  qaResults: () => cachedRequest<QAResponse>('/qa/results'),
 
   // Templates
   templateURL: `${API}/templates/schedule`,
@@ -105,7 +120,7 @@ export const api = {
   exportStudentsURL: `${API}/export/students`,
 
   // Sessions
-  getSessions: () => request<SessionSummary[]>('/sessions'),
+  getSessions: () => cachedRequest<SessionSummary[]>('/sessions'),
   getSession: (id: string) => request<SessionDetail>(`/sessions/${id}`),
   clearSession: () =>
     request<{ message: string; session_count: number }>('/sessions/clear', { method: 'POST', body: '{}' }),

@@ -62,6 +62,12 @@ export const UploadTab: React.FC<Props> = ({
   dryRun, schedules, setSchedules, setResults, showToast, onClear,
 }) => {
   const logRef = useRef<HTMLDivElement>(null);
+  const esRef = useRef<EventSource | null>(null);
+
+  // Clean up EventSource on unmount
+  useEffect(() => {
+    return () => { esRef.current?.close(); esRef.current = null; };
+  }, []);
 
   const [deploying, setDeploying] = useState(false);
   const [passwordCount, setPasswordCount] = useState<number | null>(null);
@@ -214,7 +220,7 @@ export const UploadTab: React.FC<Props> = ({
       setMissingNamespaces([]);
       api.validateNamespaces()
         .then(r => { if (r.missing.length) setMissingNamespaces(r.missing); })
-        .catch(() => { /* cluster may be unreachable — skip silently */ });
+        .catch((e) => { console.warn('Namespace validation failed', e); });
     } catch (e) {
       showToast(`Upload failed: ${e}`, 'danger');
     }
@@ -288,6 +294,7 @@ export const UploadTab: React.FC<Props> = ({
     try {
       const job = await api.deploy({ dry_run: dryRun, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect });
       const es = api.deployStream(job.job_id);
+      esRef.current = es;
 
       es.addEventListener('status', (e: MessageEvent) => {
         const d = JSON.parse(e.data);
@@ -297,10 +304,11 @@ export const UploadTab: React.FC<Props> = ({
 
         if (d.status === 'completed' || d.status === 'failed') {
           es.close();
+          esRef.current = null;
           setDeploying(false);
           if (d.status === 'completed') {
             showToast('Deployment completed', 'success');
-            api.deployResults().then(r => setResults(r)).catch(() => {});
+            api.deployResults().then(r => setResults(r)).catch((err) => { console.warn('Failed to fetch results after deploy', err); });
           } else {
             showToast(`Deployment failed: ${d.error || 'unknown'}`, 'danger');
           }
@@ -312,12 +320,14 @@ export const UploadTab: React.FC<Props> = ({
       const maxRetries = 5;
       es.addEventListener('error', () => {
         es.close();
+        esRef.current = null;
         if (retryCount < maxRetries) {
           retryCount++;
           const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 16000);
           appendLog(`SSE connection lost, reconnecting in ${delay / 1000}s (attempt ${retryCount}/${maxRetries})...`);
           setTimeout(() => {
             const retryEs = api.deployStream(job.job_id);
+            esRef.current = retryEs;
             retryEs.addEventListener('status', (e: MessageEvent) => {
               const d = JSON.parse(e.data);
               setProgress(d.progress);
@@ -325,16 +335,17 @@ export const UploadTab: React.FC<Props> = ({
               if (d.message) appendLog(d.message);
               if (d.status === 'completed' || d.status === 'failed') {
                 retryEs.close();
+                esRef.current = null;
                 setDeploying(false);
                 if (d.status === 'completed') {
                   showToast('Deployment completed', 'success');
-                  api.deployResults().then(r => setResults(r)).catch(() => {});
+                  api.deployResults().then(r => setResults(r)).catch((err) => { console.warn('Failed to fetch results after retry deploy', err); });
                 } else {
                   showToast(`Deployment failed: ${d.error || 'unknown'}`, 'danger');
                 }
               }
             });
-            retryEs.addEventListener('error', () => { retryEs.close(); });
+            retryEs.addEventListener('error', () => { retryEs.close(); esRef.current = null; });
           }, delay);
         } else {
           setDeploying(false);

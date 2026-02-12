@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Label, Tooltip } from '@patternfly/react-core';
 import { api } from '../services/api';
+import { HEALTH_CHECK_INTERVAL_MS } from '../constants';
 import type { HealthResponse } from '../types';
 
 export const HealthBadge: React.FC = () => {
@@ -26,14 +27,15 @@ export const HealthBadge: React.FC = () => {
           setColor('red');
           setTooltip(h.message || 'oc command not found');
         }
-      } catch {
+      } catch (e) {
+        console.warn('Health check failed', e);
         setLabel('API unreachable');
         setColor('red');
         setTooltip('Cannot connect to RHDP-Flow backend');
       }
     };
     check();
-    const id = setInterval(check, 30_000);
+    const id = setInterval(check, HEALTH_CHECK_INTERVAL_MS);
     return () => clearInterval(id);
   }, []);
 

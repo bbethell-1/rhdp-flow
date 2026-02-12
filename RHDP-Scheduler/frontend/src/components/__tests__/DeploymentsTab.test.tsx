@@ -1,11 +1,17 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { beforeEach } from 'vitest';
 import { DeploymentsTab } from '../DeploymentsTab';
 import { mockResult, mockFailedResult } from '../../test/mocks/api';
 
 const noop = () => {};
 
 describe('DeploymentsTab', () => {
+  beforeEach(() => {
+    sessionStorage.removeItem('rhdp-deploy-search');
+    sessionStorage.removeItem('rhdp-deploy-filter');
+  });
+
   it('renders empty state when no results', () => {
     render(<DeploymentsTab results={[]} setResults={noop} showToast={noop} />);
     expect(screen.getByText('No deployment results yet')).toBeInTheDocument();

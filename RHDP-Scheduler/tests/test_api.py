@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from api.server import app
 from api import routes
+from api.limiter import limiter as _test_limiter
 from tests.conftest import BASIC_WORKSHOP_CSV, make_oc_dispatcher
 
 
@@ -31,6 +32,9 @@ def reset_state():
     routes._session_counter = 0
     routes._asset_passwords = None
     routes._cached_base_domain = None
+    # Reset rate limiter storage so per-route limits don't bleed across tests
+    if _test_limiter:
+        _test_limiter.reset()
     yield
 
 
@@ -582,3 +586,48 @@ def test_qa_invalid_type(uploaded_client):
     """QA with invalid type should fail."""
     resp = uploaded_client.post("/api/qa/run", json={"type": "999"})
     assert resp.status_code in (400, 422)
+
+
+# ---------------------------------------------------------------------------
+# Session List Cap
+# ---------------------------------------------------------------------------
+
+def test_session_list_cap(client):
+    """Session list is capped at MAX_SESSIONS (50)."""
+    for i in range(55):
+        # Upload a CSV, then clear to archive a session
+        client.post(
+            "/api/schedules/upload",
+            files={"file": ("test.csv", BASIC_WORKSHOP_CSV.encode(), "text/csv")},
+        )
+        client.post("/api/sessions/clear", json={})
+    resp = client.get("/api/sessions")
+    assert resp.status_code == 200
+    sessions = resp.json()
+    assert len(sessions) <= 50
+
+
+# ---------------------------------------------------------------------------
+# Upload Size Limit
+# ---------------------------------------------------------------------------
+
+def test_upload_csv_size_limit(client):
+    """Uploading a file > 10 MB should return 413."""
+    big_content = b"x" * (10 * 1024 * 1024 + 1)  # Just over 10MB
+    resp = client.post(
+        "/api/schedules/upload",
+        files={"file": ("big.csv", big_content, "text/csv")},
+    )
+    assert resp.status_code == 413
+
+
+# ---------------------------------------------------------------------------
+# Extend Days Cap
+# ---------------------------------------------------------------------------
+
+def test_extend_days_cap(uploaded_client):
+    """Extending by more than 30 days should return 422."""
+    resp = uploaded_client.post(
+        "/api/operations/extend-stop", json={"days": 31, "hours": 0}
+    )
+    assert resp.status_code == 422
