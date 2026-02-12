@@ -10,6 +10,8 @@ ensure namespace exists / validate it
 
 lock when deploying didn't work
 
+sort out campaign v opperunity 
+
 ## Testing
 
 - [x] Test multi-asset with `Multi_Asset=True` + `Asset_CIs` (old format) vs grouped rows with `Multi_Workshop_Name` (new format) — verify both paths produce correct results and that per-item passwords work in both cases (5 tests: shared password, asset parsing, per-item password propagation, mixed concurrency, graceful degradation)
