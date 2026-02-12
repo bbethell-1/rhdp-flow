@@ -62,6 +62,9 @@ class DeployRequest(BaseModel):
         None, description="Optional Catalog Item ID to filter (process only this CI)"
     )
     dry_run: bool = Field(False, description="Override global dry-run toggle")
+    resource_lock: bool = Field(True, description="Apply resource-lock label")
+    enable_resource_pools: bool = Field(False, description="Enable Poolboy resource pools")
+    white_glove: bool = Field(True, description="White-glove mode")
 
 
 class LockRequest(BaseModel):
@@ -131,6 +134,7 @@ class HealthResponse(BaseModel):
     cluster_url: str = ""
     user: str = ""
     message: str = ""
+    base_domain: str = ""
 
 
 class UploadResponse(BaseModel):

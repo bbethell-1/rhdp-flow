@@ -15,10 +15,11 @@ import {
   Switch,
   ToggleGroup,
   ToggleGroupItem,
-  ClipboardCopy,
+  Tooltip,
 } from '@patternfly/react-core';
 import { Table, Thead, Tbody, Tr, Th, Td } from '@patternfly/react-table';
 import CubesIcon from '@patternfly/react-icons/dist/esm/icons/cubes-icon';
+import CopyIcon from '@patternfly/react-icons/dist/esm/icons/copy-icon';
 
 import { api } from '../services/api';
 import type { DeploymentResult } from '../types';
@@ -235,7 +236,20 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
                 <Td dataLabel="Status"><span className={statusClass(r.status)}>{formatStatus(r.status)}</span></Td>
                 <Td dataLabel="URL">
                   {r.url ? (
-                    <ClipboardCopy variant="inline-compact" isReadOnly>{r.url}</ClipboardCopy>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <a href={r.url} target="_blank" rel="noopener noreferrer" className="cell-truncate" title={r.url}>{r.url}</a>
+                      <Tooltip content="Copy URL">
+                        <Button
+                          variant="plain"
+                          size="sm"
+                          style={{ padding: '2px 4px' }}
+                          onClick={() => navigator.clipboard.writeText(r.url)}
+                          aria-label="Copy URL"
+                        >
+                          <CopyIcon />
+                        </Button>
+                      </Tooltip>
+                    </span>
                   ) : '-'}
                 </Td>
                 <Td dataLabel="Prov. Date">{r.provisioning_date}</Td>

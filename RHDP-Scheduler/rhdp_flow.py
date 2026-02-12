@@ -6,6 +6,7 @@ Automates scheduling and deployment for RHDP workshops with safety features.
 This script uses oc commands directly (no API authentication needed if already logged in).
 """
 
+import contextlib
 import csv
 import json
 import logging
@@ -111,6 +112,9 @@ class WorkshopSchedule:
     instances: Optional[int] = None  # Optional; workshop instance/seat count for multi-asset (e.g. 30); used for numberSeats when users not set
     concurrency: Optional[int] = None  # Optional; WorkshopProvision concurrency (default 1)
     salesforce_ids: str = ""  # Optional Salesforce ID(s) for chargeback (campaign, opportunity, marketing, etc.)
+    aws_regions: str = ""  # Optional comma-separated AWS regions for multi-region deployment (e.g., "us-east-1,eu-west-1")
+    count: Optional[int] = None  # Optional deployment count (from Count CSV column); distinct from instances
+    white_glove: bool = True  # Optional white-glove mode flag (default: enabled)
 
 @dataclass
 class DeploymentResult:
@@ -141,6 +145,10 @@ class RHDPConfig:
         self.retry_attempts = 3
         self.retry_delay = 5
         self.oc_command = "oc"  # Can be overridden if oc is in different location
+        self.resource_lock = True
+        self.enable_resource_pools = False
+        self.white_glove = True
+        self.base_domain = "integration.demo.redhat.com"
         
     def validate(self) -> bool:
         """Validate configuration"""
@@ -162,6 +170,26 @@ class RHDPConfig:
             return False
         
         return True
+
+def derive_base_domain(cluster_url: str) -> str:
+    """
+    Derive the web domain from an OpenShift API server URL.
+
+    Example: 'https://api.integration.demo.redhat.com:6443'
+          -> 'integration.demo.redhat.com'
+    """
+    fallback = "integration.demo.redhat.com"
+    if not cluster_url:
+        return fallback
+    try:
+        host = cluster_url.split("://", 1)[-1]   # strip scheme
+        host = host.split(":")[0]                  # strip port
+        host = host.rstrip("/")
+        if host.startswith("api."):
+            host = host[4:]
+        return host or fallback
+    except Exception:
+        return fallback
 
 # ============================================================================
 # DATE/TIME UTILITIES
@@ -275,9 +303,14 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
     }
     
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
+        # Support both file paths and file-like objects (e.g. StringIO)
+        if hasattr(filepath, 'read'):
+            f_ctx = contextlib.nullcontext(filepath)
+        else:
+            f_ctx = open(filepath, 'r', encoding='utf-8')
+        with f_ctx as f:
             reader = csv.DictReader(f)
-            
+
             if not reader.fieldnames:
                 raise ValueError("CSV file is empty or has no headers")
             
@@ -336,6 +369,8 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                     instances_str = row.get(header_map.get('instances', 'Instances'), '').strip()
                     concurrency_str = row.get(header_map.get('concurrency', 'Concurrency'), '').strip()
                     salesforce_ids = row.get(header_map.get('salesforce ids', header_map.get('campaign_id', 'Salesforce IDs')), '').strip()
+                    count_str = row.get(header_map.get('count', 'Count'), '').strip()
+                    aws_regions = row.get(header_map.get('aws_region', 'AWS_Region'), '').strip()
                     is_multi_asset = is_multi_asset_str.lower() in ['true', '1', 'yes', 'y'] if is_multi_asset_str else False
                     
                     # Support both old and new header formats (with/without UTC suffix)
@@ -400,6 +435,13 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                             concurrency = int(concurrency_str)
                         except ValueError:
                             logger.warning(f"Row {row_num}: Invalid concurrency value '{concurrency_str}', treating as unspecified")
+                    # Parse optional Count (deployment count, distinct from instances)
+                    count: Optional[int] = None
+                    if count_str:
+                        try:
+                            count = int(count_str)
+                        except ValueError:
+                            logger.warning(f"Row {row_num}: Invalid count value '{count_str}', treating as unspecified")
                     
                     # Parse boolean
                     enable_workshop_interface = enable_interface.lower() in ['true', '1', 'yes', 'y']
@@ -422,7 +464,9 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                         multi_workshop_name=multi_workshop_name,
                         instances=instances,
                         concurrency=concurrency,
-                        salesforce_ids=salesforce_ids
+                        salesforce_ids=salesforce_ids,
+                        aws_regions=aws_regions,
+                        count=count,
                     )
                     
                     schedules.append(schedule)
@@ -449,13 +493,15 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
         raise
 
 
-def load_asset_passwords(filepath: str) -> Dict[str, str]:
+def load_asset_passwords(filepath: Optional[str]) -> Dict[str, str]:
     """
     Load per-CI passwords from a CSV file (CI, Password columns).
     Used for multi-asset workshops so each asset can have its own password.
     Returns dict mapping CI -> password (e.g. "zt-ansiblebu.ansible-network-automation-basics-lab-2.prod" -> "facts1").
     """
     result: Dict[str, str] = {}
+    if not filepath:
+        return result
     path = Path(filepath)
     if not path.exists():
         return result
@@ -607,6 +653,7 @@ def write_deployment_results(
 
 def build_resource_claim_payload(
     schedule: WorkshopSchedule,
+    config: Optional[RHDPConfig] = None,
     requester_email: str = ""
 ) -> Dict:
     """
@@ -673,12 +720,12 @@ def build_resource_claim_payload(
                 "demo.redhat.com/purpose-activity": schedule.activity,
                 "demo.redhat.com/requester": requester_email,
                 "demo.redhat.com/salesforce-items": _salesforce_items(schedule),
-                "poolboy.gpte.redhat.com/resource-pool-name": "disable"
             },
             "labels": {
                 "babylon.gpte.redhat.com/catalogItemName": schedule.ci,
                 "babylon.gpte.redhat.com/catalogItemNamespace": "babylon-catalog-prod",
-                "demo.redhat.com/white-glove": "false",
+                "demo.redhat.com/resource-lock": "true" if (config and config.resource_lock) else "false",
+                "demo.redhat.com/white-glove": "true" if (config and config.white_glove) else ("true" if schedule.white_glove else "false"),
                 "rhdp-flow.gpte.redhat.com/scheduled": "true",
                 "rhdp-flow.gpte.redhat.com/scheduled-by": "rhdp-flow"
             }
@@ -697,6 +744,10 @@ def build_resource_claim_payload(
         }
     }
     
+    # Disable resource pools unless config says otherwise
+    if not (config and config.enable_resource_pools):
+        payload["metadata"]["annotations"]["poolboy.gpte.redhat.com/resource-pool-name"] = "disable"
+
     # Add accessPassword to spec (not parameterValues)
     if schedule.password:
         payload["spec"]["accessPassword"] = schedule.password
@@ -710,7 +761,11 @@ def build_resource_claim_payload(
         # Store workshop name for use when creating Workshop
         if schedule.workshop_name:
             payload["metadata"]["annotations"]["rhdp-flow.gpte.redhat.com/workshop-name"] = schedule.workshop_name
-    
+
+    # Thread white-glove flag through payload for downstream functions
+    if schedule.white_glove:
+        payload["_white_glove"] = True
+
     return payload
 
 def create_resource_claim_via_oc(
@@ -1050,7 +1105,8 @@ def create_workshop_with_ui(
         workshop_metadata["labels"] = {
             "babylon.gpte.redhat.com/catalogItemName": ci,
             "babylon.gpte.redhat.com/catalogItemNamespace": "babylon-catalog-prod",
-            "demo.redhat.com/white-glove": "false"
+            "demo.redhat.com/resource-lock": "true" if config.resource_lock else "false",
+            "demo.redhat.com/white-glove": "true" if config.white_glove else "false",
         }
         
         # Build Workshop payload with UI enabled from the start
@@ -1226,7 +1282,7 @@ def create_workshop_provision(
                 "workshopName": workshop_name,
                 "count": count_val,
                 "concurrency": concurrency_val,
-                "enableResourcePools": False,
+                "enableResourcePools": config.enable_resource_pools,
                 "actionSchedule": {
                     "start": param_values.get('start_timestamp', ''),
                     "stop": param_values.get('stop_timestamp', '')
@@ -1575,15 +1631,18 @@ def create_multi_workshop_from_group(
 
     first = group_schedules[0]
 
-    # Collect per-asset passwords and num_users from individual rows
+    # Collect per-asset passwords, num_users, and concurrencies from individual rows
     asset_cis = ",".join(s.ci for s in group_schedules)
     asset_passwords: Dict[str, str] = {}
     asset_num_users: Dict[str, int] = {}
+    asset_concurrencies: Dict[str, int] = {}
     for s in group_schedules:
         if s.password:
             asset_passwords[s.ci] = s.password
         if s.users is not None and s.users > 0:
             asset_num_users[s.ci] = s.users
+        if s.concurrency is not None:
+            asset_concurrencies[s.ci] = s.concurrency
 
     # Build a synthetic schedule that create_multi_workshop expects
     synth = WorkshopSchedule(
@@ -1611,6 +1670,7 @@ def create_multi_workshop_from_group(
         synth, config,
         asset_passwords=asset_passwords or None,
         asset_num_users=asset_num_users or None,
+        asset_concurrencies=asset_concurrencies or None,
     )
 
 
@@ -1618,7 +1678,8 @@ def create_multi_workshop(
     schedule: WorkshopSchedule,
     config: RHDPConfig,
     asset_passwords: Optional[Dict[str, str]] = None,
-    asset_num_users: Optional[Dict[str, int]] = None
+    asset_num_users: Optional[Dict[str, int]] = None,
+    asset_concurrencies: Optional[Dict[str, int]] = None
 ) -> Optional[str]:
     """
     Create a MultiWorkshop resource with multiple asset workshops.
@@ -1682,7 +1743,7 @@ def create_multi_workshop(
                 print("\n" + "=" * 70)
                 print(json.dumps(sample_payload, indent=2))
                 print("=" * 70 + "\n")
-        mock_name = schedule.multi_workshop_name or "dryrun-multi"
+        mock_name = schedule.multi_workshop_name or f"automation-dryrun"
         logger.info(f"[DRY-RUN] Would create MultiWorkshop and {len(asset_ci_list)} asset workshops (no resources created)")
         return mock_name
     
@@ -1792,7 +1853,8 @@ def create_multi_workshop(
             
             # Create WorkshopProvision to manage the Workshop and provision seats
             logger.info(f"Creating WorkshopProvision for asset workshop '{asset_workshop_name}'...")
-            create_workshop_provision(asset_workshop_name, schedule.namespace, asset_payload, config, enable_workshop_ui=False, concurrency=schedule.concurrency, count=schedule.instances)
+            asset_concurrency = (asset_concurrencies or {}).get(asset_ci, schedule.concurrency)
+            create_workshop_provision(asset_workshop_name, schedule.namespace, asset_payload, config, enable_workshop_ui=False, concurrency=asset_concurrency, count=schedule.instances)
             
             created_workshops.append((asset_ci, asset_workshop_name, catalog_namespace, display_name))
             logger.info(f"✅ Created Workshop '{asset_workshop_name}' with WorkshopProvision for asset {asset_ci}")
@@ -1900,6 +1962,56 @@ def create_multi_workshop(
         import traceback
         logger.debug(traceback.format_exc())
         return None
+
+
+def create_multi_region_workshop(
+    schedule: WorkshopSchedule,
+    config: RHDPConfig,
+) -> Optional[str]:
+    """
+    Create a single Workshop with multiple WorkshopProvisions, one per AWS region.
+
+    Users are distributed evenly across regions (remainder goes to first regions).
+    Returns the workshop name on success, or None if only one region is specified.
+
+    Args:
+        schedule: WorkshopSchedule with aws_regions set to comma-separated regions
+        config: RHDPConfig object
+
+    Returns:
+        Workshop name if successful, None if single region or on error
+    """
+    regions = [r.strip().replace("_", "-") for r in schedule.aws_regions.split(",") if r.strip()]
+    if len(regions) < 2:
+        return None
+
+    total_users = schedule.users or 0
+    base_count = total_users // len(regions)
+    remainder = total_users % len(regions)
+
+    # Build the ResourceClaim payload for create_workshop_with_ui
+    payload = build_resource_claim_payload(schedule)
+    generate_name = f"{schedule.ci}-"
+
+    workshop_name = create_workshop_with_ui(generate_name, schedule.namespace, payload, config)
+    if not workshop_name:
+        return None
+
+    for idx, region in enumerate(regions):
+        region_count = base_count + (1 if idx < remainder else 0)
+        create_workshop_provision(
+            workshop_name=workshop_name,
+            namespace=schedule.namespace,
+            resourceclaim_payload=payload,
+            config=config,
+            concurrency=schedule.concurrency,
+            count=region_count,
+            provision_name_suffix=f"-{region}",
+            extra_parameters={"aws_region": region},
+        )
+
+    return workshop_name
+
 
 def enable_workshop_lab_interface(
     workshop_name: str,
@@ -2070,19 +2182,21 @@ def get_resourceclaim_name_from_cluster(
 def construct_workshop_url(
     ci: str,
     namespace: str,
-    guid_suffix: str = ""
+    guid_suffix: str = "",
+    base_domain: str = "integration.demo.redhat.com",
 ) -> str:
     """
     Construct workshop URL based on RHDP pattern.
-    
-    Pattern: https://integration.demo.redhat.com/workshops/{namespace}/{ci}-{suffix}
+
+    Pattern: https://{base_domain}/workshops/{namespace}/{ci}-{suffix}
     Example: https://integration.demo.redhat.com/workshops/user-bbethell-redhat-com/openshift-cnv.ocp-virt-roadshow-multi-user.prod-vt958
-    
+
     Args:
         ci: Catalog Item ID
         namespace: Namespace (already in correct format)
         guid_suffix: Optional suffix from GUID
-        
+        base_domain: Web domain derived from the connected cluster
+
     Returns:
         Constructed workshop URL
     """
@@ -2090,26 +2204,27 @@ def construct_workshop_url(
         workshop_path = f"{ci}-{guid_suffix}"
     else:
         workshop_path = ci
-    
-    url = f"https://integration.demo.redhat.com/workshops/{namespace}/{workshop_path}"
+
+    url = f"https://{base_domain}/workshops/{namespace}/{workshop_path}"
     return url
 
-def get_landing_page_url(workshop_id: str) -> str:
+def get_landing_page_url(workshop_id: str, base_domain: str = "integration.demo.redhat.com") -> str:
     """
     Construct landing page workshop URL from workshopId.
-    
-    Pattern: https://integration.demo.redhat.com/workshop/{workshopId}
+
+    Pattern: https://{base_domain}/workshop/{workshopId}
     Example: https://integration.demo.redhat.com/workshop/m5hzmw
-    
+
     Args:
         workshop_id: Workshop ID (from label babylon.gpte.redhat.com/workshop-id)
-        
+        base_domain: Web domain derived from the connected cluster
+
     Returns:
         Landing page workshop URL
     """
     if not workshop_id:
         return ""
-    return f"https://integration.demo.redhat.com/workshop/{workshop_id}"
+    return f"https://{base_domain}/workshop/{workshop_id}"
 
 def get_workshop_urls(workshop_name: str, namespace: str, ci: str, config: RHDPConfig) -> Tuple[str, str]:
     """
@@ -2125,13 +2240,14 @@ def get_workshop_urls(workshop_name: str, namespace: str, ci: str, config: RHDPC
         Tuple of (full_workshop_url, catalog_url)
     """
     # Construct full workshop URL
+    bd = getattr(config, 'base_domain', 'integration.demo.redhat.com')
     suffix = workshop_name.split('-')[-1] if '-' in workshop_name else ""
-    full_url = construct_workshop_url(ci, namespace, suffix)
-    
+    full_url = construct_workshop_url(ci, namespace, suffix, base_domain=bd)
+
     # Get workshopId and construct landing page URL
     workshop_id = get_workshop_id(workshop_name, namespace, config)
-    landing_page_url = get_landing_page_url(workshop_id) if workshop_id else ""
-    
+    landing_page_url = get_landing_page_url(workshop_id, base_domain=bd) if workshop_id else ""
+
     return (full_url, landing_page_url)
 
 def verify_deployment(
@@ -2139,19 +2255,20 @@ def verify_deployment(
     namespace: str,
     ci: str,
     config: RHDPConfig
-) -> Tuple[bool, Optional[str]]:
+) -> Tuple[bool, Optional[str], str]:
     """
     Verify deployment by checking ResourceClaim status.
-    
+
     Args:
         guid: ResourceClaim name/GUID
         namespace: Kubernetes namespace
         ci: Catalog Item ID for URL construction
         config: RHDPConfig object
-        
+
     Returns:
-        Tuple of (is_healthy: bool, url: Optional[str])
+        Tuple of (is_healthy: bool, url: Optional[str], log_url: str)
     """
+    bd = getattr(config, 'base_domain', 'integration.demo.redhat.com')
     if config.dry_run:
         # Extract suffix from GUID if present
         suffix = ""
@@ -2159,9 +2276,9 @@ def verify_deployment(
             parts = guid.split('-')
             if len(parts) > 1:
                 suffix = parts[-1]
-        url = construct_workshop_url(ci, namespace, suffix)
+        url = construct_workshop_url(ci, namespace, suffix, base_domain=bd)
         logger.info(f"[DRY-RUN] Would verify deployment: {guid} in {namespace}")
-        return (True, url)
+        return (True, url, "")
     
     try:
         # Get ResourceClaim status
@@ -2188,35 +2305,35 @@ def verify_deployment(
             logger.warning(f"Could not get ResourceClaim {guid}: {result.stderr}")
             # Still construct URL
             suffix = guid.split('-')[-1] if '-' in guid else ""
-            url = construct_workshop_url(ci, namespace, suffix)
-            return (False, url)
-        
+            url = construct_workshop_url(ci, namespace, suffix, base_domain=bd)
+            return (False, url, "")
+
         rc_data = json.loads(result.stdout)
         status = rc_data.get('status', {})
-        
+
         # Check if healthy and ready
         healthy = status.get('healthy', False)
         ready = status.get('ready', False)
-        
+
         # Extract suffix from GUID
         suffix = guid.split('-')[-1] if '-' in guid else ""
-        url = construct_workshop_url(ci, namespace, suffix)
-        
+        url = construct_workshop_url(ci, namespace, suffix, base_domain=bd)
+
         if healthy and ready:
             logger.info(f"Deployment verification passed for {guid}: {url}")
-            return (True, url)
+            return (True, url, "")
         elif healthy:
             logger.info(f"Deployment is healthy but not ready yet for {guid}: {url}")
-            return (True, url)  # Still consider it successful if healthy
+            return (True, url, "")  # Still consider it successful if healthy
         else:
             logger.warning(f"Deployment verification failed for {guid}: {url} (healthy={healthy}, ready={ready})")
-            return (False, url)
-        
+            return (False, url, "")
+
     except Exception as e:
         logger.error(f"Verification error for {guid}: {e}")
         suffix = guid.split('-')[-1] if '-' in guid else ""
-        url = construct_workshop_url(ci, namespace, suffix)
-        return (False, url)
+        url = construct_workshop_url(ci, namespace, suffix, base_domain=bd)
+        return (False, url, "")
 
 # ============================================================================
 # QA FUNCTIONS
@@ -2419,10 +2536,11 @@ def qa1_verify_setup(
                         workshop_users_assigned = f"{assigned}/{total_seats}" if total_seats else "0/0"
                         
                         # Construct multi-workshop portal URL (not individual workshop URLs)
-                        url = f"https://integration.demo.redhat.com/multi-workshop/{namespace}/{mw_name}"
+                        _bd = getattr(config, 'base_domain', 'integration.demo.redhat.com')
+                        url = f"https://{_bd}/multi-workshop/{namespace}/{mw_name}"
                         # For multi-asset workshops, landing page URL is the same as the portal URL
                         landing_page_url = url
-                        
+
                         # Check if matches schedule (expected total seats = Instances or Users)
                         matches_schedule = True
                         issues = []
@@ -2626,9 +2744,9 @@ def qa1_verify_setup(
             else:
                 # Fallback: construct URL from ResourceClaim name
                 suffix = name.split('-')[-1] if '-' in name else ""
-                full_url = construct_workshop_url(schedule.ci, namespace, suffix)
+                full_url = construct_workshop_url(schedule.ci, namespace, suffix, base_domain=getattr(config, 'base_domain', 'integration.demo.redhat.com'))
                 catalog_url = ""
-            
+
             # Determine status
             if healthy and ready:
                 overall_status = "✅ VERIFIED"
@@ -2823,10 +2941,11 @@ def qa2_verify_deployment_status(
                         workshop_users_assigned = f"{assigned}/{total_seats}" if total_seats else "0/0"
                         
                         # Construct multi-workshop portal URL (not individual workshop URLs)
-                        url = f"https://integration.demo.redhat.com/multi-workshop/{namespace}/{mw_name}"
+                        _bd = getattr(config, 'base_domain', 'integration.demo.redhat.com')
+                        url = f"https://{_bd}/multi-workshop/{namespace}/{mw_name}"
                         # For multi-asset workshops, landing page URL is the same as the portal URL
                         landing_page_url = url
-                        
+
                         expected_total = _expected_total_seats(schedule)
                         expected_seats = expected_total if expected_total is not None else _effective_users(schedule)
                         seats_match = (expected_seats is None) or (number_seats == expected_seats)
@@ -3003,9 +3122,9 @@ def qa2_verify_deployment_status(
                 full_url, catalog_url = get_workshop_urls(workshop_name, namespace, schedule.ci, config)
             else:
                 suffix = name.split('-')[-1] if '-' in name else ""
-                full_url = construct_workshop_url(schedule.ci, namespace, suffix)
+                full_url = construct_workshop_url(schedule.ci, namespace, suffix, base_domain=getattr(config, 'base_domain', 'integration.demo.redhat.com'))
                 catalog_url = ""
-            
+
             # Determine deployment status
             if healthy and ready:
                 deployment_status = "✅ DEPLOYED & READY"
@@ -3259,7 +3378,8 @@ def process_schedule(
                 )
             
             # Construct URL for multi-workshop
-            url = f"https://integration.demo.redhat.com/multi-workshop/{schedule.namespace}/{multi_workshop_name}"
+            _bd = getattr(config, 'base_domain', 'integration.demo.redhat.com')
+            url = f"https://{_bd}/multi-workshop/{schedule.namespace}/{multi_workshop_name}"
             
             # For multi-workshop, we'll mark it as deployed (verification is more complex)
             return DeploymentResult(
@@ -3275,6 +3395,40 @@ def process_schedule(
                 timestamp=time.strftime("%Y-%m-%d %H:%M:%S")
             )
         
+        # Check if this is a multi-region workshop
+        regions = [r.strip() for r in schedule.aws_regions.split(",") if r.strip()]
+        if len(regions) >= 2:
+            logger.info(f"Multi-region workshop detected - regions: {schedule.aws_regions}")
+            workshop_name = create_multi_region_workshop(schedule, config)
+            if workshop_name:
+                url = construct_workshop_url(schedule.ci, schedule.namespace, workshop_name.split('-')[-1] if '-' in workshop_name else "", base_domain=getattr(config, 'base_domain', 'integration.demo.redhat.com'))
+                return DeploymentResult(
+                    ci_name=schedule.ci_name,
+                    ci=schedule.ci,
+                    namespace=schedule.namespace,
+                    guid=workshop_name,
+                    url=url,
+                    status="deployed_unverified",
+                    provisioning_date=schedule.provisioning_date,
+                    auto_stop=schedule.auto_stop,
+                    auto_destroy=schedule.auto_destroy,
+                    timestamp=time.strftime("%Y-%m-%d %H:%M:%S")
+                )
+            else:
+                return DeploymentResult(
+                    ci_name=schedule.ci_name,
+                    ci=schedule.ci,
+                    namespace=schedule.namespace,
+                    guid="failed",
+                    url="",
+                    status="failed",
+                    provisioning_date=schedule.provisioning_date,
+                    auto_stop=schedule.auto_stop,
+                    auto_destroy=schedule.auto_destroy,
+                    timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
+                    error_message="Failed to create multi-region workshop"
+                )
+
         # Build payload
         payload = build_resource_claim_payload(schedule)
         
@@ -3323,7 +3477,7 @@ def process_schedule(
             time.sleep(2)
         
         # Verify deployment
-        is_healthy, url = verify_deployment(guid, namespace or schedule.namespace, schedule.ci, config)
+        is_healthy, url, _log_url = verify_deployment(guid, namespace or schedule.namespace, schedule.ci, config)
         
         if is_healthy:
             status = "verified"
@@ -3333,7 +3487,7 @@ def process_schedule(
             status = "deployed_no_url"
             # Construct URL anyway
             suffix = guid.split('-')[-1] if '-' in guid else ""
-            url = construct_workshop_url(schedule.ci, schedule.namespace, suffix)
+            url = construct_workshop_url(schedule.ci, schedule.namespace, suffix, base_domain=getattr(config, 'base_domain', 'integration.demo.redhat.com'))
         
         return DeploymentResult(
             ci_name=schedule.ci_name,
@@ -3700,7 +3854,40 @@ Examples:
         choices=["1", "2", "both"],
         help="Run QA verification: '1'=verify setup (times/users), '2'=verify deployment status (seats), 'both'=run both"
     )
-    
+    parser.add_argument(
+        "--lock",
+        action="store_true",
+        help="Lock (immediately stop) all workshops matching the CSV"
+    )
+    parser.add_argument(
+        "--extend-stop",
+        action="store_true",
+        help="Extend auto-stop time for workshops matching the CSV"
+    )
+    parser.add_argument(
+        "--extend-destroy",
+        action="store_true",
+        help="Extend auto-destroy/lifespan time for workshops matching the CSV"
+    )
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=0,
+        help="Number of days to extend (used with --extend-stop or --extend-destroy)"
+    )
+    parser.add_argument(
+        "--hours",
+        type=int,
+        default=0,
+        help="Number of hours to extend (used with --extend-stop or --extend-destroy)"
+    )
+    parser.add_argument(
+        "--scale",
+        type=int,
+        default=None,
+        help="Scale workshop seat count to target value"
+    )
+
     return parser
 
 def main():
@@ -3830,14 +4017,43 @@ def main():
             if not schedules:
                 logger.error(f"No schedules found for CI: {args.ci}")
                 sys.exit(1)
-        
+
+        # Handle operations (lock, extend, scale) and exit
+        if args.lock:
+            lock_workshops(schedules, config)
+            sys.exit(0)
+        if args.extend_stop:
+            extend_stop_time(schedules, config, days=args.days, hours=args.hours)
+            sys.exit(0)
+        if args.extend_destroy:
+            extend_destroy_time(schedules, config, days=args.days, hours=args.hours)
+            sys.exit(0)
+        if args.scale is not None:
+            scale_workshops(schedules, config, target_count=args.scale)
+            sys.exit(0)
+
         if config.dry_run:
             dry_run_validate_schedules(
                 schedules, asset_passwords, asset_num_users, input_path, config
             )
-        
+
+        # Expand count > 1 into multiple schedule instances
+        expanded = []
+        for schedule in schedules:
+            count = schedule.count if schedule.count and schedule.count > 1 else 1
+            if count > 1:
+                import copy
+                for i in range(1, count + 1):
+                    clone = copy.deepcopy(schedule)
+                    clone.workshop_name = f"{schedule.workshop_name} (Instance {i})"
+                    clone.count = 1
+                    expanded.append(clone)
+            else:
+                expanded.append(schedule)
+        schedules = expanded
+
         logger.info(f"Processing {len(schedules)} schedule(s)")
-        
+
         # Process each schedule
         results = []
         for schedule in schedules:

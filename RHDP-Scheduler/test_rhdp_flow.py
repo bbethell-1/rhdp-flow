@@ -2107,13 +2107,13 @@ class TestExportStudentLandingPageCSV(unittest.TestCase):
 class TestWhiteGloveLabel(unittest.TestCase):
     """Tests for white-glove label in payloads."""
 
-    def test_white_glove_false_by_default(self):
-        """White-glove defaults to False, label is 'false'."""
+    def test_white_glove_true_by_default(self):
+        """White-glove defaults to True, label is 'true'."""
         schedule = make_schedule()
         config = make_config(dry_run=True)
         payload = build_resource_claim_payload(schedule, config)
         self.assertEqual(
-            payload["metadata"]["labels"]["demo.redhat.com/white-glove"], "false"
+            payload["metadata"]["labels"]["demo.redhat.com/white-glove"], "true"
         )
 
     def test_white_glove_true_sets_label(self):
@@ -2132,10 +2132,10 @@ class TestWhiteGloveLabel(unittest.TestCase):
         payload = build_resource_claim_payload(schedule, config)
         self.assertTrue(payload.get("_white_glove"))
 
-    def test_csv_missing_white_glove_defaults_false(self):
-        """CSV without White_Glove column still parses (backward compat)."""
+    def test_csv_missing_white_glove_defaults_true(self):
+        """CSV without White_Glove column still parses (default is True)."""
         schedules = read_csv_input(io.StringIO(BASIC_WORKSHOP_CSV))
-        self.assertFalse(schedules[0].white_glove)
+        self.assertTrue(schedules[0].white_glove)
 
 
 # ============================================================================

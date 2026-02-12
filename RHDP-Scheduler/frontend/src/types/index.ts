@@ -5,6 +5,7 @@ export interface HealthResponse {
   cluster_url: string;
   user: string;
   message: string;
+  base_domain: string;
 }
 
 export interface WorkshopSchedule {
@@ -61,6 +62,9 @@ export interface JobResponse {
 export interface DeployRequest {
   ci_filter?: string | null;
   dry_run?: boolean;
+  resource_lock?: boolean;
+  enable_resource_pools?: boolean;
+  white_glove?: boolean;
 }
 
 export interface OperationResponse {

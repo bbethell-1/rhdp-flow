@@ -36,6 +36,7 @@ from rhdp_flow import (
     extend_stop_time,
     extend_destroy_time,
     scale_workshops,
+    derive_base_domain,
 )
 
 from api.models import (
@@ -72,11 +73,46 @@ _asset_passwords: Optional[Dict[str, str]] = None
 _sessions: List[dict] = []
 _session_counter: int = 0
 
+# Cached base domain derived from the connected cluster
+_cached_base_domain: Optional[str] = None
 
-def _get_config(dry_run: bool = False) -> RHDPConfig:
+
+def _detect_and_cache_base_domain() -> str:
+    """Run `oc whoami --show-server`, derive base domain, and cache it."""
+    global _cached_base_domain
+    if _cached_base_domain is not None:
+        return _cached_base_domain
+    try:
+        env = os.environ.copy()
+        kc = os.environ.get("KUBECONFIG")
+        if kc:
+            env["KUBECONFIG"] = kc
+        r = subprocess.run(
+            ["oc", "whoami", "--show-server"],
+            capture_output=True, text=True, timeout=10, env=env,
+        )
+        if r.returncode == 0:
+            _cached_base_domain = derive_base_domain(r.stdout.strip())
+        else:
+            _cached_base_domain = "integration.demo.redhat.com"
+    except Exception:
+        _cached_base_domain = "integration.demo.redhat.com"
+    return _cached_base_domain
+
+
+def _get_config(
+    dry_run: bool = False,
+    resource_lock: bool = True,
+    enable_resource_pools: bool = False,
+    white_glove: bool = True,
+) -> RHDPConfig:
     config = RHDPConfig()
     config.dry_run = dry_run
     config.kubeconfig_path = os.environ.get("KUBECONFIG")
+    config.resource_lock = resource_lock
+    config.enable_resource_pools = enable_resource_pools
+    config.white_glove = white_glove
+    config.base_domain = _detect_and_cache_base_domain()
     return config
 
 
@@ -208,12 +244,17 @@ def health():
             capture_output=True, text=True, timeout=10, env=env,
         )
         if r_user.returncode == 0 and r_server.returncode == 0:
+            cluster_url = r_server.stdout.strip()
+            # Cache and return the derived base domain
+            global _cached_base_domain
+            _cached_base_domain = derive_base_domain(cluster_url)
             return HealthResponse(
                 status="ok",
                 oc_installed=True,
                 oc_connected=True,
-                cluster_url=r_server.stdout.strip(),
+                cluster_url=cluster_url,
                 user=r_user.stdout.strip(),
+                base_domain=_cached_base_domain,
             )
         else:
             msg_parts = []
@@ -321,7 +362,12 @@ async def deploy(body: DeployRequest = DeployRequest()):
 
     async def _run():
         try:
-            config = _get_config(dry_run=body.dry_run)
+            config = _get_config(
+                dry_run=body.dry_run,
+                resource_lock=body.resource_lock,
+                enable_resource_pools=body.enable_resource_pools,
+                white_glove=body.white_glove,
+            )
             jobs.update_job(job.job_id, status=jobs.Status.running, message="Starting deployment")
 
             # Replicate main() deploy loop logic
@@ -342,7 +388,7 @@ async def deploy(body: DeployRequest = DeployRequest()):
                 mw_name = create_multi_workshop_from_group(group_scheds, config)
                 first = group_scheds[0]
                 if mw_name:
-                    url = f"https://integration.demo.redhat.com/multi-workshop/{first.namespace}/{mw_name}"
+                    url = f"https://{config.base_domain}/multi-workshop/{first.namespace}/{mw_name}"
                     results.append(DeploymentResult(
                         ci_name=group_name, ci=first.ci, namespace=first.namespace,
                         guid=mw_name, url=url, status="deployed_unverified",
@@ -402,7 +448,12 @@ def deploy_dry_run(body: DeployRequest = DeployRequest()):
         raise HTTPException(400, "No schedules loaded. Upload a CSV first.")
 
     schedules = _filter_schedules(body.ci_filter)
-    config = _get_config(dry_run=True)
+    config = _get_config(
+        dry_run=True,
+        resource_lock=body.resource_lock,
+        enable_resource_pools=body.enable_resource_pools,
+        white_glove=body.white_glove,
+    )
 
     # Replicate main() grouping logic for accurate preview
     grouped_multi = {}
@@ -418,7 +469,7 @@ def deploy_dry_run(body: DeployRequest = DeployRequest()):
         mw_name = create_multi_workshop_from_group(group_scheds, config)
         first = group_scheds[0]
         if mw_name:
-            url = f"https://integration.demo.redhat.com/multi-workshop/{first.namespace}/{mw_name}"
+            url = f"https://{config.base_domain}/multi-workshop/{first.namespace}/{mw_name}"
             results.append(DeploymentResult(
                 ci_name=group_name, ci=first.ci, namespace=first.namespace,
                 guid=mw_name, url=url, status="deployed_unverified",

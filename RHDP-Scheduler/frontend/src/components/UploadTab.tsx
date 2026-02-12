@@ -2,11 +2,15 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   Alert,
   Button,
+  Card,
+  CardBody,
+  CardTitle,
   PageSection,
   Title,
   Progress,
   Split,
   SplitItem,
+  Switch,
   EmptyState,
   EmptyStateBody,
   FileUpload,
@@ -67,6 +71,11 @@ export const UploadTab: React.FC<Props> = ({
   const [csvFilename, setCsvFilename] = useState('');
   const [passwordFile, setPasswordFile] = useState<File | null>(null);
   const [passwordFilename, setPasswordFilename] = useState('');
+
+  // Deploy settings
+  const [resourceLock, setResourceLock] = useState(true);
+  const [enableResourcePools, setEnableResourcePools] = useState(false);
+  const [whiteGlove, setWhiteGlove] = useState(true);
 
   // Confirmation modal state
   const [showDeployConfirm, setShowDeployConfirm] = useState(false);
@@ -183,6 +192,9 @@ export const UploadTab: React.FC<Props> = ({
       setExpandedRows(new Set());
       setSkippedRows(0);
       setTotalRows(0);
+      setResourceLock(true);
+      setEnableResourcePools(false);
+      setWhiteGlove(true);
       showToast('Session cleared', 'success');
     } catch (e) {
       showToast(`Clear failed: ${e}`, 'danger');
@@ -192,7 +204,7 @@ export const UploadTab: React.FC<Props> = ({
   const handleDryRun = async () => {
     if (schedules.length === 0) { showToast('Upload a CSV first', 'danger'); return; }
     try {
-      const data = await api.dryRun({ dry_run: true });
+      const data = await api.dryRun({ dry_run: true, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove });
       setResults(data);
       showToast(`Dry-run: ${data.length} result(s)`, 'success');
     } catch (e) {
@@ -219,7 +231,7 @@ export const UploadTab: React.FC<Props> = ({
     setLogLines([]);
 
     try {
-      const job = await api.deploy({ dry_run: dryRun });
+      const job = await api.deploy({ dry_run: dryRun, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove });
       const es = api.deployStream(job.job_id);
 
       es.addEventListener('status', (e: MessageEvent) => {
@@ -401,6 +413,39 @@ export const UploadTab: React.FC<Props> = ({
               </Tbody>
             </Table>
           </div>
+
+          {/* Deploy settings */}
+          <Card isCompact style={{ marginBottom: 16 }}>
+            <CardTitle>Deploy Settings</CardTitle>
+            <CardBody>
+              <Split hasGutter>
+                <SplitItem>
+                  <Switch
+                    id="resource-lock-switch"
+                    label="Resource Lock"
+                    isChecked={resourceLock}
+                    onChange={(_e, checked) => setResourceLock(checked)}
+                  />
+                </SplitItem>
+                <SplitItem>
+                  <Switch
+                    id="resource-pools-switch"
+                    label="Enable Resource Pools"
+                    isChecked={enableResourcePools}
+                    onChange={(_e, checked) => setEnableResourcePools(checked)}
+                  />
+                </SplitItem>
+                <SplitItem>
+                  <Switch
+                    id="white-glove-switch"
+                    label="White Glove"
+                    isChecked={whiteGlove}
+                    onChange={(_e, checked) => setWhiteGlove(checked)}
+                  />
+                </SplitItem>
+              </Split>
+            </CardBody>
+          </Card>
 
           {/* Deploy buttons */}
           <Split hasGutter style={{ marginBottom: 16 }}>
