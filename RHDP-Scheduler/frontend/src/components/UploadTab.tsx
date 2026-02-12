@@ -105,10 +105,6 @@ export const UploadTab: React.FC<Props> = ({
       if (prov && prov < now)
         warns.push({ index: i, field: 'provisioning_date', message: `"${s.ci_name}" provisioning date is in the past (${s.provisioning_date})` });
 
-      // Auto-destroy before auto-stop
-      if (stop && destroy && destroy < stop)
-        warns.push({ index: i, field: 'auto_destroy', message: `"${s.ci_name}" auto-destroy (${s.auto_destroy}) is before auto-stop (${s.auto_stop})` });
-
       // Missing required dates
       if (!s.provisioning_date?.trim())
         warns.push({ index: i, field: 'provisioning_date', message: `"${s.ci_name}" is missing a provisioning date` });
