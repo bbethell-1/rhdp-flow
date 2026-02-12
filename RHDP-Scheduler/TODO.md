@@ -1,5 +1,15 @@
 # RHDP-Flow TODO List
 
+##
+
+Remove validaiton warning on auto-stop
+
+validate csv when uploaded?
+
+ensure namespace exists / validate it 
+
+
+
 ## Testing
 
 - [x] Test multi-asset with `Multi_Asset=True` + `Asset_CIs` (old format) vs grouped rows with `Multi_Workshop_Name` (new format) — verify both paths produce correct results and that per-item passwords work in both cases (5 tests: shared password, asset parsing, per-item password propagation, mixed concurrency, graceful degradation)
