@@ -18,29 +18,26 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 # 4. Frontend
-cd frontend && npm install && cd ..
+cd frontend && npm install && npm run build && cd ..
 
-# 5. Run (two terminals)
-# Terminal 1 — API (port 8000)
-source .venv/bin/activate
+# 5. Run
 python3 -m uvicorn api.server:app --host 127.0.0.1 --port 8000
-
-# Terminal 2 — Frontend (port 5173, proxies /api → backend)
-cd frontend && npm run dev
 ```
 
-Open **http://localhost:5173** in your browser.
+Open **http://localhost:8000** in your browser.
 
 ## Features
 
 - **Web UI** — React/PatternFly 6 frontend with five tabs: Upload & Deploy, Deployments, Operations, QA, Students
 - **CSV Input** — Drag-and-drop CSV upload with inline validation warnings
 - **Dry-Run Mode** — Preview JSON payloads without creating real resources
+- **Deploy Settings** — Configurable Resource Lock, Resource Pools, and White Glove toggles with sensible defaults
+- **Cluster-Aware URLs** — Workshop and landing page URLs automatically use the domain derived from the connected cluster
 - **Multi-Asset Workshops** — Group multiple CIs into a single MultiWorkshop
 - **Per-Asset Passwords** — Override passwords per CI via companion CSV
 - **Operations** — Lock, extend (stop/destroy), and scale running workshops
 - **QA Verification** — Verify setup (dates/users) and deployment health (seats/URLs)
-- **Results Export** — CSV export with GUIDs and student landing page URLs
+- **Results Export** — CSV export with GUIDs and student landing page URLs; clickable hyperlinks in Deployments and Students tabs
 - **CLI** — Direct command-line deployment and an interactive wizard (`--wizard`)
 - **Risk Prevention** — 13 built-in safeguards (confirmation modals, date validation, live-mode warnings). See [docs/RISK-PREVENTION.md](docs/RISK-PREVENTION.md) for details and screenshots.
 
@@ -137,6 +134,20 @@ oc login https://api.your-cluster.example.com:6443 --token=sha256~your-token
 oc whoami   # should show your user
 ```
 
+### Production Mode (single server)
+
+Build the frontend once, then run the API server — it serves both the API and the built React app:
+
+```bash
+cd frontend && npm run build && cd ..
+source .venv/bin/activate
+python3 -m uvicorn api.server:app --host 127.0.0.1 --port 8000
+```
+
+Open **http://localhost:8000** in your browser.
+
+### Development Mode (two terminals)
+
 Open **two terminals** from the `RHDP-Scheduler` directory:
 
 **Terminal 1 — API server** (port 8000):
@@ -153,7 +164,21 @@ cd frontend
 npm run dev
 ```
 
-Open **http://localhost:5173** in your browser. The masthead shows a green "Connected" badge when the backend and cluster are reachable.
+Open **http://localhost:5173** in your browser.
+
+The masthead shows a green "Connected" badge when the backend and cluster are reachable. Workshop URLs are automatically derived from the connected cluster (e.g., `integration.demo.redhat.com` from `api.integration.demo.redhat.com:6443`).
+
+### Deploy Settings
+
+After uploading a CSV, the **Deploy Settings** card appears with three toggles:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Resource Lock | On | Apply `demo.redhat.com/resource-lock` label to prevent accidental deletion |
+| Enable Resource Pools | Off | Enable Poolboy resource pool allocation |
+| White Glove | On | Apply white-glove label for managed workshops |
+
+![Deploy Settings](docs/images/13-deploy-settings-toggles.png)
 
 ## CSV Format
 

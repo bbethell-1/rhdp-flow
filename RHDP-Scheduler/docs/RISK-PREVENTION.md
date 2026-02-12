@@ -22,6 +22,7 @@ All screenshots are in [`docs/images/`](images/) and show the features described
 | [10-qa-tab-guidance-cards.png](images/10-qa-tab-guidance-cards.png) | QA tab: info banner, blue hints, QA1/QA2 explanation cards (Item 13) |
 | [11-deployments-summary-cards.png](images/11-deployments-summary-cards.png) | Deployments: summary cards, search, status filter, auto-refresh |
 | [12-deployments-light-mode.png](images/12-deployments-light-mode.png) | Light mode theme view |
+| [13-deploy-settings-toggles.png](images/13-deploy-settings-toggles.png) | Deploy settings: Resource Lock, Resource Pools, White Glove toggles |
 
 ---
 
