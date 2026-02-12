@@ -58,9 +58,13 @@ async def generic_error_handler(request: Request, exc: Exception):
 
 
 # ---------------------------------------------------------------------------
-# Static files — serve web/ at root (must be last so API routes take priority)
+# Static files — serve frontend/dist/ (React build) or web/ (legacy) at root
 # ---------------------------------------------------------------------------
 
+_frontend_dist = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 _web_dir = os.path.join(os.path.dirname(__file__), "..", "web")
-if os.path.isdir(_web_dir):
-    app.mount("/", StaticFiles(directory=_web_dir, html=True), name="static")
+_static_dir = _frontend_dist if os.path.isdir(_frontend_dist) else _web_dir
+import logging as _logging
+_logging.getLogger("rhdp_flow.api").info(f"Static files: {os.path.abspath(_static_dir)}")
+if os.path.isdir(_static_dir):
+    app.mount("/", StaticFiles(directory=_static_dir, html=True), name="static")
