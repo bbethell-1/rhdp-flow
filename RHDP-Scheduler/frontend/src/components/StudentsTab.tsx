@@ -59,14 +59,16 @@ export const StudentsTab: React.FC<Props> = ({ qaResults }) => {
         </SplitItem>
         <SplitItem isFilled />
         <SplitItem>
-          <Button
-            variant="secondary"
-            component="a"
-            href={api.exportStudentsURL}
-            isDisabled={students.length === 0}
-          >
-            Download CSV
-          </Button>
+          <Tooltip content="Export all student landing page URLs as a CSV file for distribution">
+            <Button
+              variant="secondary"
+              component="a"
+              href={api.exportStudentsURL}
+              isDisabled={students.length === 0}
+            >
+              Download CSV
+            </Button>
+          </Tooltip>
         </SplitItem>
       </Split>
 
@@ -75,9 +77,9 @@ export const StudentsTab: React.FC<Props> = ({ qaResults }) => {
         <Table aria-label="Student landing pages" variant="compact" className="fixed-table" isStickyHeader>
           <Thead>
             <Tr>
-              <Th sort={getSortParams('ci_name')}>CI Name</Th>
-              <Th>Landing Page URL</Th>
-              <Th sort={getSortParams('status')}>Status</Th>
+              <Th sort={getSortParams('ci_name')} info={{ tooltip: 'Catalog Item display name' }}>CI Name</Th>
+              <Th info={{ tooltip: 'Student-facing URL for accessing the workshop' }}>Landing Page URL</Th>
+              <Th sort={getSortParams('status')} info={{ tooltip: 'QA verification status for this workshop' }}>Status</Th>
             </Tr>
           </Thead>
           <Tbody>

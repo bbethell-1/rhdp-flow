@@ -19,6 +19,7 @@ import {
   ModalHeader,
   ModalFooter,
   SearchInput,
+  Tooltip,
 } from '@patternfly/react-core';
 import { Table, Thead, Tbody, Tr, Th, Td, ExpandableRowContent } from '@patternfly/react-table';
 import UploadIcon from '@patternfly/react-icons/dist/esm/icons/upload-icon';
@@ -534,36 +535,44 @@ export const UploadTab: React.FC<Props> = ({
             <CardBody>
               <Split hasGutter>
                 <SplitItem>
-                  <Switch
-                    id="resource-lock-switch"
-                    label="Lock UI Admin Settings"
-                    isChecked={resourceLock}
-                    onChange={(_e, checked) => setResourceLock(checked)}
-                  />
+                  <Tooltip content="Prevents non-admin users from modifying resource settings in the RHDP UI. Sets the demo.redhat.com/lock-enabled label.">
+                    <Switch
+                      id="resource-lock-switch"
+                      label="Lock UI Admin Settings"
+                      isChecked={resourceLock}
+                      onChange={(_e, checked) => setResourceLock(checked)}
+                    />
+                  </Tooltip>
                 </SplitItem>
                 <SplitItem>
-                  <Switch
-                    id="resource-pools-switch"
-                    label="Enable Resource Pools"
-                    isChecked={enableResourcePools}
-                    onChange={(_e, checked) => setEnableResourcePools(checked)}
-                  />
+                  <Tooltip content="Enable Poolboy resource pool allocation for flexible resource sharing across workshops. Leave off for dedicated per-workshop resources.">
+                    <Switch
+                      id="resource-pools-switch"
+                      label="Enable Resource Pools"
+                      isChecked={enableResourcePools}
+                      onChange={(_e, checked) => setEnableResourcePools(checked)}
+                    />
+                  </Tooltip>
                 </SplitItem>
                 <SplitItem>
-                  <Switch
-                    id="white-glove-switch"
-                    label="White Glove"
-                    isChecked={whiteGlove}
-                    onChange={(_e, checked) => setWhiteGlove(checked)}
-                  />
+                  <Tooltip content="Mark workshops as fully managed and pre-configured. Applies the white-glove label for managed delivery.">
+                    <Switch
+                      id="white-glove-switch"
+                      label="White Glove"
+                      isChecked={whiteGlove}
+                      onChange={(_e, checked) => setWhiteGlove(checked)}
+                    />
+                  </Tooltip>
                 </SplitItem>
                 <SplitItem>
-                  <Switch
-                    id="redirect-switch"
-                    label="Redirect"
-                    isChecked={redirect}
-                    onChange={(_e, checked) => setRedirect(checked)}
-                  />
+                  <Tooltip content="Automatically redirect students to the lab UI after they log in to the workshop.">
+                    <Switch
+                      id="redirect-switch"
+                      label="Redirect"
+                      isChecked={redirect}
+                      onChange={(_e, checked) => setRedirect(checked)}
+                    />
+                  </Tooltip>
                 </SplitItem>
               </Split>
             </CardBody>

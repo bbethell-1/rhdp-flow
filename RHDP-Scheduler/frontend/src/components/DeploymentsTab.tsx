@@ -219,36 +219,44 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
       {results.length > 0 && (
         <Flex style={{ marginBottom: 16 }} gap={{ default: 'gapMd' }}>
           <FlexItem>
-            <Card isCompact isPlain>
-              <CardBody>
-                <div className="summary-card-value">{statusCounts.total}</div>
-                <div className="summary-card-label">Total</div>
-              </CardBody>
-            </Card>
+            <Tooltip content="Total number of deployment results across all statuses">
+              <Card isCompact isPlain>
+                <CardBody>
+                  <div className="summary-card-value">{statusCounts.total}</div>
+                  <div className="summary-card-label">Total</div>
+                </CardBody>
+              </Card>
+            </Tooltip>
           </FlexItem>
           <FlexItem>
-            <Card isCompact isPlain>
-              <CardBody>
-                <div className="summary-card-value status-verified">{statusCounts.verified}</div>
-                <div className="summary-card-label">Verified</div>
-              </CardBody>
-            </Card>
+            <Tooltip content="Deployed and confirmed healthy via QA verification">
+              <Card isCompact isPlain>
+                <CardBody>
+                  <div className="summary-card-value status-verified">{statusCounts.verified}</div>
+                  <div className="summary-card-label">Verified</div>
+                </CardBody>
+              </Card>
+            </Tooltip>
           </FlexItem>
           <FlexItem>
-            <Card isCompact isPlain>
-              <CardBody>
-                <div className="summary-card-value status-deployed_unverified">{statusCounts.unverified}</div>
-                <div className="summary-card-label">Unverified</div>
-              </CardBody>
-            </Card>
+            <Tooltip content="Deployed successfully but not yet verified by QA checks">
+              <Card isCompact isPlain>
+                <CardBody>
+                  <div className="summary-card-value status-deployed_unverified">{statusCounts.unverified}</div>
+                  <div className="summary-card-label">Unverified</div>
+                </CardBody>
+              </Card>
+            </Tooltip>
           </FlexItem>
           <FlexItem>
-            <Card isCompact isPlain>
-              <CardBody>
-                <div className="summary-card-value status-failed">{statusCounts.failed}</div>
-                <div className="summary-card-label">Failed</div>
-              </CardBody>
-            </Card>
+            <Tooltip content="Deployment encountered an error — check the Error column for details">
+              <Card isCompact isPlain>
+                <CardBody>
+                  <div className="summary-card-value status-failed">{statusCounts.failed}</div>
+                  <div className="summary-card-label">Failed</div>
+                </CardBody>
+              </Card>
+            </Tooltip>
           </FlexItem>
         </Flex>
       )}
@@ -280,12 +288,14 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
 
       <Split hasGutter style={{ marginBottom: 16, alignItems: 'center' }}>
         <SplitItem>
-          <Switch
-            id="auto-refresh-switch"
-            label="Auto-refresh (15s)"
-            isChecked={autoRefresh}
-            onChange={(_e, checked) => setAutoRefresh(checked)}
-          />
+          <Tooltip content="Automatically poll for updated deployment results every 15 seconds">
+            <Switch
+              id="auto-refresh-switch"
+              label="Auto-refresh (15s)"
+              isChecked={autoRefresh}
+              onChange={(_e, checked) => setAutoRefresh(checked)}
+            />
+          </Tooltip>
         </SplitItem>
         <SplitItem isFilled />
         <SplitItem>
@@ -328,10 +338,10 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
                     isSelected: paginatedResults.length > 0 && paginatedResults.every(r => selectedRows.has(r.ci_name)),
                   }}
                 />
-                <Th sort={getSortParams('ci_name')}>CI Name</Th>
-                <Th sort={getSortParams('ci')}>CI</Th>
-                <Th sort={getSortParams('namespace')}>Namespace</Th>
-                <Th>GUID</Th>
+                <Th sort={getSortParams('ci_name')} info={{ tooltip: 'Catalog Item display name' }}>CI Name</Th>
+                <Th sort={getSortParams('ci')} info={{ tooltip: 'Catalog Item identifier (vendor.item.env)' }}>CI</Th>
+                <Th sort={getSortParams('namespace')} info={{ tooltip: 'OpenShift namespace where resources are deployed' }}>Namespace</Th>
+                <Th info={{ tooltip: 'Globally Unique Identifier for this deployment instance' }}>GUID</Th>
                 <Th sort={getSortParams('status')}>Status</Th>
                 <Th>URL</Th>
                 <Th>Prov. Date (UTC)</Th>

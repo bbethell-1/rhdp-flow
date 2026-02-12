@@ -18,6 +18,7 @@ import {
   ModalBody,
   ModalHeader,
   ModalFooter,
+  Tooltip,
 } from '@patternfly/react-core';
 import { Table, Thead, Tbody, Tr, Th, Td } from '@patternfly/react-table';
 
@@ -308,7 +309,7 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
 
         {/* Extend Stop */}
         <Card isFullHeight>
-          <CardTitle>Extend Stop Time</CardTitle>
+          <CardTitle><Tooltip content="Push back the time when workshops automatically stop running. Workshops can be restarted after stop."><span>Extend Stop Time</span></Tooltip></CardTitle>
           <CardBody>
             <CIFilter options={ciOptions} value={extStopFilter} onChange={setExtStopFilter} id="ext-stop-ci-filter" />
             <div className="ops-number-row">
@@ -349,7 +350,7 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
 
         {/* Extend Destroy */}
         <Card isFullHeight>
-          <CardTitle>Extend Destroy Time</CardTitle>
+          <CardTitle><Tooltip content="Push back the time when workshop resources are permanently destroyed and cleaned up. This cannot be reversed after the deadline."><span>Extend Destroy Time</span></Tooltip></CardTitle>
           <CardBody>
             <CIFilter options={ciOptions} value={extDestroyFilter} onChange={setExtDestroyFilter} id="ext-destroy-ci-filter" />
             <div className="ops-number-row">
@@ -390,7 +391,7 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
 
         {/* Scale */}
         <Card isFullHeight>
-          <CardTitle>Scale Workshops</CardTitle>
+          <CardTitle><Tooltip content="Change the number of running workshop seat instances. Scale to 0 to remove all instances."><span>Scale Workshops</span></Tooltip></CardTitle>
           <CardBody>
             <CIFilter options={ciOptions} value={scaleFilter} onChange={setScaleFilter} id="scale-ci-filter" />
             <div className="ops-number-row">
@@ -403,7 +404,7 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
                 widthChars={4}
                 aria-label="Target count"
               />
-              <span>target count</span>
+              <Tooltip content="Number of workshop seat instances to provision"><span>target count</span></Tooltip>
             </div>
             <Button
               variant="primary"

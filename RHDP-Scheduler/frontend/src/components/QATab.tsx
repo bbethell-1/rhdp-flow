@@ -16,6 +16,7 @@ import {
   Label,
   Switch,
   Title,
+  Tooltip,
 } from '@patternfly/react-core';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { Table, Thead, Tbody, Tr, Th, Td, ThProps } from '@patternfly/react-table';
@@ -132,12 +133,14 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
           <Button variant="secondary" onClick={handleRefresh}>Refresh</Button>
         </SplitItem>
         <SplitItem>
-          <Switch
-            id="qa-auto-refresh"
-            label="Auto-refresh (15s)"
-            isChecked={autoRefresh}
-            onChange={(_e, checked) => setAutoRefresh(checked)}
-          />
+          <Tooltip content="Automatically poll for updated QA results every 15 seconds">
+            <Switch
+              id="qa-auto-refresh"
+              label="Auto-refresh (15s)"
+              isChecked={autoRefresh}
+              onChange={(_e, checked) => setAutoRefresh(checked)}
+            />
+          </Tooltip>
         </SplitItem>
         {qaResults.length > 0 && (
           <SplitItem>
@@ -252,13 +255,13 @@ const QAResultsTable: React.FC<{
       <Table aria-label="QA results" variant="compact" className="fixed-table" isStickyHeader>
         <Thead>
           <Tr>
-            <Th sort={getSortParams('ci_name')}>CI Name</Th>
-            <Th sort={getSortParams('ci')}>CI</Th>
-            <Th sort={getSortParams('status')}>Status</Th>
-            <Th>Deployed</Th>
-            <Th>Healthy</Th>
-            <Th>Seats</Th>
-            <Th>Landing Page URL</Th>
+            <Th sort={getSortParams('ci_name')} info={{ tooltip: 'Catalog Item display name' }}>CI Name</Th>
+            <Th sort={getSortParams('ci')} info={{ tooltip: 'Catalog Item identifier (vendor.item.env)' }}>CI</Th>
+            <Th sort={getSortParams('status')} info={{ tooltip: 'QA verification result: verified or failed' }}>Status</Th>
+            <Th info={{ tooltip: 'Whether the workshop was successfully deployed and running' }}>Deployed</Th>
+            <Th info={{ tooltip: 'Whether the deployed workshop passed health checks' }}>Healthy</Th>
+            <Th info={{ tooltip: 'Expected seats (from CSV) / Actual seats (provisioned)' }}>Seats</Th>
+            <Th info={{ tooltip: 'Student-facing URL for accessing the workshop — also available in the Students tab' }}>Landing Page URL</Th>
           </Tr>
         </Thead>
         <Tbody>

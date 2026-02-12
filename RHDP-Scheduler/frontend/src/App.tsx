@@ -19,6 +19,7 @@ import {
   Modal,
   ModalBody,
   ModalHeader,
+  Tooltip,
 } from '@patternfly/react-core';
 
 import type {
@@ -139,19 +140,25 @@ const App: React.FC = () => {
           <ToolbarContent>
             <ToolbarItem>
               <div className="masthead-controls">
-                <Checkbox
-                  label="Dry-Run Mode"
-                  isChecked={dryRun}
-                  onChange={(_e, checked) => setDryRun(checked)}
-                  id="globalDryRun"
-                />
+                <Tooltip content="When enabled, deployments preview JSON payloads without provisioning real resources. Disable for live deployments.">
+                  <Checkbox
+                    label="Dry-Run Mode"
+                    isChecked={dryRun}
+                    onChange={(_e, checked) => setDryRun(checked)}
+                    id="globalDryRun"
+                  />
+                </Tooltip>
                 <HealthBadge />
-                <span className="tz-indicator">
-                  Times in UTC | You: {Intl.DateTimeFormat().resolvedOptions().timeZone}
-                </span>
-                <button className="theme-toggle" onClick={toggleTheme}>
-                  {theme === 'dark' ? 'Light mode' : 'Dark mode'}
-                </button>
+                <Tooltip content="All schedule and deployment times are displayed in UTC. Your local timezone is shown for reference.">
+                  <span className="tz-indicator">
+                    Times in UTC | You: {Intl.DateTimeFormat().resolvedOptions().timeZone}
+                  </span>
+                </Tooltip>
+                <Tooltip content="Toggle between light and dark theme">
+                  <button className="theme-toggle" onClick={toggleTheme}>
+                    {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+                  </button>
+                </Tooltip>
               </div>
             </ToolbarItem>
           </ToolbarContent>
