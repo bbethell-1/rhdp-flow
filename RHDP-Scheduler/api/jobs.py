@@ -78,6 +78,8 @@ def update_job(
 
 async def event_generator(job_id: str):
     """Async generator yielding SSE events for a job."""
+    from api.server import is_shutting_down
+
     job = _jobs.get(job_id)
     if job is None:
         yield ServerSentEvent(data='{"error": "job not found"}', event="error")
@@ -85,6 +87,9 @@ async def event_generator(job_id: str):
     # Send current state immediately
     yield ServerSentEvent(data=_serialize(job), event="status")
     while job.status in (Status.pending, Status.running):
+        if is_shutting_down():
+            yield ServerSentEvent(data='{"message": "server shutting down"}', event="closing")
+            return
         try:
             data = await asyncio.wait_for(job._events.get(), timeout=30)
             yield ServerSentEvent(data=_serialize_dict(data), event="status")

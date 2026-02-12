@@ -6,6 +6,7 @@ export interface HealthResponse {
   user: string;
   message: string;
   base_domain: string;
+  rhdp_api_reachable: boolean;
 }
 
 export interface WorkshopSchedule {
@@ -93,6 +94,15 @@ export interface QARequest {
   type: '1' | '2' | 'both';
 }
 
+export interface RetryRequest {
+  ci_names: string[];
+  dry_run?: boolean;
+  resource_lock?: boolean;
+  enable_resource_pools?: boolean;
+  white_glove?: boolean;
+  redirect?: boolean;
+}
+
 export interface QAResponse {
   count: number;
   results: QAResult[];
@@ -108,6 +118,21 @@ export interface QAResult {
   actual_seats: number;
   landing_page_url: string;
   [key: string]: unknown;
+}
+
+export interface DiffEntry {
+  ci_name: string;
+  ci: string;
+  namespace: string;
+  change: 'added' | 'removed' | 'changed';
+  details: string;
+}
+
+export interface DiffResponse {
+  added: DiffEntry[];
+  removed: DiffEntry[];
+  changed: DiffEntry[];
+  unchanged: number;
 }
 
 export interface SessionSummary {

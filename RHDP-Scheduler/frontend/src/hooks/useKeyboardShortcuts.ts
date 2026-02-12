@@ -1,0 +1,43 @@
+import { useEffect } from 'react';
+
+/**
+ * Keyboard shortcuts for tab navigation and help.
+ * @param onTabChange - callback to switch tabs (1-5)
+ * @param onHelp - callback to toggle help overlay
+ */
+export function useKeyboardShortcuts(
+  onTabChange: (tab: string) => void,
+  onHelp: () => void,
+) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Ignore when typing in an input, textarea, or select
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      switch (e.key) {
+        case '1':
+          onTabChange('upload');
+          break;
+        case '2':
+          onTabChange('deployments');
+          break;
+        case '3':
+          onTabChange('operations');
+          break;
+        case '4':
+          onTabChange('qa');
+          break;
+        case '5':
+          onTabChange('students');
+          break;
+        case '?':
+          onHelp();
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onTabChange, onHelp]);
+}

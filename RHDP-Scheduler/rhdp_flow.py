@@ -826,11 +826,7 @@ def create_resource_claim_via_oc(
     
     if config.dry_run:
         logger.info(f"[DRY-RUN] Would create ResourceClaim in namespace {namespace}:")
-        print("\n" + "=" * 70)
-        print(f"ResourceClaim Payload:")
-        print("=" * 70)
-        print(json.dumps(payload, indent=2))
-        print("=" * 70 + "\n")
+        logger.debug("ResourceClaim Payload:\n%s", json.dumps(payload, indent=2))
         
         # Return a mock GUID for dry-run
         mock_guid = f"{generate_name}dryrun-{int(time.time())}"
@@ -1100,11 +1096,7 @@ def create_workshop_with_ui(
         pv = resourceclaim_payload['spec']['provider'].get('parameterValues', {})
         has_num_users = 'num_users' in pv
         logger.info(f"[DRY-RUN] Would create Workshop for {ci} (num_users in payload: {has_num_users})")
-        print("\n" + "=" * 70)
-        print("Workshop payload (spec only):")
-        print("=" * 70)
-        print(json.dumps(resourceclaim_payload.get('spec', resourceclaim_payload), indent=2))
-        print("=" * 70 + "\n")
+        logger.debug("Workshop payload (spec only):\n%s", json.dumps(resourceclaim_payload.get('spec', resourceclaim_payload), indent=2))
         prefix = workshop_name_or_prefix.rstrip('-') if workshop_name_or_prefix.endswith('-') else workshop_name_or_prefix
         return f"{prefix}-dryrun-{int(time.time())}"
     try:
@@ -1779,9 +1771,7 @@ def create_multi_workshop(
                     },
                 }
                 logger.info("[DRY-RUN] Sample asset payload (first asset):")
-                print("\n" + "=" * 70)
-                print(json.dumps(sample_payload, indent=2))
-                print("=" * 70 + "\n")
+                logger.debug("Sample asset payload:\n%s", json.dumps(sample_payload, indent=2))
         mock_name = schedule.multi_workshop_name or f"automation-dryrun"
         logger.info(f"[DRY-RUN] Would create MultiWorkshop and {len(asset_ci_list)} asset workshops (no resources created)")
         return mock_name

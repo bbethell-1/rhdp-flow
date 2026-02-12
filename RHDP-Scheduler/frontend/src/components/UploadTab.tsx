@@ -18,11 +18,13 @@ import {
   ModalBody,
   ModalHeader,
   ModalFooter,
+  SearchInput,
 } from '@patternfly/react-core';
 import { Table, Thead, Tbody, Tr, Th, Td, ExpandableRowContent } from '@patternfly/react-table';
 import UploadIcon from '@patternfly/react-icons/dist/esm/icons/upload-icon';
 
 import { api } from '../services/api';
+import { DiffView } from './DiffView';
 import type { WorkshopSchedule, DeploymentResult } from '../types';
 
 /* ── Schedule date validation helpers ── */
@@ -87,6 +89,9 @@ export const UploadTab: React.FC<Props> = ({
 
   // Expandable rows state
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
+
+  // Search filter for schedule preview
+  const [previewSearch, setPreviewSearch] = useState('');
 
   // ── Schedule validation warnings ──
   const warnings = useMemo(() => {
@@ -159,6 +164,20 @@ export const UploadTab: React.FC<Props> = ({
   }, [schedules]);
 
   const warningRowIndices = useMemo(() => new Set(warnings.map(w => w.index)), [warnings]);
+
+  // Filtered schedules for preview search
+  const filteredSchedules = useMemo(() => {
+    if (!previewSearch) return schedules.map((s, i) => ({ s, i }));
+    const q = previewSearch.toLowerCase();
+    return schedules
+      .map((s, i) => ({ s, i }))
+      .filter(({ s }) =>
+        s.ci_name.toLowerCase().includes(q) ||
+        s.ci.toLowerCase().includes(q) ||
+        s.namespace.toLowerCase().includes(q) ||
+        s.workshop_name.toLowerCase().includes(q)
+      );
+  }, [schedules, previewSearch]);
   const hasMultiAsset = schedules.some(s => s.is_multi_asset);
   const needsPasswordWarning = hasMultiAsset && passwordCount === null;
 
@@ -287,10 +306,39 @@ export const UploadTab: React.FC<Props> = ({
         }
       });
 
+      // Auto-reconnect with exponential backoff
+      let retryCount = 0;
+      const maxRetries = 5;
       es.addEventListener('error', () => {
         es.close();
-        setDeploying(false);
-        showToast('Connection lost during deploy', 'danger');
+        if (retryCount < maxRetries) {
+          retryCount++;
+          const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 16000);
+          appendLog(`SSE connection lost, reconnecting in ${delay / 1000}s (attempt ${retryCount}/${maxRetries})...`);
+          setTimeout(() => {
+            const retryEs = api.deployStream(job.job_id);
+            retryEs.addEventListener('status', (e: MessageEvent) => {
+              const d = JSON.parse(e.data);
+              setProgress(d.progress);
+              setProgressMsg(d.message || '');
+              if (d.message) appendLog(d.message);
+              if (d.status === 'completed' || d.status === 'failed') {
+                retryEs.close();
+                setDeploying(false);
+                if (d.status === 'completed') {
+                  showToast('Deployment completed', 'success');
+                  api.deployResults().then(r => setResults(r)).catch(() => {});
+                } else {
+                  showToast(`Deployment failed: ${d.error || 'unknown'}`, 'danger');
+                }
+              }
+            });
+            retryEs.addEventListener('error', () => { retryEs.close(); });
+          }, delay);
+        } else {
+          setDeploying(false);
+          showToast('Connection lost during deploy (max retries exceeded)', 'danger');
+        }
       });
     } catch (e) {
       setDeploying(false);
@@ -353,9 +401,28 @@ export const UploadTab: React.FC<Props> = ({
       {/* Schedule preview */}
       {schedules.length > 0 ? (
         <>
-          <Title headingLevel="h3" style={{ marginBottom: 8 }}>
-            Schedule Preview ({schedules.length})
-          </Title>
+          <Split hasGutter style={{ marginBottom: 8, alignItems: 'center' }}>
+            <SplitItem>
+              <Title headingLevel="h3">
+                Schedule Preview ({previewSearch ? `${filteredSchedules.length} of ${schedules.length}` : schedules.length})
+              </Title>
+            </SplitItem>
+            <SplitItem isFilled />
+            <SplitItem>
+              <SearchInput
+                placeholder="Search schedules..."
+                value={previewSearch}
+                onChange={(_e, val) => setPreviewSearch(val)}
+                onClear={() => setPreviewSearch('')}
+                style={{ width: 220 }}
+              />
+            </SplitItem>
+            <SplitItem>
+              <Button variant="link" component="a" href={api.templateURL}>
+                Download CSV Template
+              </Button>
+            </SplitItem>
+          </Split>
 
           {/* Skipped rows warning */}
           {skippedRows > 0 && (
@@ -394,8 +461,8 @@ export const UploadTab: React.FC<Props> = ({
             Your local timezone: {Intl.DateTimeFormat().resolvedOptions().timeZone}. Ensure CSV dates are entered in UTC.
           </Alert>
 
-          <div className="table-scroll-wrapper">
-            <Table aria-label="Schedule preview" variant="compact" className="fixed-table">
+          <div className="table-sticky-wrapper">
+            <Table aria-label="Schedule preview" variant="compact" className="fixed-table" isStickyHeader>
               <Thead>
                 <Tr>
                   <Th />
@@ -412,7 +479,7 @@ export const UploadTab: React.FC<Props> = ({
                 </Tr>
               </Thead>
               <Tbody>
-                {schedules.map((s, i) => (
+                {filteredSchedules.map(({ s, i }) => (
                   <>
                     <Tr key={`row-${i}`} className={warningRowIndices.has(i) ? 'warning-row' : undefined}>
                       <Td
@@ -429,9 +496,9 @@ export const UploadTab: React.FC<Props> = ({
                       <Td dataLabel="Users">{s.users ?? '-'}</Td>
                       <Td dataLabel="Instances">{s.instances ?? '-'}</Td>
                       <Td dataLabel="UI">{s.enable_workshop_interface ? 'Yes' : 'No'}</Td>
-                      <Td dataLabel="Prov. Date (UTC)">{s.provisioning_date}</Td>
-                      <Td dataLabel="Auto-Stop (UTC)">{s.auto_stop}</Td>
-                      <Td dataLabel="Auto-Destroy (UTC)">{s.auto_destroy}</Td>
+                      <Td dataLabel="Prov. Date (UTC)" className="date-cell">{s.provisioning_date}</Td>
+                      <Td dataLabel="Auto-Stop (UTC)" className="date-cell">{s.auto_stop}</Td>
+                      <Td dataLabel="Auto-Destroy (UTC)" className="date-cell">{s.auto_destroy}</Td>
                     </Tr>
                     {expandedRows.has(i) && (
                       <Tr key={`detail-${i}`} isExpanded>
@@ -513,6 +580,9 @@ export const UploadTab: React.FC<Props> = ({
               </Button>
             </SplitItem>
           </Split>
+
+          {/* Diff view */}
+          <DiffView hasSchedules={schedules.length > 0} showToast={showToast} />
         </>
       ) : (
         <EmptyState titleText="No schedules loaded" headingLevel="h3" icon={UploadIcon}>

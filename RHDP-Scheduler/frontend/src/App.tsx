@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   Page,
   Masthead,
@@ -16,6 +16,9 @@ import {
   Checkbox,
   Alert,
   Badge,
+  Modal,
+  ModalBody,
+  ModalHeader,
 } from '@patternfly/react-core';
 
 import type {
@@ -26,6 +29,7 @@ import type {
 
 import { api } from './services/api';
 import { useTheme } from './hooks/useTheme';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { HealthBadge } from './components/HealthBadge';
 import { SessionHistory } from './components/SessionHistory';
 import { UploadTab } from './components/UploadTab';
@@ -34,15 +38,23 @@ import { OperationsTab } from './components/OperationsTab';
 import { QATab } from './components/QATab';
 import { StudentsTab } from './components/StudentsTab';
 
+const VALID_TABS = ['upload', 'deployments', 'operations', 'qa', 'students'];
+
+function getTabFromHash(): string {
+  const hash = window.location.hash.replace('#', '');
+  return VALID_TABS.includes(hash) ? hash : 'upload';
+}
+
 const App: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
-  const [activeTab, setActiveTab] = useState<string | number>('upload');
+  const [activeTab, setActiveTab] = useState<string | number>(getTabFromHash);
   const [dryRun, setDryRun] = useState(true);
   const [schedules, setSchedules] = useState<WorkshopSchedule[]>([]);
   const [results, setResults] = useState<DeploymentResult[]>([]);
   const [qaResults, setQAResults] = useState<QAResult[]>([]);
   const [viewingSession, setViewingSession] = useState(false);
   const [toast, setToast] = useState<{ msg: string; variant: 'success' | 'danger' | 'info' } | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
 
   const toastTimer = useRef<ReturnType<typeof setTimeout>>();
 
@@ -86,6 +98,32 @@ const App: React.FC = () => {
   }, []);
 
   const studentsCount = qaResults.filter(r => r.landing_page_url).length;
+
+  // Update document title and URL hash based on active tab
+  useEffect(() => {
+    const tabNames: Record<string, string> = {
+      upload: 'Upload & Deploy',
+      deployments: 'Deployments',
+      operations: 'Operations',
+      qa: 'QA',
+      students: 'Students',
+    };
+    const name = tabNames[String(activeTab)] || 'Upload & Deploy';
+    document.title = `RHDP-Flow | ${name}`;
+    window.history.replaceState(null, '', `#${activeTab}`);
+  }, [activeTab]);
+
+  // Listen for browser back/forward to update active tab
+  useEffect(() => {
+    const handler = () => setActiveTab(getTabFromHash());
+    window.addEventListener('hashchange', handler);
+    return () => window.removeEventListener('hashchange', handler);
+  }, []);
+
+  // Keyboard shortcuts
+  const handleTabShortcut = useCallback((tab: string) => setActiveTab(tab), []);
+  const handleHelpToggle = useCallback(() => setShowHelp(prev => !prev), []);
+  useKeyboardShortcuts(handleTabShortcut, handleHelpToggle);
 
   const masthead = (
     <Masthead className={dryRun ? undefined : 'live-mode'}>
@@ -197,6 +235,35 @@ const App: React.FC = () => {
           </Tab>
         </Tabs>
       </PageSection>
+
+      {/* Keyboard shortcuts help modal */}
+      <Modal
+        variant="small"
+        isOpen={showHelp}
+        onClose={() => setShowHelp(false)}
+        aria-labelledby="shortcuts-help-title"
+      >
+        <ModalHeader title="Keyboard Shortcuts" labelId="shortcuts-help-title" />
+        <ModalBody>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <tbody>
+              {[
+                ['1', 'Upload & Deploy tab'],
+                ['2', 'Deployments tab'],
+                ['3', 'Operations tab'],
+                ['4', 'QA tab'],
+                ['5', 'Students tab'],
+                ['?', 'Toggle this help'],
+              ].map(([key, desc]) => (
+                <tr key={key} style={{ borderBottom: '1px solid var(--pf-v6-global--BorderColor--100, #d2d2d2)' }}>
+                  <td style={{ padding: '6px 12px', fontFamily: 'monospace', fontWeight: 700 }}>{key}</td>
+                  <td style={{ padding: '6px 12px' }}>{desc}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </ModalBody>
+      </Modal>
     </Page>
   );
 };

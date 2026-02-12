@@ -48,7 +48,7 @@
 - [x] **Scale** — `--scale N` sets WorkshopProvision count to target value
 - [x] **Regions (Multi-Region Provisioning)** — `AWS_Region` column supports comma-separated regions; creates one Workshop with multiple regional WorkshopProvisions, users distributed evenly
 - [x] **Interactive CSV Wizard** — `--wizard` launches a rich CLI wizard to generate workshop schedule CSVs interactively
-- [x] **Test Suite** — 212 tests covering all functionality (see `test_rhdp_flow.py` and `tests/`)
+- [x] **Test Suite** — 77 backend + 36 frontend = 113 API/component tests (see `tests/` and `frontend/src/`)
 - [x] **Fix Workshop URLs** — Map infra domain (`ocp-{env}.infra.open.redhat.com`) to RHDP UI domain (`{env}.demo.redhat.com`) and append `/details` suffix
 - [x] **Fix Lock Label** — Use correct `demo.redhat.com/lock-enabled` label matching RHDP UI (was `resource-lock`)
 - [x] **Remove False-Positive Warning** — Auto-destroy before auto-stop is valid (destroy nullifies stop)
@@ -56,6 +56,31 @@
 - [x] **Enhanced CSV Validation** — Duplicate row detection, CI format check, namespace format check, user count reasonableness, auto-stop before provisioning warning
 - [x] **Namespace Existence Validation** — API endpoint checks namespaces exist on cluster after upload; frontend shows danger alert for missing namespaces
 - [x] **Salesforce Campaign vs Opportunity** — New `Salesforce_Type` CSV column (default: `opportunity`) allows specifying `campaign` or `opportunity` type for chargeback
+- [x] **Standardized Logging** — Replaced print() with structured logger in rhdp_flow.py
+- [x] **Deep Health Check** — `/api/health` probes RHDP API reachability
+- [x] **Rate Limiting** — SlowAPI rate limiting on POST/GET endpoints
+- [x] **API Versioning** — `/api/v1/` prefix with backward-compatible `/api/` alias
+- [x] **CORS Configuration** — Configurable origins via `CORS_ORIGINS` env var
+- [x] **Optional API Key Auth** — `RHDP_API_KEY` env var protects mutation endpoints
+- [x] **CSP Headers** — Content Security Policy on all responses
+- [x] **Frontend Test Suite** — Vitest + React Testing Library with 36 component tests
+- [x] **Row Hover / Monospace Dates / Favicon / Tab Titles** — CSS polish and cosmetics
+- [x] **Extend Operation Confirmations** — Confirmation modals for extend-stop and extend-destroy
+- [x] **SSE Auto-Reconnect** — Exponential backoff reconnect (max 5 retries)
+- [x] **Auto-Refresh Hook** — Reusable useAutoRefresh hook for Operations and QA tabs
+- [x] **Graceful Shutdown** — Backend shutdown flag, SSE generators yield closing event
+- [x] **Sortable Columns** — Click column headers to sort on all data tables
+- [x] **Pagination** — Default 20 rows/page on Deployments and QA tabs
+- [x] **Sticky Headers** — Table headers stay visible when scrolling
+- [x] **CSV Template Download** — `GET /api/templates/schedule` with example row
+- [x] **Search on Upload/Operations** — SearchInput on schedule preview and operations history
+- [x] **Retry Failed Deployments** — Per-row and bulk retry via checkbox selection
+- [x] **Keyboard Shortcuts** — 1-5 for tabs, ? for help overlay
+- [x] **URL Hash Routing** — Tab state synced to URL hash for bookmarking
+- [x] **Schedule Diff** — Compare new CSV against loaded schedules (added/removed/changed)
+- [x] **Architecture Diagram** — Mermaid diagram in README
+- [x] **API Documentation Links** — Swagger UI (`/docs`) and ReDoc (`/redoc`) links in README
+- [x] **CHANGELOG** — Keep a Changelog format documenting all batches
 
 ## Usage Examples
 

@@ -2,6 +2,9 @@ import { useState, useMemo, useEffect } from 'react';
 import {
   Button,
   PageSection,
+  SearchInput,
+  Split,
+  SplitItem,
   Title,
   Card,
   CardBody,
@@ -114,6 +117,24 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
   // Scale-to-zero confirmation modal
   const [showScaleZeroConfirm, setShowScaleZeroConfirm] = useState(false);
 
+  // Extend confirmation modals
+  const [showExtStopConfirm, setShowExtStopConfirm] = useState(false);
+  const [showExtDestroyConfirm, setShowExtDestroyConfirm] = useState(false);
+
+  // History search
+  const [historySearch, setHistorySearch] = useState('');
+
+  const filteredHistory = useMemo(() => {
+    if (!historySearch) return history;
+    const q = historySearch.toLowerCase();
+    return history.filter(r =>
+      r.operation.toLowerCase().includes(q) ||
+      r.target.toLowerCase().includes(q) ||
+      r.message.toLowerCase().includes(q) ||
+      r.values.toLowerCase().includes(q)
+    );
+  }, [history, historySearch]);
+
   const ciOptions = useMemo(() => {
     const unique = new Set(schedules.map(s => s.ci));
     return Array.from(unique).sort();
@@ -197,6 +218,8 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
 
   const handleExtendStop = async () => {
     if (extStopDays === 0 && extStopHours === 0) { showToast('Specify days or hours', 'danger'); return; }
+    if (!showExtStopConfirm) { setShowExtStopConfirm(true); return; }
+    setShowExtStopConfirm(false);
     const vals = `${extStopDays}d ${extStopHours}h`;
     setExtStopLoading(true);
     try {
@@ -213,6 +236,8 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
 
   const handleExtendDestroy = async () => {
     if (extDestroyDays === 0 && extDestroyHours === 0) { showToast('Specify days or hours', 'danger'); return; }
+    if (!showExtDestroyConfirm) { setShowExtDestroyConfirm(true); return; }
+    setShowExtDestroyConfirm(false);
     const vals = `${extDestroyDays}d ${extDestroyHours}h`;
     setExtDestroyLoading(true);
     try {
@@ -393,9 +418,26 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
       </div>
 
       {/* Operations History Table */}
-      <Title headingLevel="h3" style={{ marginBottom: 8 }}>Operations History</Title>
+      <Split hasGutter style={{ marginBottom: 8, alignItems: 'center' }}>
+        <SplitItem>
+          <Title headingLevel="h3">Operations History</Title>
+        </SplitItem>
+        <SplitItem isFilled />
+        {history.length > 0 && (
+          <SplitItem>
+            <SearchInput
+              placeholder="Search history..."
+              value={historySearch}
+              onChange={(_e, val) => setHistorySearch(val)}
+              onClear={() => setHistorySearch('')}
+              style={{ width: 220 }}
+            />
+          </SplitItem>
+        )}
+      </Split>
       {history.length > 0 ? (
-        <Table aria-label="Operations history" variant="compact">
+        <div className="table-sticky-wrapper">
+        <Table aria-label="Operations history" variant="compact" isStickyHeader>
           <Thead>
             <Tr>
               <Th>Time (UTC)</Th>
@@ -407,9 +449,9 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
             </Tr>
           </Thead>
           <Tbody>
-            {history.map((rec, i) => (
+            {filteredHistory.map((rec, i) => (
               <Tr key={i}>
-                <Td dataLabel="Time (UTC)">{rec.timestamp}</Td>
+                <Td dataLabel="Time (UTC)" className="date-cell">{rec.timestamp}</Td>
                 <Td dataLabel="Operation">{rec.operation}</Td>
                 <Td dataLabel="Target CI">{rec.target}</Td>
                 <Td dataLabel="Values">{rec.values}</Td>
@@ -423,6 +465,7 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
             ))}
           </Tbody>
         </Table>
+        </div>
       ) : (
         <div className="log-box">No operations yet.</div>
       )}
@@ -487,6 +530,48 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
         <ModalFooter>
           <Button variant="danger" onClick={handleScale}>Scale to Zero</Button>
           <Button variant="link" onClick={() => setShowScaleZeroConfirm(false)}>Cancel</Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Extend stop confirmation modal */}
+      <Modal
+        variant="small"
+        isOpen={showExtStopConfirm}
+        onClose={() => setShowExtStopConfirm(false)}
+        aria-labelledby="ext-stop-confirm-title"
+      >
+        <ModalHeader title="Confirm Extend Stop Time" labelId="ext-stop-confirm-title" />
+        <ModalBody>
+          <p>
+            Extend auto-stop time by <strong>{extStopDays}d {extStopHours}h</strong>
+            {extStopFilter ? <> for <strong>"{extStopFilter}"</strong></> : <> for <strong>all catalog items</strong></>}.
+          </p>
+          {stopPreview && <p className="ops-preview" style={{ marginTop: 8 }}>{stopPreview}</p>}
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="primary" onClick={handleExtendStop}>Extend Stop</Button>
+          <Button variant="link" onClick={() => setShowExtStopConfirm(false)}>Cancel</Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Extend destroy confirmation modal */}
+      <Modal
+        variant="small"
+        isOpen={showExtDestroyConfirm}
+        onClose={() => setShowExtDestroyConfirm(false)}
+        aria-labelledby="ext-destroy-confirm-title"
+      >
+        <ModalHeader title="Confirm Extend Destroy Time" labelId="ext-destroy-confirm-title" />
+        <ModalBody>
+          <p>
+            Extend auto-destroy time by <strong>{extDestroyDays}d {extDestroyHours}h</strong>
+            {extDestroyFilter ? <> for <strong>"{extDestroyFilter}"</strong></> : <> for <strong>all catalog items</strong></>}.
+          </p>
+          {destroyPreview && <p className="ops-preview" style={{ marginTop: 8 }}>{destroyPreview}</p>}
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="primary" onClick={handleExtendDestroy}>Extend Destroy</Button>
+          <Button variant="link" onClick={() => setShowExtDestroyConfirm(false)}>Cancel</Button>
         </ModalFooter>
       </Modal>
     </PageSection>

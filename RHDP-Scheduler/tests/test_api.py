@@ -457,3 +457,128 @@ def test_dry_run_deploy_with_custom_settings(uploaded_client):
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Template Download
+# ---------------------------------------------------------------------------
+
+def test_template_download(client):
+    resp = client.get("/api/templates/schedule")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "text/csv; charset=utf-8"
+    assert "CI Name" in resp.text
+    assert "Example Workshop" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Retry
+# ---------------------------------------------------------------------------
+
+def test_retry_no_schedules(client):
+    resp = client.post("/api/deploy/retry", json={"ci_names": ["foo"]})
+    assert resp.status_code == 400
+
+
+def test_retry_no_matching_ci(uploaded_client):
+    resp = uploaded_client.post(
+        "/api/deploy/retry", json={"ci_names": ["Nonexistent Workshop"]}
+    )
+    assert resp.status_code == 404
+
+
+def test_retry_empty_ci_names(client):
+    """Retry with empty ci_names list should fail validation."""
+    resp = client.post("/api/deploy/retry", json={"ci_names": []})
+    assert resp.status_code == 422  # Pydantic validation error
+
+
+# ---------------------------------------------------------------------------
+# Diff
+# ---------------------------------------------------------------------------
+
+def test_diff_no_schedules(client):
+    resp = client.post(
+        "/api/schedules/diff",
+        files={"file": ("new.csv", BASIC_WORKSHOP_CSV.encode(), "text/csv")},
+    )
+    assert resp.status_code == 400
+
+
+def test_diff_with_same_csv(uploaded_client):
+    """Diffing the same CSV should show zero changes."""
+    resp = uploaded_client.post(
+        "/api/schedules/diff",
+        files={"file": ("new.csv", BASIC_WORKSHOP_CSV.encode(), "text/csv")},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["added"] == []
+    assert data["removed"] == []
+    assert data["changed"] == []
+    assert data["unchanged"] == 1
+
+
+def test_diff_detects_removal(uploaded_client):
+    """Uploading an empty-data CSV shows the original as removed."""
+    # An entirely different CI should show 1 added, 1 removed
+    other_csv = """\
+CI Name,CI,Namespace,Users,Workshop_instance_count,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Instances,Salesforce IDs
+New Workshop,new-vendor.new-item.prod,user-new-ns,10,1,True,Pass1,Admin,QA,New WS,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,,,,,,
+"""
+    resp = uploaded_client.post(
+        "/api/schedules/diff",
+        files={"file": ("new.csv", other_csv.encode(), "text/csv")},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["added"]) == 1
+    assert len(data["removed"]) == 1
+    assert data["unchanged"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Error Paths
+# ---------------------------------------------------------------------------
+
+def test_upload_non_csv_content(client):
+    """Uploading non-CSV content should fail."""
+    resp = client.post(
+        "/api/schedules/upload",
+        files={"file": ("bad.csv", b"not,a,real,csv\nno,matching,headers,here", "text/csv")},
+    )
+    assert resp.status_code == 400
+
+
+def test_deploy_malformed_json(client):
+    """Malformed JSON body should return 422."""
+    resp = client.post(
+        "/api/deploy",
+        content=b"not json",
+        headers={"Content-Type": "application/json"},
+    )
+    assert resp.status_code == 422
+
+
+@patch("rhdp_flow.subprocess.run")
+def test_operations_scale_to_zero(mock_run, uploaded_client):
+    """Scale to 0 is valid (removes all instances)."""
+    mock_run.side_effect = make_oc_dispatcher()
+    resp = uploaded_client.post(
+        "/api/operations/scale", json={"target_count": 0}
+    )
+    assert resp.status_code == 200
+
+
+def test_operations_scale_negative(uploaded_client):
+    """Scale with negative count should fail validation."""
+    resp = uploaded_client.post(
+        "/api/operations/scale", json={"target_count": -1}
+    )
+    assert resp.status_code in (400, 422)
+
+
+def test_qa_invalid_type(uploaded_client):
+    """QA with invalid type should fail."""
+    resp = uploaded_client.post("/api/qa/run", json={"type": "999"})
+    assert resp.status_code in (400, 422)

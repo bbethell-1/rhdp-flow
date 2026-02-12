@@ -10,9 +10,11 @@ import subprocess
 from dataclasses import asdict
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sse_starlette.sse import EventSourceResponse
+
+from api.auth import verify_api_key
 
 import sys, os
 
@@ -45,12 +47,15 @@ from rhdp_flow import (
 from api.models import (
     DeploymentResultResponse,
     DeployRequest,
+    DiffEntry,
+    DiffResponse,
     ExtendRequest,
     HealthResponse,
     JobResponse,
     LockRequest,
     OperationResponse,
     QARequest,
+    RetryRequest,
     ScaleRequest,
     SessionSummary,
     UploadResponse,
@@ -60,7 +65,7 @@ from api import jobs
 
 logger = logging.getLogger("rhdp_flow.api")
 
-router = APIRouter(prefix="/api")
+router = APIRouter()
 
 # ---------------------------------------------------------------------------
 # In-memory state
@@ -253,6 +258,17 @@ def health():
             # Cache and return the derived base domain
             global _cached_base_domain
             _cached_base_domain = derive_base_domain(cluster_url)
+            # Lightweight RHDP API probe: check if catalogitems are accessible
+            rhdp_ok = False
+            try:
+                r_cat = subprocess.run(
+                    [config.oc_command, "get", "catalogitem", "-n", "babylon-catalog-prod",
+                     "--no-headers", "-o", "name", "--limit=1"],
+                    capture_output=True, text=True, timeout=10, env=env,
+                )
+                rhdp_ok = r_cat.returncode == 0
+            except Exception:
+                pass
             return HealthResponse(
                 status="ok",
                 oc_installed=True,
@@ -260,6 +276,7 @@ def health():
                 cluster_url=cluster_url,
                 user=r_user.stdout.strip(),
                 base_domain=_cached_base_domain,
+                rhdp_api_reachable=rhdp_ok,
             )
         else:
             msg_parts = []
@@ -378,12 +395,73 @@ def validate_namespaces():
     return {"namespaces": results, "missing": missing}
 
 
+@router.post("/schedules/diff", response_model=DiffResponse)
+async def diff_schedules(file: UploadFile = File(...)):
+    """Compare a new CSV against the currently loaded schedules."""
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded to compare against.")
+
+    content = await file.read()
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(400, "File must be UTF-8 encoded CSV")
+
+    import tempfile
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, encoding="utf-8")
+    tmp.write(text)
+    tmp.close()
+
+    try:
+        new_schedules = read_csv_input(tmp.name)
+    except ValueError as e:
+        os.unlink(tmp.name)
+        raise HTTPException(400, str(e))
+    os.unlink(tmp.name)
+
+    # Build keyed maps: (ci, namespace) -> schedule
+    old_map = {(s.ci, s.namespace): s for s in _schedules}
+    new_map = {(s.ci, s.namespace): s for s in new_schedules}
+
+    added = []
+    removed = []
+    changed = []
+    unchanged = 0
+
+    # Find added + changed
+    for key, ns in new_map.items():
+        if key not in old_map:
+            added.append(DiffEntry(ci_name=ns.ci_name, ci=ns.ci, namespace=ns.namespace, change="added"))
+        else:
+            os_item = old_map[key]
+            diffs = []
+            for field in ("users", "provisioning_date", "auto_stop", "auto_destroy", "password", "workshop_name"):
+                old_val = getattr(os_item, field)
+                new_val = getattr(ns, field)
+                if old_val != new_val:
+                    diffs.append(f"{field}: {old_val} → {new_val}")
+            if diffs:
+                changed.append(DiffEntry(
+                    ci_name=ns.ci_name, ci=ns.ci, namespace=ns.namespace,
+                    change="changed", details="; ".join(diffs),
+                ))
+            else:
+                unchanged += 1
+
+    # Find removed
+    for key, os_item in old_map.items():
+        if key not in new_map:
+            removed.append(DiffEntry(ci_name=os_item.ci_name, ci=os_item.ci, namespace=os_item.namespace, change="removed"))
+
+    return DiffResponse(added=added, removed=removed, changed=changed, unchanged=unchanged)
+
+
 # ---------------------------------------------------------------------------
 # Deploy
 # ---------------------------------------------------------------------------
 
 @router.post("/deploy", response_model=JobResponse)
-async def deploy(body: DeployRequest = DeployRequest()):
+async def deploy(body: DeployRequest = DeployRequest(), _key=Depends(verify_api_key)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded. Upload a CSV first.")
 
@@ -474,7 +552,7 @@ async def deploy(body: DeployRequest = DeployRequest()):
 
 
 @router.post("/deploy/dry-run", response_model=List[DeploymentResultResponse])
-def deploy_dry_run(body: DeployRequest = DeployRequest()):
+def deploy_dry_run(body: DeployRequest = DeployRequest(), _key=Depends(verify_api_key)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded. Upload a CSV first.")
 
@@ -556,12 +634,74 @@ def get_deploy_results():
     return [_result_to_response(r) for r in _deployment_results]
 
 
+@router.post("/deploy/retry", response_model=JobResponse)
+async def deploy_retry(body: RetryRequest, _key=Depends(verify_api_key)):
+    """Re-deploy specific workshops by CI name (typically failed ones)."""
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded. Upload a CSV first.")
+
+    ci_name_set = set(body.ci_names)
+    matching = [s for s in _schedules if s.ci_name in ci_name_set]
+    if not matching:
+        raise HTTPException(404, f"No schedules match the provided CI names: {body.ci_names}")
+
+    job = jobs.create_job()
+
+    async def _run():
+        try:
+            config = _get_config(
+                dry_run=body.dry_run,
+                resource_lock=body.resource_lock,
+                enable_resource_pools=body.enable_resource_pools,
+                white_glove=body.white_glove,
+                redirect=body.redirect,
+            )
+            jobs.update_job(job.job_id, status=jobs.Status.running, message=f"Retrying {len(matching)} deployment(s)")
+
+            results = []
+            for i, s in enumerate(matching):
+                result = process_schedule(s, config, asset_passwords=_asset_passwords)
+                results.append(result)
+                pct = int((i + 1) / len(matching) * 100)
+                jobs.update_job(
+                    job.job_id, progress=pct,
+                    message=f"Retried {result.ci_name}: {result.status}",
+                )
+                if not config.dry_run and len(matching) > 1:
+                    await asyncio.sleep(1)
+
+            # Update global results: replace matching entries, keep the rest
+            global _deployment_results
+            result_map = {r.ci_name: r for r in results}
+            _deployment_results = [
+                result_map.get(r.ci_name, r) for r in _deployment_results
+            ] + [r for r in results if r.ci_name not in {dr.ci_name for dr in _deployment_results}]
+
+            jobs.update_job(
+                job.job_id,
+                status=jobs.Status.completed,
+                progress=100,
+                message=f"Retry completed: {len(results)} deployment(s)",
+                results=[asdict(r) for r in results],
+            )
+        except Exception as exc:
+            jobs.update_job(
+                job.job_id,
+                status=jobs.Status.failed,
+                error=str(exc),
+                message=f"Retry failed: {exc}",
+            )
+
+    asyncio.create_task(_run())
+    return JobResponse(job_id=job.job_id, status=job.status)
+
+
 # ---------------------------------------------------------------------------
 # Operations
 # ---------------------------------------------------------------------------
 
 @router.post("/operations/lock", response_model=OperationResponse)
-def op_lock(body: LockRequest = LockRequest()):
+def op_lock(body: LockRequest = LockRequest(), _key=Depends(verify_api_key)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     schedules = _filter_schedules(body.ci_filter)
@@ -571,7 +711,7 @@ def op_lock(body: LockRequest = LockRequest()):
 
 
 @router.post("/operations/unlock", response_model=OperationResponse)
-def op_unlock(body: LockRequest = LockRequest()):
+def op_unlock(body: LockRequest = LockRequest(), _key=Depends(verify_api_key)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     schedules = _filter_schedules(body.ci_filter)
@@ -581,7 +721,7 @@ def op_unlock(body: LockRequest = LockRequest()):
 
 
 @router.post("/operations/extend-stop", response_model=OperationResponse)
-def op_extend_stop(body: ExtendRequest):
+def op_extend_stop(body: ExtendRequest, _key=Depends(verify_api_key)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     if body.days == 0 and body.hours == 0:
@@ -596,7 +736,7 @@ def op_extend_stop(body: ExtendRequest):
 
 
 @router.post("/operations/extend-destroy", response_model=OperationResponse)
-def op_extend_destroy(body: ExtendRequest):
+def op_extend_destroy(body: ExtendRequest, _key=Depends(verify_api_key)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     if body.days == 0 and body.hours == 0:
@@ -611,7 +751,7 @@ def op_extend_destroy(body: ExtendRequest):
 
 
 @router.post("/operations/scale", response_model=OperationResponse)
-def op_scale(body: ScaleRequest):
+def op_scale(body: ScaleRequest, _key=Depends(verify_api_key)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     schedules = _filter_schedules(body.ci_filter)
@@ -716,6 +856,47 @@ def export_results():
         iter([output.getvalue()]),
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=deployment_results.csv"},
+    )
+
+
+@router.get("/templates/schedule")
+def download_template():
+    """Download a CSV template with headers and an example row."""
+    output = io.StringIO()
+    fieldnames = [
+        "CI Name", "Catalog Item", "Namespace", "Users", "Instances",
+        "Workshop Name", "Enable Workshop Interface", "Password", "Activity",
+        "Purpose", "Provisioning Date", "Auto Stop", "Auto Destroy",
+        "Concurrency", "Salesforce IDs", "Is Multi-Asset", "Asset CIs",
+        "Multi Workshop Name",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerow({
+        "CI Name": "Example Workshop",
+        "Catalog Item": "vendor.workshop.prod",
+        "Namespace": "user-ns",
+        "Users": "30",
+        "Instances": "",
+        "Workshop Name": "my-workshop",
+        "Enable Workshop Interface": "Yes",
+        "Password": "changeme",
+        "Activity": "Training",
+        "Purpose": "Demo",
+        "Provisioning Date": "15/03/2025 09:00",
+        "Auto Stop": "15/03/2025 17:00",
+        "Auto Destroy": "16/03/2025 09:00",
+        "Concurrency": "",
+        "Salesforce IDs": "",
+        "Is Multi-Asset": "No",
+        "Asset CIs": "",
+        "Multi Workshop Name": "",
+    })
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=schedule_template.csv"},
     )
 
 

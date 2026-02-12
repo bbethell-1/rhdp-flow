@@ -252,3 +252,66 @@ html, body, #root {
 .tab-badge {
   margin-left: 6px;
 }
+
+/* ── Row hover effect ── */
+.pf-v6-c-table tbody tr:hover {
+  background-color: var(--pf-v6-c-table--m-hoverable--tbody--tr--hover--BackgroundColor, rgba(0, 0, 0, 0.04));
+}
+
+/* ── Monospace date cells ── */
+.date-cell {
+  font-family: 'Red Hat Mono', 'Menlo', monospace;
+  font-size: 0.85rem;
+}
+
+/* ── Skeleton loading animation ── */
+@keyframes skeleton-pulse {
+  0% { opacity: 0.6; }
+  50% { opacity: 0.3; }
+  100% { opacity: 0.6; }
+}
+.skeleton-row td {
+  position: relative;
+}
+.skeleton-cell {
+  height: 1em;
+  background: var(--pf-v6-global--palette--black-200, #d2d2d2);
+  border-radius: 4px;
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+/* ── Sticky table headers ── */
+.table-sticky-wrapper {
+  max-height: 70vh;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+.table-sticky-wrapper .pf-v6-c-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--pf-v6-c-table--BackgroundColor, #fff);
+}
+
+/* ── Toast spacing normalization ── */
+.pf-v6-c-alert + .pf-v6-c-alert {
+  margin-top: 8px;
+}
+
+/* ── Mobile responsiveness ── */
+@media (max-width: 768px) {
+  .masthead-controls {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .tz-indicator {
+    display: none;
+  }
+  .table-scroll-wrapper,
+  .table-sticky-wrapper {
+    font-size: 0.8rem;
+  }
+  .summary-card-value {
+    font-size: 1.2rem;
+  }
+}

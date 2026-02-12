@@ -1,3 +1,4 @@
+import { useState, useMemo } from 'react';
 import {
   Button,
   PageSection,
@@ -8,7 +9,7 @@ import {
   EmptyStateBody,
   Tooltip,
 } from '@patternfly/react-core';
-import { Table, Thead, Tbody, Tr, Th, Td } from '@patternfly/react-table';
+import { Table, Thead, Tbody, Tr, Th, Td, ThProps } from '@patternfly/react-table';
 import UsersIcon from '@patternfly/react-icons/dist/esm/icons/users-icon';
 import CopyIcon from '@patternfly/react-icons/dist/esm/icons/copy-icon';
 
@@ -19,8 +20,36 @@ interface Props {
   qaResults: QAResult[];
 }
 
+type SortableStudentColumn = 'ci_name' | 'status';
+
 export const StudentsTab: React.FC<Props> = ({ qaResults }) => {
   const students = qaResults.filter(r => r.landing_page_url);
+
+  const [sortBy, setSortBy] = useState<SortableStudentColumn | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
+  const sorted = useMemo(() => {
+    if (!sortBy) return students;
+    return [...students].sort((a, b) => {
+      const aVal = (String(a[sortBy] || '')).toLowerCase();
+      const bVal = (String(b[sortBy] || '')).toLowerCase();
+      const cmp = aVal.localeCompare(bVal);
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }, [students, sortBy, sortDir]);
+
+  const getSortParams = (col: SortableStudentColumn): ThProps['sort'] => ({
+    sortBy: sortBy === col ? { index: 0, direction: sortDir } : { index: 0, direction: 'asc', defaultDirection: 'asc' },
+    onSort: () => {
+      if (sortBy === col) {
+        setSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
+      } else {
+        setSortBy(col);
+        setSortDir('asc');
+      }
+    },
+    columnIndex: 0,
+  });
 
   return (
     <PageSection>
@@ -41,18 +70,18 @@ export const StudentsTab: React.FC<Props> = ({ qaResults }) => {
         </SplitItem>
       </Split>
 
-      {students.length > 0 ? (
-        <div className="table-scroll-wrapper">
-        <Table aria-label="Student landing pages" variant="compact" className="fixed-table">
+      {sorted.length > 0 ? (
+        <div className="table-sticky-wrapper">
+        <Table aria-label="Student landing pages" variant="compact" className="fixed-table" isStickyHeader>
           <Thead>
             <Tr>
-              <Th>CI Name</Th>
+              <Th sort={getSortParams('ci_name')}>CI Name</Th>
               <Th>Landing Page URL</Th>
-              <Th>Status</Th>
+              <Th sort={getSortParams('status')}>Status</Th>
             </Tr>
           </Thead>
           <Tbody>
-            {students.map((r, i) => (
+            {sorted.map((r, i) => (
               <Tr key={i}>
                 <Td dataLabel="CI Name">{r.ci_name}</Td>
                 <Td dataLabel="Landing Page URL">

@@ -29,17 +29,25 @@ Open **http://localhost:8000** in your browser.
 ## Features
 
 - **Web UI** — React/PatternFly 6 frontend with five tabs: Upload & Deploy, Deployments, Operations, QA, Students
-- **CSV Input** — Drag-and-drop CSV upload with inline validation warnings
+- **CSV Input** — Drag-and-drop CSV upload with inline validation warnings; [download CSV template](#csv-format) from the UI
 - **Dry-Run Mode** — Preview JSON payloads without creating real resources
-- **Deploy Settings** — Configurable Resource Lock, Resource Pools, and White Glove toggles with sensible defaults
+- **Deploy Settings** — Configurable Resource Lock, Resource Pools, White Glove, and Redirect toggles with sensible defaults
 - **Cluster-Aware URLs** — Workshop and landing page URLs automatically use the domain derived from the connected cluster
 - **Multi-Asset Workshops** — Group multiple CIs into a single MultiWorkshop
 - **Per-Asset Passwords** — Override passwords per CI via companion CSV
 - **Operations** — Lock, extend (stop/destroy), and scale running workshops
 - **QA Verification** — Verify setup (dates/users) and deployment health (seats/URLs)
 - **Results Export** — CSV export with GUIDs and student landing page URLs; clickable hyperlinks in Deployments and Students tabs
+- **Retry & Bulk Operations** — Retry failed deployments individually or in bulk via checkbox selection
+- **Schedule Diff** — Compare a new CSV against loaded schedules to see added, removed, and changed rows
+- **Keyboard Shortcuts** — Press `1`-`5` for tabs, `?` for help overlay
+- **URL Routing** — Tab state synced to URL hash (`#deployments`, `#operations`, etc.) for bookmarking and browser back/forward
+- **Sortable & Paginated Tables** — Column sorting, pagination (default 20/page), sticky headers across all tabs
+- **Search & Filter** — Search inputs on schedule preview, deployments, and operations history; status toggle filters on deployments
+- **Security** — Optional API key auth, CORS restrictions, CSP headers, rate limiting. See [docs/SECURITY.md](docs/SECURITY.md)
 - **CLI** — Direct command-line deployment and an interactive wizard (`--wizard`)
-- **Risk Prevention** — 13 built-in safeguards (confirmation modals, date validation, live-mode warnings). See [docs/RISK-PREVENTION.md](docs/RISK-PREVENTION.md) for details and screenshots.
+- **Risk Prevention** — 13 built-in safeguards (confirmation modals, date validation, live-mode warnings). See [docs/RISK-PREVENTION.md](docs/RISK-PREVENTION.md) for details and screenshots
+- **Test Suite** — 77 backend tests (pytest) + 36 frontend tests (Vitest + React Testing Library)
 
 ## Requirements
 
@@ -308,19 +316,97 @@ zt-ansiblebu.ansible-network-automation-basics-lab-2.event,AnsibleSecret2
 | `--hours` | Hours to extend (with `--extend-*`) |
 | `--scale N` | Scale WorkshopProvision seat count |
 
+## API Documentation
+
+The backend exposes interactive API docs powered by FastAPI:
+
+- **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
+
+All endpoints are available under `/api/` (backward-compatible) and `/api/v1/`.
+
+## Architecture
+
+```mermaid
+graph TB
+    subgraph Browser
+        UI[React / PatternFly 6 UI]
+    end
+
+    subgraph Backend["FastAPI Backend (port 8000)"]
+        Server[api/server.py<br/>CORS, CSP, Rate Limiting]
+        Routes[api/routes.py<br/>REST Endpoints]
+        Jobs[api/jobs.py<br/>SSE Job Manager]
+        Auth[api/auth.py<br/>Optional API Key]
+        Models[api/models.py<br/>Pydantic Schemas]
+    end
+
+    subgraph Core["Core Engine"]
+        Flow[rhdp_flow.py<br/>CLI + Deployment Logic]
+        Wizard[rhdp_flow_wizard.py<br/>Interactive CSV Wizard]
+    end
+
+    subgraph Cluster["OpenShift Cluster"]
+        OC[oc CLI]
+        K8s[Kubernetes API<br/>ResourceClaims, Workshops,<br/>WorkshopProvisions]
+    end
+
+    UI -->|REST + SSE| Server
+    Server --> Routes
+    Routes --> Jobs
+    Routes --> Auth
+    Routes --> Models
+    Routes --> Flow
+    Flow --> OC
+    OC --> K8s
+    Wizard --> Flow
+```
+
 ## Project Structure
 
 ```
 RHDP-Scheduler/
-├── api/                  # FastAPI backend (server.py, routes.py, models.py, jobs.py)
+├── api/                  # FastAPI backend
+│   ├── server.py         # App setup, CORS, CSP, static file serving
+│   ├── routes.py         # REST endpoints (upload, deploy, operations, QA, export)
+│   ├── models.py         # Pydantic request/response schemas
+│   ├── jobs.py           # Async job manager with SSE streaming
+│   └── auth.py           # Optional API key authentication
 ├── frontend/             # React/Vite/TypeScript UI
-│   └── src/components/   # Tab components (UploadTab, DeploymentsTab, etc.)
+│   └── src/
+│       ├── components/   # Tab components (UploadTab, DeploymentsTab, etc.)
+│       ├── hooks/        # Custom hooks (useAutoRefresh, useKeyboardShortcuts)
+│       ├── services/     # API client
+│       └── test/         # Test setup, mocks, component tests
+├── tests/                # Backend pytest suite (77 tests)
 ├── sample-csvs/          # Example schedule and password CSVs
-├── docs/                 # Risk prevention docs and UI screenshots
-├── rhdp_flow.py          # CLI entry point
+├── docs/                 # Risk prevention, security, usage docs + screenshots
+├── rhdp_flow.py          # CLI entry point + core deployment engine
 ├── rhdp_flow_wizard.py   # Interactive CSV wizard
 └── requirements.txt      # Python dependencies
 ```
+
+## Testing
+
+### Backend Tests
+
+```bash
+source .venv/bin/activate
+python -m pytest tests/ -v
+```
+
+77 tests covering API endpoints, CSV parsing, date handling, and models.
+
+### Frontend Tests
+
+```bash
+cd frontend
+npm test              # single run
+npm run test:watch    # watch mode
+npm run test:coverage # with coverage report
+```
+
+36 tests covering all tab components, health badge, and app smoke tests.
 
 ## Troubleshooting
 

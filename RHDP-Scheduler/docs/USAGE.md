@@ -116,6 +116,51 @@ npm run build
 
 ---
 
+## Web UI Features
+
+### CSV Template Download
+
+Click **Download CSV Template** in the Upload tab toolbar to get a pre-formatted CSV with all column headers and an example row. Available at `GET /api/templates/schedule`.
+
+### Keyboard Shortcuts
+
+Press `?` anywhere in the UI to open the keyboard shortcuts help modal.
+
+| Key | Action |
+|-----|--------|
+| `1` | Upload & Deploy tab |
+| `2` | Deployments tab |
+| `3` | Operations tab |
+| `4` | QA tab |
+| `5` | Students tab |
+| `?` | Show help overlay |
+
+### Schedule Diff
+
+After uploading a CSV, use the **Compare CSV** section at the bottom of the Upload tab to upload a second CSV and see what changed:
+- **Green** rows: added in the new CSV
+- **Red** rows: removed from the new CSV
+- **Yellow** rows: changed fields (details shown)
+
+### Retry Failed Deployments
+
+In the Deployments tab:
+- **Single retry**: Click the retry icon on any failed row
+- **Bulk retry**: Select failed rows using checkboxes, then click **Retry Selected**
+
+### Search & Filter
+
+All data tables have search inputs that filter across CI name, GUID, namespace, and other fields. The Deployments tab also has toggle buttons to filter by status (All / Verified / Unverified / Failed).
+
+### URL Tab Routing
+
+The current tab is synced to the URL hash (e.g., `http://localhost:8000/#deployments`). This means you can:
+- Bookmark specific tabs
+- Use browser back/forward to navigate between tabs
+- Share direct links to specific tabs
+
+---
+
 ## Example CSV Files
 
 Example CSVs are in `docs/examples/`:

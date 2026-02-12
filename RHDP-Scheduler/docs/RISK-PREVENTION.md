@@ -167,6 +167,26 @@ These appear as warnings in the validation summary alongside date warnings, with
 
 ---
 
+### 14. Extend Operations Confirmation Modals (MEDIUM)
+
+**Risk:** User accidentally extends stop or destroy time for all workshops without reviewing the impact.
+
+**Safeguard:** Both Extend Stop and Extend Destroy now require confirmation via a modal before executing. The modal shows the number of affected workshops, the extension amount, and a preview of the resulting dates.
+
+### 15. Security Hardening (HIGH)
+
+**Risk:** Unrestricted API access, missing security headers, no rate limiting.
+
+**Safeguards:**
+
+- **CORS**: Configurable allowed origins (default: localhost only). See [SECURITY.md](SECURITY.md)
+- **API Key Auth**: Optional `RHDP_API_KEY` protects all mutation endpoints
+- **CSP Headers**: Content-Security-Policy restricts resource loading to same-origin
+- **Rate Limiting**: 60 req/min on POST, 120 req/min on GET endpoints
+- **Security Headers**: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`
+
+---
+
 *All risk prevention items implemented.*
 
-*Last updated: 2026-02-11*
+*Last updated: 2026-02-12*

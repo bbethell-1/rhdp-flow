@@ -89,6 +89,17 @@ class ScaleRequest(BaseModel):
     ci_filter: Optional[str] = None
 
 
+class RetryRequest(BaseModel):
+    """Body for POST /api/deploy/retry — re-deploy specific CI names."""
+
+    ci_names: List[str] = Field(..., min_length=1, description="List of CI names to retry")
+    dry_run: bool = Field(False, description="Run in dry-run mode")
+    resource_lock: bool = Field(True, description="Apply lock-enabled label")
+    enable_resource_pools: bool = Field(False, description="Enable Poolboy resource pools")
+    white_glove: bool = Field(True, description="White-glove mode")
+    redirect: bool = Field(True, description="Enable workshop UI redirect")
+
+
 class QAType(str, Enum):
     qa1 = "1"
     qa2 = "2"
@@ -136,6 +147,7 @@ class HealthResponse(BaseModel):
     user: str = ""
     message: str = ""
     base_domain: str = ""
+    rhdp_api_reachable: bool = False
 
 
 class UploadResponse(BaseModel):
@@ -149,6 +161,21 @@ class OperationResponse(BaseModel):
     success: bool
     message: str
     details: List[str] = Field(default_factory=list)
+
+
+class DiffEntry(BaseModel):
+    ci_name: str
+    ci: str
+    namespace: str
+    change: str  # 'added', 'removed', 'changed'
+    details: str = ""
+
+
+class DiffResponse(BaseModel):
+    added: List[DiffEntry]
+    removed: List[DiffEntry]
+    changed: List[DiffEntry]
+    unchanged: int
 
 
 class SessionSummary(BaseModel):
