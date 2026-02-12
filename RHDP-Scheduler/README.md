@@ -174,7 +174,7 @@ After uploading a CSV, the **Deploy Settings** card appears with three toggles:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| Resource Lock | On | Apply `demo.redhat.com/resource-lock` label to prevent accidental deletion |
+| Resource Lock | On | Apply `demo.redhat.com/lock-enabled` label to prevent accidental deletion |
 | Enable Resource Pools | Off | Enable Poolboy resource pool allocation |
 | White Glove | On | Apply white-glove label for managed workshops |
 

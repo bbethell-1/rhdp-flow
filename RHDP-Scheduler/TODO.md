@@ -15,7 +15,6 @@ sort out campaign v opperunity
 redirect: can add to csv or toggle? to turn on webui redirect
 
     demo.redhat.com/lock-enabled: 'true'
-    demo.redhat.com/resource-lock: 'true' 
 
 ## Testing
 

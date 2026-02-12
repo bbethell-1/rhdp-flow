@@ -728,7 +728,7 @@ def build_resource_claim_payload(
             "labels": {
                 "babylon.gpte.redhat.com/catalogItemName": schedule.ci,
                 "babylon.gpte.redhat.com/catalogItemNamespace": "babylon-catalog-prod",
-                "demo.redhat.com/resource-lock": "true" if (config and config.resource_lock) else "false",
+                "demo.redhat.com/lock-enabled": "true" if (config and config.resource_lock) else "false",
                 "demo.redhat.com/white-glove": "true" if (config and config.white_glove) else ("true" if schedule.white_glove else "false"),
                 "rhdp-flow.gpte.redhat.com/scheduled": "true",
                 "rhdp-flow.gpte.redhat.com/scheduled-by": "rhdp-flow"
@@ -1109,7 +1109,7 @@ def create_workshop_with_ui(
         workshop_metadata["labels"] = {
             "babylon.gpte.redhat.com/catalogItemName": ci,
             "babylon.gpte.redhat.com/catalogItemNamespace": "babylon-catalog-prod",
-            "demo.redhat.com/resource-lock": "true" if config.resource_lock else "false",
+            "demo.redhat.com/lock-enabled": "true" if config.resource_lock else "false",
             "demo.redhat.com/white-glove": "true" if config.white_glove else "false",
         }
         
@@ -3528,7 +3528,7 @@ def process_schedule(
 # ============================================================================
 
 def _set_resource_lock(schedules, config, locked: bool):
-    """Toggle the demo.redhat.com/resource-lock label on Workshop resources.
+    """Toggle the demo.redhat.com/lock-enabled label on Workshop resources.
 
     When locked=True non-admin users cannot modify the resource in the RHDP UI.
     """
@@ -3568,9 +3568,9 @@ def _set_resource_lock(schedules, config, locked: bool):
                 config.oc_command, "patch", "workshop", name,
                 "-n", ns,
                 "--type", "merge",
-                "-p", json.dumps({"metadata": {"labels": {"demo.redhat.com/resource-lock": label_value}}}),
+                "-p", json.dumps({"metadata": {"labels": {"demo.redhat.com/lock-enabled": label_value}}}),
             ]
-            logger.info(f"{action} workshop {name}: resource-lock={label_value}")
+            logger.info(f"{action} workshop {name}: lock-enabled={label_value}")
             pr = subprocess.run(patch_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
             if pr.returncode != 0:
                 logger.error(f"Failed to patch workshop {name}: {pr.stderr}")
@@ -3579,7 +3579,7 @@ def _set_resource_lock(schedules, config, locked: bool):
 
 
 def lock_workshops(schedules, config):
-    """Lock workshops by setting the resource-lock label to true.
+    """Lock workshops by setting the lock-enabled label to true.
 
     When locked, non-admin users cannot modify the resource in the RHDP UI.
     """
@@ -3587,7 +3587,7 @@ def lock_workshops(schedules, config):
 
 
 def unlock_workshops(schedules, config):
-    """Unlock workshops by setting the resource-lock label to false.
+    """Unlock workshops by setting the lock-enabled label to false.
 
     Removes the resource lock so non-admin users can modify the resource again.
     """

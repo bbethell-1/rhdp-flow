@@ -257,7 +257,7 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
           <CardBody>
             <CIFilter options={ciOptions} value={lockFilter} onChange={setLockFilter} id="lock-ci-filter" />
             <p style={{ marginBottom: 8, fontSize: '0.85rem' }}>
-              Toggle the <code>demo.redhat.com/resource-lock</code> label on existing workshops.
+              Toggle the <code>demo.redhat.com/lock-enabled</code> label on existing workshops.
               When locked, non-admin users cannot make changes in the RHDP UI.
             </p>
             <div style={{ display: 'flex', gap: 8 }}>
@@ -437,7 +437,7 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
         <ModalHeader title="Confirm Lock" labelId="lock-confirm-title" titleIconVariant="warning" />
         <ModalBody>
           <p>
-            This will set the <code>demo.redhat.com/resource-lock</code> label to <strong>true</strong> on{' '}
+            This will set the <code>demo.redhat.com/lock-enabled</code> label to <strong>true</strong> on{' '}
             {lockAffectedCount > 0 ? <strong>{lockAffectedCount} workshop(s)</strong> : 'workshops'}
             {lockFilter ? <> matching <strong>"{lockFilter}"</strong></> : <> (<strong>all catalog items</strong>)</>}.
           </p>
@@ -459,7 +459,7 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
         <ModalHeader title="Confirm Unlock" labelId="unlock-confirm-title" />
         <ModalBody>
           <p>
-            This will set the <code>demo.redhat.com/resource-lock</code> label to <strong>false</strong> on{' '}
+            This will set the <code>demo.redhat.com/lock-enabled</code> label to <strong>false</strong> on{' '}
             {lockAffectedCount > 0 ? <strong>{lockAffectedCount} workshop(s)</strong> : 'workshops'}
             {lockFilter ? <> matching <strong>"{lockFilter}"</strong></> : <> (<strong>all catalog items</strong>)</>}.
           </p>

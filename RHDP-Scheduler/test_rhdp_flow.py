@@ -902,7 +902,7 @@ class TestMultiRegionWorkshop(unittest.TestCase):
 
 
 class TestLockWorkshops(unittest.TestCase):
-    """Tests for lock_workshops (resource-lock label)."""
+    """Tests for lock_workshops (lock-enabled label)."""
 
     def test_dry_run_logs_without_patching(self):
         config = make_config(dry_run=True)
@@ -920,10 +920,10 @@ class TestLockWorkshops(unittest.TestCase):
         config = make_config(dry_run=False)
         schedules = [make_schedule()]
         lock_workshops(schedules, config)
-        # Verify a patch call was made with resource-lock label
+        # Verify a patch call was made with lock-enabled label
         patch_calls = [c for c in mock_run.call_args_list if "patch" in c[0][0]]
         self.assertGreater(len(patch_calls), 0)
-        # Extract the patch JSON and verify it targets the resource-lock label
+        # Extract the patch JSON and verify it targets the lock-enabled label
         patch_cmd = patch_calls[0][0][0]
         patch_json_str = None
         for i, arg in enumerate(patch_cmd):
@@ -932,7 +932,7 @@ class TestLockWorkshops(unittest.TestCase):
         self.assertIsNotNone(patch_json_str)
         patch_data = json.loads(patch_json_str)
         self.assertEqual(
-            patch_data["metadata"]["labels"]["demo.redhat.com/resource-lock"],
+            patch_data["metadata"]["labels"]["demo.redhat.com/lock-enabled"],
             "true",
         )
 
@@ -950,7 +950,7 @@ class TestLockWorkshops(unittest.TestCase):
 
 
 class TestUnlockWorkshops(unittest.TestCase):
-    """Tests for unlock_workshops (resource-lock label)."""
+    """Tests for unlock_workshops (lock-enabled label)."""
 
     def test_dry_run_logs_without_patching(self):
         config = make_config(dry_run=True)
@@ -968,7 +968,7 @@ class TestUnlockWorkshops(unittest.TestCase):
         config = make_config(dry_run=False)
         schedules = [make_schedule()]
         unlock_workshops(schedules, config)
-        # Verify a patch call was made with resource-lock=false
+        # Verify a patch call was made with lock-enabled=false
         patch_calls = [c for c in mock_run.call_args_list if "patch" in c[0][0]]
         self.assertGreater(len(patch_calls), 0)
         patch_cmd = patch_calls[0][0][0]
@@ -979,7 +979,7 @@ class TestUnlockWorkshops(unittest.TestCase):
         self.assertIsNotNone(patch_json_str)
         patch_data = json.loads(patch_json_str)
         self.assertEqual(
-            patch_data["metadata"]["labels"]["demo.redhat.com/resource-lock"],
+            patch_data["metadata"]["labels"]["demo.redhat.com/lock-enabled"],
             "false",
         )
 
@@ -2325,7 +2325,7 @@ class TestDeriveBaseDomain(unittest.TestCase):
 
 
 class TestResourceLockLabel(unittest.TestCase):
-    """Tests for resource-lock label in payloads."""
+    """Tests for lock-enabled label in payloads."""
 
     def test_resource_lock_true_by_default(self):
         """Config defaults resource_lock=True, label is 'true'."""
@@ -2333,7 +2333,7 @@ class TestResourceLockLabel(unittest.TestCase):
         config = make_config(dry_run=True)
         payload = build_resource_claim_payload(schedule, config)
         self.assertEqual(
-            payload["metadata"]["labels"]["demo.redhat.com/resource-lock"], "true"
+            payload["metadata"]["labels"]["demo.redhat.com/lock-enabled"], "true"
         )
 
     def test_resource_lock_false(self):
@@ -2343,15 +2343,15 @@ class TestResourceLockLabel(unittest.TestCase):
         config.resource_lock = False
         payload = build_resource_claim_payload(schedule, config)
         self.assertEqual(
-            payload["metadata"]["labels"]["demo.redhat.com/resource-lock"], "false"
+            payload["metadata"]["labels"]["demo.redhat.com/lock-enabled"], "false"
         )
 
     def test_resource_lock_label_present_in_payload(self):
-        """resource-lock label is always present in the payload."""
+        """lock-enabled label is always present in the payload."""
         schedule = make_schedule()
         config = make_config(dry_run=True)
         payload = build_resource_claim_payload(schedule, config)
-        self.assertIn("demo.redhat.com/resource-lock", payload["metadata"]["labels"])
+        self.assertIn("demo.redhat.com/lock-enabled", payload["metadata"]["labels"])
 
 
 # ============================================================================
