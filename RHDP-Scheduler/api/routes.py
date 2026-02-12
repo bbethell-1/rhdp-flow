@@ -405,7 +405,7 @@ async def deploy(body: DeployRequest = DeployRequest()):
             grouped_multi = {}
             regular_schedules = []
             for s in schedules:
-                if s.multi_workshop_name and not s.is_multi_asset:
+                if s.multi_workshop_name and s.is_multi_asset:
                     grouped_multi.setdefault(s.multi_workshop_name, []).append(s)
                 else:
                     regular_schedules.append(s)
@@ -491,7 +491,7 @@ def deploy_dry_run(body: DeployRequest = DeployRequest()):
     grouped_multi = {}
     regular_schedules = []
     for s in schedules:
-        if s.multi_workshop_name and not s.is_multi_asset:
+        if s.multi_workshop_name and s.is_multi_asset:
             grouped_multi.setdefault(s.multi_workshop_name, []).append(s)
         else:
             regular_schedules.append(s)
