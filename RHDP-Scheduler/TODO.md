@@ -107,5 +107,5 @@ python3 rhdp_flow.py --wizard
 | Concurrency | No | 1 | Deployment concurrency |
 | Count | No | 1 | Number of instances to create |
 | AWS_Region | No | - | Comma-separated AWS regions for multi-region |
-| Salesforce IDs | No | - | Salesforce ID for chargeback |
-| Salesforce_Type | No | opportunity | Salesforce item type: `opportunity` or `campaign` |
+| Salesforce IDs | No | - | Salesforce items; plain ID or `type:id` pairs separated by `;` (e.g. `opportunity:71456169;campaign:701Pe00000wHJg2IAG;project:P144`) |
+| Salesforce_Type | No | opportunity | Default type when IDs have no prefix: `opportunity`, `campaign`, `project`, or `cdh` |

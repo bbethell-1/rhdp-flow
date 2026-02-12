@@ -72,12 +72,38 @@ def _provider_parameter_values(
     return pv
 
 
+VALID_SALESFORCE_TYPES = {"opportunity", "campaign", "project", "cdh"}
+
+
 def _salesforce_items(schedule: "WorkshopSchedule") -> str:
-    """Format salesforce_items JSON string from salesforce_ids. Empty [] when not set."""
-    if schedule.salesforce_ids:
-        sf_type = schedule.salesforce_type if schedule.salesforce_type in ("opportunity", "campaign") else "opportunity"
-        return json.dumps([{"id": schedule.salesforce_ids, "type": sf_type, "required": True}])
-    return "[]"
+    """Format salesforce_items JSON string.
+
+    Supports multiple items via semicolon-separated ``type:id`` pairs in
+    ``salesforce_ids``, e.g. ``"opportunity:71456169;campaign:701Pe00000wHJg2IAG;project:P144"``.
+
+    For backwards-compat, a plain ID without a type prefix uses ``salesforce_type``
+    (default ``"opportunity"``).
+    """
+    if not schedule.salesforce_ids:
+        return "[]"
+
+    items = []
+    for part in schedule.salesforce_ids.split(";"):
+        part = part.strip()
+        if not part:
+            continue
+        if ":" in part:
+            sf_type, sf_id = part.split(":", 1)
+            sf_type = sf_type.strip().lower()
+            sf_id = sf_id.strip()
+        else:
+            sf_type = schedule.salesforce_type if schedule.salesforce_type in VALID_SALESFORCE_TYPES else "opportunity"
+            sf_id = part
+        if sf_type not in VALID_SALESFORCE_TYPES:
+            logger.warning(f"Unknown Salesforce type '{sf_type}', defaulting to 'opportunity'")
+            sf_type = "opportunity"
+        items.append({"id": sf_id, "type": sf_type, "required": True})
+    return json.dumps(items) if items else "[]"
 
 
 def _workshop_provision_parameters(param_values: Dict, resourceclaim_payload: Dict) -> Dict:
@@ -113,8 +139,8 @@ class WorkshopSchedule:
     users: Optional[int] = None  # Optional; when omitted/empty we don't set num_users
     instances: Optional[int] = None  # Optional; workshop instance/seat count for multi-asset (e.g. 30); used for numberSeats when users not set
     concurrency: Optional[int] = None  # Optional; WorkshopProvision concurrency (default 1)
-    salesforce_ids: str = ""  # Optional Salesforce ID(s) for chargeback
-    salesforce_type: str = "opportunity"  # Salesforce item type: "opportunity" or "campaign"
+    salesforce_ids: str = ""  # Semicolon-separated salesforce items, e.g. "opportunity:71456169;campaign:701Pe;project:P144" or plain ID
+    salesforce_type: str = "opportunity"  # Default type when salesforce_ids has no type prefix (opportunity, campaign, project, cdh)
     aws_regions: str = ""  # Optional comma-separated AWS regions for multi-region deployment (e.g., "us-east-1,eu-west-1")
     count: Optional[int] = None  # Optional deployment count (from Count CSV column); distinct from instances
     white_glove: bool = True  # Optional white-glove mode flag (default: enabled)
