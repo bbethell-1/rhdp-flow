@@ -351,6 +351,31 @@ def get_schedules():
     return [_schedule_to_response(s) for s in _schedules]
 
 
+@router.post("/schedules/validate-namespaces")
+def validate_namespaces():
+    """Check whether the namespaces referenced by loaded schedules exist on the cluster."""
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+    config = _get_config()
+    env = os.environ.copy()
+    if config.kubeconfig_path:
+        env["KUBECONFIG"] = config.kubeconfig_path
+
+    unique_ns = {s.namespace for s in _schedules}
+    results: Dict[str, bool] = {}
+    for ns in unique_ns:
+        try:
+            r = subprocess.run(
+                [config.oc_command, "get", "namespace", ns, "-o", "name"],
+                capture_output=True, text=True, timeout=10, env=env,
+            )
+            results[ns] = r.returncode == 0
+        except Exception:
+            results[ns] = False
+    missing = [ns for ns, ok in results.items() if not ok]
+    return {"namespaces": results, "missing": missing}
+
+
 # ---------------------------------------------------------------------------
 # Deploy
 # ---------------------------------------------------------------------------

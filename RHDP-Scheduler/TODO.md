@@ -2,9 +2,7 @@
 
 ## Backlog
 
-- [ ] Validate CSV when uploaded (beyond date warnings)
-- [ ] Ensure namespace exists / validate it before deploying
-- [ ] Sort out campaign vs opportunity (Salesforce field naming)
+(empty — all items completed or moved to Feature Ideas)
 
 ## Testing
 
@@ -16,10 +14,10 @@
 
 ## Documentation
 
-- [ ] Create clear example CSV sheets covering each deployment type (basic, multi-asset, grouped, multi-region, count expansion)
-- [ ] Write clear example commands for deploying and for QA verification
-- [ ] Write examples for operational commands: lock all, extend stop, extend destroy, scale
-- [ ] Add CSV wizard usage examples
+- [x] Create clear example CSV sheets covering each deployment type — see `docs/examples/`
+- [x] Write clear example commands for deploying and for QA verification — see `docs/USAGE.md`
+- [x] Write examples for operational commands: lock all, extend stop, extend destroy, scale — see `docs/USAGE.md`
+- [x] Add CSV wizard usage examples — see `docs/USAGE.md`
 - [ ] Record a short demo video showing all options
 
 ## Feature Ideas
@@ -55,6 +53,9 @@
 - [x] **Fix Lock Label** — Use correct `demo.redhat.com/lock-enabled` label matching RHDP UI (was `resource-lock`)
 - [x] **Remove False-Positive Warning** — Auto-destroy before auto-stop is valid (destroy nullifies stop)
 - [x] **Redirect Toggle** — `labUserInterface.redirect` configurable via Deploy Settings switch (default on); controls whether users auto-redirect to lab UI
+- [x] **Enhanced CSV Validation** — Duplicate row detection, CI format check, namespace format check, user count reasonableness, auto-stop before provisioning warning
+- [x] **Namespace Existence Validation** — API endpoint checks namespaces exist on cluster after upload; frontend shows danger alert for missing namespaces
+- [x] **Salesforce Campaign vs Opportunity** — New `Salesforce_Type` CSV column (default: `opportunity`) allows specifying `campaign` or `opportunity` type for chargeback
 
 ## Usage Examples
 
@@ -106,3 +107,5 @@ python3 rhdp_flow.py --wizard
 | Concurrency | No | 1 | Deployment concurrency |
 | Count | No | 1 | Number of instances to create |
 | AWS_Region | No | - | Comma-separated AWS regions for multi-region |
+| Salesforce IDs | No | - | Salesforce ID for chargeback |
+| Salesforce_Type | No | opportunity | Salesforce item type: `opportunity` or `campaign` |

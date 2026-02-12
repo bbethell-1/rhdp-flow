@@ -75,7 +75,8 @@ def _provider_parameter_values(
 def _salesforce_items(schedule: "WorkshopSchedule") -> str:
     """Format salesforce_items JSON string from salesforce_ids. Empty [] when not set."""
     if schedule.salesforce_ids:
-        return json.dumps([{"id": schedule.salesforce_ids, "type": "opportunity", "required": True}])
+        sf_type = schedule.salesforce_type if schedule.salesforce_type in ("opportunity", "campaign") else "opportunity"
+        return json.dumps([{"id": schedule.salesforce_ids, "type": sf_type, "required": True}])
     return "[]"
 
 
@@ -112,7 +113,8 @@ class WorkshopSchedule:
     users: Optional[int] = None  # Optional; when omitted/empty we don't set num_users
     instances: Optional[int] = None  # Optional; workshop instance/seat count for multi-asset (e.g. 30); used for numberSeats when users not set
     concurrency: Optional[int] = None  # Optional; WorkshopProvision concurrency (default 1)
-    salesforce_ids: str = ""  # Optional Salesforce ID(s) for chargeback (campaign, opportunity, marketing, etc.)
+    salesforce_ids: str = ""  # Optional Salesforce ID(s) for chargeback
+    salesforce_type: str = "opportunity"  # Salesforce item type: "opportunity" or "campaign"
     aws_regions: str = ""  # Optional comma-separated AWS regions for multi-region deployment (e.g., "us-east-1,eu-west-1")
     count: Optional[int] = None  # Optional deployment count (from Count CSV column); distinct from instances
     white_glove: bool = True  # Optional white-glove mode flag (default: enabled)
@@ -374,6 +376,7 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                     instances_str = row.get(header_map.get('instances', 'Instances'), '').strip()
                     concurrency_str = row.get(header_map.get('concurrency', 'Concurrency'), '').strip()
                     salesforce_ids = row.get(header_map.get('salesforce ids', header_map.get('campaign_id', 'Salesforce IDs')), '').strip()
+                    salesforce_type = row.get(header_map.get('salesforce_type', header_map.get('salesforce type', 'Salesforce_Type')), '').strip().lower() or 'opportunity'
                     count_str = row.get(header_map.get('count', 'Count'), '').strip()
                     aws_regions = row.get(header_map.get('aws_region', 'AWS_Region'), '').strip()
                     is_multi_asset = is_multi_asset_str.lower() in ['true', '1', 'yes', 'y'] if is_multi_asset_str else False
@@ -470,6 +473,7 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                         instances=instances,
                         concurrency=concurrency,
                         salesforce_ids=salesforce_ids,
+                        salesforce_type=salesforce_type,
                         aws_regions=aws_regions,
                         count=count,
                     )

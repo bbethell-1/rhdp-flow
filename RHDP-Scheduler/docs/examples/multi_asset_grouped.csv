@@ -1,0 +1,3 @@
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Workshop_Name
+Experience OpenShift Virtualization Roadshow,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-jdoe-redhat-com,20,True,virt-pass,Admin,QA,Virt Roadshow,19/03/2026 10:00,19/03/2026 18:00,21/03/2026 10:00,summit-demo-2026
+Ansible Network Automation Lab,zt-ansiblebu.ansible-network-automation-basics-lab-2.event,user-jdoe-redhat-com,20,True,ansible-pass,Admin,QA,Ansible Lab,19/03/2026 10:00,19/03/2026 18:00,21/03/2026 10:00,summit-demo-2026

@@ -78,6 +78,9 @@ export const UploadTab: React.FC<Props> = ({
   const [whiteGlove, setWhiteGlove] = useState(true);
   const [redirect, setRedirect] = useState(true);
 
+  // Namespace validation
+  const [missingNamespaces, setMissingNamespaces] = useState<string[]>([]);
+
   // Confirmation modal state
   const [showDeployConfirm, setShowDeployConfirm] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -89,6 +92,18 @@ export const UploadTab: React.FC<Props> = ({
   const warnings = useMemo(() => {
     const warns: ScheduleWarning[] = [];
     const now = new Date();
+
+    // Detect duplicate rows (same CI + Namespace)
+    const seen = new Map<string, number>();
+    schedules.forEach((s, i) => {
+      const key = `${s.ci}||${s.namespace}`;
+      if (seen.has(key) && !s.multi_workshop_name) {
+        warns.push({ index: i, field: 'ci', message: `"${s.ci_name}" appears to be a duplicate (same CI + Namespace as row ${(seen.get(key) ?? 0) + 1})` });
+      } else {
+        seen.set(key, i);
+      }
+    });
+
     schedules.forEach((s, i) => {
       const prov = parseScheduleDate(s.provisioning_date);
       const stop = parseScheduleDate(s.auto_stop);
@@ -106,6 +121,10 @@ export const UploadTab: React.FC<Props> = ({
       if (prov && prov < now)
         warns.push({ index: i, field: 'provisioning_date', message: `"${s.ci_name}" provisioning date is in the past (${s.provisioning_date})` });
 
+      // Auto-stop before provisioning
+      if (prov && stop && stop <= prov)
+        warns.push({ index: i, field: 'auto_stop', message: `"${s.ci_name}" auto-stop is before or equal to provisioning date` });
+
       // Missing required dates
       if (!s.provisioning_date?.trim())
         warns.push({ index: i, field: 'provisioning_date', message: `"${s.ci_name}" is missing a provisioning date` });
@@ -113,6 +132,20 @@ export const UploadTab: React.FC<Props> = ({
         warns.push({ index: i, field: 'auto_stop', message: `"${s.ci_name}" is missing an auto-stop date` });
       if (!s.auto_destroy?.trim())
         warns.push({ index: i, field: 'auto_destroy', message: `"${s.ci_name}" is missing an auto-destroy date` });
+
+      // CI format check (expect vendor.item.env pattern)
+      if (s.ci && !s.ci.includes('.'))
+        warns.push({ index: i, field: 'ci', message: `"${s.ci_name}" CI "${s.ci}" may be invalid (expected format: vendor.item.env)` });
+
+      // Namespace format check
+      if (s.namespace && !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(s.namespace))
+        warns.push({ index: i, field: 'namespace', message: `"${s.ci_name}" namespace "${s.namespace}" may be invalid (must be lowercase alphanumeric with hyphens)` });
+
+      // Users reasonableness
+      if (s.users !== null && s.users > 500)
+        warns.push({ index: i, field: 'users', message: `"${s.ci_name}" has a high user count (${s.users}) — verify this is intentional` });
+      if (s.users !== null && s.users < 1)
+        warns.push({ index: i, field: 'users', message: `"${s.ci_name}" has an invalid user count (${s.users})` });
 
       // Blank optional fields (informational)
       if (!s.password?.trim())
@@ -157,6 +190,11 @@ export const UploadTab: React.FC<Props> = ({
         ? `Loaded ${data.count} of ${data.total_rows} row(s) — ${data.skipped_rows} row(s) skipped`
         : `Loaded ${data.count} schedule(s)`;
       showToast(msg, data.skipped_rows ? 'danger' : 'success');
+      // Validate namespaces in background
+      setMissingNamespaces([]);
+      api.validateNamespaces()
+        .then(r => { if (r.missing.length) setMissingNamespaces(r.missing); })
+        .catch(() => { /* cluster may be unreachable — skip silently */ });
     } catch (e) {
       showToast(`Upload failed: ${e}`, 'danger');
     }
@@ -333,6 +371,14 @@ export const UploadTab: React.FC<Props> = ({
               <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
                 {warnings.map((w, i) => <li key={i}>{w.message}</li>)}
               </ul>
+            </Alert>
+          )}
+
+          {/* Namespace existence warning */}
+          {missingNamespaces.length > 0 && (
+            <Alert variant="danger" isInline title={`${missingNamespaces.length} namespace(s) not found on cluster`} style={{ marginBottom: 12 }}>
+              The following namespaces do not exist: <strong>{missingNamespaces.join(', ')}</strong>.
+              Deployment will fail unless these are created first.
             </Alert>
           )}
 

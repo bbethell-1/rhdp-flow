@@ -1,0 +1,2 @@
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Count
+Experience OpenShift Virtualization Roadshow,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-jdoe-redhat-com,20,True,virt2026,Admin,QA,Virt Roadshow,15/03/2026 11:00,15/03/2026 19:00,17/03/2026 11:00,3

@@ -48,6 +48,8 @@ export const api = {
     return res.json();
   },
   getSchedules: () => request<WorkshopSchedule[]>('/schedules'),
+  validateNamespaces: () =>
+    request<{ namespaces: Record<string, boolean>; missing: string[] }>('/schedules/validate-namespaces', { method: 'POST', body: '{}' }),
 
   // Deploy
   deploy: (body: DeployRequest) =>
