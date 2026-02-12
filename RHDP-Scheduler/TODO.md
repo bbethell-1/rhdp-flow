@@ -1,20 +1,11 @@
 # RHDP-Flow TODO List
 
-##
+## Backlog
 
-Remove validaiton warning on auto-stop
-
-validate csv when uploaded?
-
-ensure namespace exists / validate it 
-
-lock when deploying didn't work
-
-sort out campaign v opperunity 
-
-redirect: can add to csv or toggle? to turn on webui redirect
-
-    demo.redhat.com/lock-enabled: 'true'
+- [ ] Validate CSV when uploaded (beyond date warnings)
+- [ ] Ensure namespace exists / validate it before deploying
+- [ ] Sort out campaign vs opportunity (Salesforce field naming)
+- [ ] Redirect: add CSV column or toggle to turn on webui redirect
 
 ## Testing
 
@@ -54,13 +45,16 @@ redirect: can add to csv or toggle? to turn on webui redirect
 - [x] **Deployment Concurrency** — Add `Concurrency` column to CSV, configurable per workshop
 - [x] **Multiple Instance Support (Count)** — Add `Count` column to CSV, automatically expands into N instances
 - [x] **Multi-Asset Per-Item Passwords** — Rows sharing the same `Multi_Workshop_Name` are auto-grouped; each row has its own CI and password
-- [x] **Lock All** — `--lock` flag stops all workshops from the CSV immediately (sets stop time to now)
+- [x] **Lock All** — `--lock` flag sets `demo.redhat.com/lock-enabled` label on workshops
 - [x] **Extend Stop** — `--extend-stop --days N --hours N` extends auto-stop time for workshops
 - [x] **Extend Destroy** — `--extend-destroy --days N --hours N` extends auto-destroy/lifespan time for workshops and provisions
 - [x] **Scale** — `--scale N` sets WorkshopProvision count to target value
 - [x] **Regions (Multi-Region Provisioning)** — `AWS_Region` column supports comma-separated regions; creates one Workshop with multiple regional WorkshopProvisions, users distributed evenly
 - [x] **Interactive CSV Wizard** — `--wizard` launches a rich CLI wizard to generate workshop schedule CSVs interactively
-- [x] **Test Suite** — 113 tests across 26 groups covering all functionality (see `test_rhdp_flow.py`)
+- [x] **Test Suite** — 212 tests covering all functionality (see `test_rhdp_flow.py` and `tests/`)
+- [x] **Fix Workshop URLs** — Map infra domain (`ocp-{env}.infra.open.redhat.com`) to RHDP UI domain (`{env}.demo.redhat.com`) and append `/details` suffix
+- [x] **Fix Lock Label** — Use correct `demo.redhat.com/lock-enabled` label matching RHDP UI (was `resource-lock`)
+- [x] **Remove False-Positive Warning** — Auto-destroy before auto-stop is valid (destroy nullifies stop)
 
 ## Usage Examples
 
