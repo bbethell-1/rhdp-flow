@@ -1409,7 +1409,7 @@ class TestConstructWorkshopUrl(unittest.TestCase):
         )
         self.assertEqual(
             url,
-            "https://integration.demo.redhat.com/workshops/user-bbethell-redhat-com/openshift-cnv.ocp-virt-roadshow-multi-user.prod-vt958"
+            "https://integration.demo.redhat.com/workshops/user-bbethell-redhat-com/openshift-cnv.ocp-virt-roadshow-multi-user.prod-vt958/details"
         )
 
     def test_without_suffix(self):
@@ -1419,7 +1419,7 @@ class TestConstructWorkshopUrl(unittest.TestCase):
         )
         self.assertEqual(
             url,
-            "https://integration.demo.redhat.com/workshops/user-bbethell-redhat-com/openshift-cnv.ocp-virt-roadshow-multi-user.prod"
+            "https://integration.demo.redhat.com/workshops/user-bbethell-redhat-com/openshift-cnv.ocp-virt-roadshow-multi-user.prod/details"
         )
 
 
@@ -2316,7 +2316,7 @@ class TestDeriveBaseDomain(unittest.TestCase):
     def test_different_cluster(self):
         """Different cluster URL produces correct domain."""
         result = derive_base_domain("https://api.ocp-integration.infra.open.redhat.com:6443")
-        self.assertEqual(result, "ocp-integration.infra.open.redhat.com")
+        self.assertEqual(result, "integration.demo.redhat.com")
 
 
 # ============================================================================
@@ -2413,7 +2413,7 @@ class TestBaseDomainUrlConstruction(unittest.TestCase):
         )
         self.assertEqual(
             url,
-            "https://ocp-production.demo.redhat.com/workshops/user-bbethell-redhat-com/openshift-cnv.ocp-virt-roadshow-multi-user.prod-vt958",
+            "https://ocp-production.demo.redhat.com/workshops/user-bbethell-redhat-com/openshift-cnv.ocp-virt-roadshow-multi-user.prod-vt958/details",
         )
 
     def test_construct_workshop_url_default_domain(self):
@@ -2433,7 +2433,7 @@ class TestBaseDomainUrlConstruction(unittest.TestCase):
         )
         self.assertEqual(
             url,
-            "https://staging.demo.redhat.com/workshops/user-bbethell-redhat-com/openshift-cnv.ocp-virt-roadshow-multi-user.prod",
+            "https://staging.demo.redhat.com/workshops/user-bbethell-redhat-com/openshift-cnv.ocp-virt-roadshow-multi-user.prod/details",
         )
 
     def test_landing_page_url_custom_domain(self):

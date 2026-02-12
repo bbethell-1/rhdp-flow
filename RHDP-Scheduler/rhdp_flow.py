@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 import os
+import re
 
 # ============================================================================
 # CONFIGURATION & LOGGING SETUP
@@ -187,6 +188,9 @@ def derive_base_domain(cluster_url: str) -> str:
         host = host.rstrip("/")
         if host.startswith("api."):
             host = host[4:]
+        m = re.match(r'^ocp-(.+?)\.infra\.open\.redhat\.com$', host)
+        if m:
+            host = f"{m.group(1)}.demo.redhat.com"
         return host or fallback
     except Exception:
         return fallback
@@ -2205,7 +2209,7 @@ def construct_workshop_url(
     else:
         workshop_path = ci
 
-    url = f"https://{base_domain}/workshops/{namespace}/{workshop_path}"
+    url = f"https://{base_domain}/workshops/{namespace}/{workshop_path}/details"
     return url
 
 def get_landing_page_url(workshop_id: str, base_domain: str = "integration.demo.redhat.com") -> str:
