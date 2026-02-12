@@ -157,30 +157,31 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
       {qaResults.length > 0 ? (
         <>
           <Title headingLevel="h3" style={{ marginBottom: 8 }}>QA Results ({qaResults.length})</Title>
+          <div className="table-scroll-wrapper">
           <Table aria-label="QA results" variant="compact" className="fixed-table">
             <Thead>
               <Tr>
-                <Th width={15}>CI Name</Th>
-                <Th width={20}>CI</Th>
-                <Th width={10}>Status</Th>
-                <Th width={10}>Deployed</Th>
-                <Th width={10}>Healthy</Th>
-                <Th width={10}>Seats</Th>
-                <Th width={25}>Landing Page URL</Th>
+                <Th>CI Name</Th>
+                <Th>CI</Th>
+                <Th>Status</Th>
+                <Th>Deployed</Th>
+                <Th>Healthy</Th>
+                <Th>Seats</Th>
+                <Th>Landing Page URL</Th>
               </Tr>
             </Thead>
             <Tbody>
               {qaResults.map((r, i) => (
                 <Tr key={i}>
                   <Td dataLabel="CI Name">{r.ci_name}</Td>
-                  <Td dataLabel="CI"><span className="cell-truncate" title={r.ci}>{r.ci}</span></Td>
+                  <Td dataLabel="CI">{r.ci}</Td>
                   <Td dataLabel="Status"><span className={statusColorClass(r.status)}>{r.status}</span></Td>
                   <Td dataLabel="Deployed">{r.deployed || '-'}</Td>
                   <Td dataLabel="Healthy"><span className={healthyColorClass(r.healthy)}>{healthyDisplay(r.healthy)}</span></Td>
                   <Td dataLabel="Seats">{r.expected_seats ?? '-'} / {r.actual_seats ?? '-'}</Td>
                   <Td dataLabel="Landing Page URL">
                     {r.landing_page_url ? (
-                      <a className="cell-truncate" href={r.landing_page_url} target="_blank" rel="noopener noreferrer" title={r.landing_page_url}>
+                      <a href={r.landing_page_url} target="_blank" rel="noopener noreferrer" className="cell-truncate" title={r.landing_page_url}>
                         {r.landing_page_url}
                       </a>
                     ) : '-'}
@@ -189,6 +190,7 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
               ))}
             </Tbody>
           </Table>
+          </div>
         </>
       ) : (
         !qaResults.length && (

@@ -42,12 +42,13 @@ export const StudentsTab: React.FC<Props> = ({ qaResults }) => {
       </Split>
 
       {students.length > 0 ? (
+        <div className="table-scroll-wrapper">
         <Table aria-label="Student landing pages" variant="compact" className="fixed-table">
           <Thead>
             <Tr>
-              <Th width={20}>CI Name</Th>
-              <Th width={60}>Landing Page URL</Th>
-              <Th width={20}>Status</Th>
+              <Th>CI Name</Th>
+              <Th>Landing Page URL</Th>
+              <Th>Status</Th>
             </Tr>
           </Thead>
           <Tbody>
@@ -75,6 +76,7 @@ export const StudentsTab: React.FC<Props> = ({ qaResults }) => {
             ))}
           </Tbody>
         </Table>
+        </div>
       ) : (
         <EmptyState titleText="No student data" headingLevel="h3" icon={UsersIcon}>
           <EmptyStateBody>Run QA first to populate student landing pages.</EmptyStateBody>

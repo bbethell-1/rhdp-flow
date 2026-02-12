@@ -390,21 +390,21 @@ export const UploadTab: React.FC<Props> = ({
             </Alert>
           )}
 
-          <div style={{ marginBottom: 16 }}>
+          <div className="table-scroll-wrapper">
             <Table aria-label="Schedule preview" variant="compact" className="fixed-table">
               <Thead>
                 <Tr>
                   <Th />
-                  <Th width={10}>CI Name</Th>
-                  <Th width={10}>CI</Th>
-                  <Th width={10}>Workshop Name</Th>
-                  <Th width={10}>Namespace</Th>
-                  <Th width={10}>Users</Th>
-                  <Th width={10}>Instances</Th>
-                  <Th width={10}>UI</Th>
-                  <Th width={10}>Prov. Date</Th>
-                  <Th width={10}>Auto-Stop</Th>
-                  <Th width={10}>Auto-Destroy</Th>
+                  <Th>CI Name</Th>
+                  <Th>CI</Th>
+                  <Th>Workshop Name</Th>
+                  <Th>Namespace</Th>
+                  <Th>Users</Th>
+                  <Th>Instances</Th>
+                  <Th>UI</Th>
+                  <Th>Prov. Date</Th>
+                  <Th>Auto-Stop</Th>
+                  <Th>Auto-Destroy</Th>
                 </Tr>
               </Thead>
               <Tbody>
@@ -419,9 +419,9 @@ export const UploadTab: React.FC<Props> = ({
                         }}
                       />
                       <Td dataLabel="CI Name">{s.ci_name}</Td>
-                      <Td dataLabel="CI"><span className="cell-truncate" title={s.ci}>{s.ci}</span></Td>
-                      <Td dataLabel="Workshop Name"><span className="cell-truncate" title={s.workshop_name}>{s.workshop_name}</span></Td>
-                      <Td dataLabel="Namespace"><span className="cell-truncate" title={s.namespace}>{s.namespace}</span></Td>
+                      <Td dataLabel="CI">{s.ci}</Td>
+                      <Td dataLabel="Workshop Name">{s.workshop_name}</Td>
+                      <Td dataLabel="Namespace">{s.namespace}</Td>
                       <Td dataLabel="Users">{s.users ?? '-'}</Td>
                       <Td dataLabel="Instances">{s.instances ?? '-'}</Td>
                       <Td dataLabel="UI">{s.enable_workshop_interface ? 'Yes' : 'No'}</Td>

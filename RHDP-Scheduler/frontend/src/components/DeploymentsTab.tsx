@@ -210,34 +210,35 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
       </Split>
 
       {filteredResults.length > 0 ? (
+        <div className="table-scroll-wrapper">
         <Table aria-label="Deployment results" variant="compact" className="fixed-table">
           <Thead>
             <Tr>
-              <Th width={10}>CI Name</Th>
-              <Th width={10}>CI</Th>
-              <Th width={10}>Namespace</Th>
-              <Th width={10}>GUID</Th>
-              <Th width={10}>Status</Th>
-              <Th width={15}>URL</Th>
-              <Th width={10}>Prov. Date</Th>
-              <Th width={10}>Auto-Stop</Th>
-              <Th width={10}>Auto-Destroy</Th>
-              <Th width={10}>Timestamp</Th>
-              <Th width={10}>Error</Th>
+              <Th>CI Name</Th>
+              <Th>CI</Th>
+              <Th>Namespace</Th>
+              <Th>GUID</Th>
+              <Th>Status</Th>
+              <Th>URL</Th>
+              <Th>Prov. Date</Th>
+              <Th>Auto-Stop</Th>
+              <Th>Auto-Destroy</Th>
+              <Th>Timestamp</Th>
+              <Th>Error</Th>
             </Tr>
           </Thead>
           <Tbody>
             {filteredResults.map((r, i) => (
               <Tr key={i}>
                 <Td dataLabel="CI Name">{r.ci_name}</Td>
-                <Td dataLabel="CI"><span className="cell-truncate" title={r.ci}>{r.ci}</span></Td>
-                <Td dataLabel="Namespace"><span className="cell-truncate" title={r.namespace}>{r.namespace}</span></Td>
-                <Td dataLabel="GUID"><span className="cell-truncate" title={r.guid}>{r.guid}</span></Td>
+                <Td dataLabel="CI">{r.ci}</Td>
+                <Td dataLabel="Namespace">{r.namespace}</Td>
+                <Td dataLabel="GUID">{r.guid}</Td>
                 <Td dataLabel="Status"><span className={statusClass(r.status)}>{formatStatus(r.status)}</span></Td>
                 <Td dataLabel="URL">
                   {r.url ? (
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, maxWidth: '100%', minWidth: 0 }}>
-                      <a href={r.url} target="_blank" rel="noopener noreferrer" className="cell-truncate" style={{ minWidth: 0 }} title={r.url}>{r.url}</a>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <a href={r.url} target="_blank" rel="noopener noreferrer" className="cell-truncate" title={r.url}>{r.url}</a>
                       <Tooltip content="Copy URL">
                         <Button
                           variant="plain"
@@ -256,13 +257,12 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
                 <Td dataLabel="Auto-Stop">{r.auto_stop || '-'}</Td>
                 <Td dataLabel="Auto-Destroy">{r.auto_destroy || '-'}</Td>
                 <Td dataLabel="Timestamp">{r.timestamp}</Td>
-                <Td dataLabel="Error">
-                  {r.error_message ? <span className="cell-truncate" title={r.error_message}>{r.error_message}</span> : ''}
-                </Td>
+                <Td dataLabel="Error">{r.error_message || ''}</Td>
               </Tr>
             ))}
           </Tbody>
         </Table>
+        </div>
       ) : results.length > 0 ? (
         <EmptyState titleText="No matching results" headingLevel="h3" icon={CubesIcon}>
           <EmptyStateBody>Try adjusting your search or filter criteria.</EmptyStateBody>

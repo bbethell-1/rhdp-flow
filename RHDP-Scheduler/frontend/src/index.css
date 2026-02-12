@@ -129,16 +129,26 @@ html, body, #root {
   font-weight: 600;
 }
 
-/* Fixed-width tables: no horizontal scroll, cells truncate with ellipsis */
-.fixed-table {
-  table-layout: fixed;
-  width: 100%;
+/* Scrollable tables: auto-sized columns, horizontal scroll when needed */
+.table-scroll-wrapper {
+  overflow-x: auto;
+}
+.fixed-table.pf-v6-c-table {
+  width: max-content;
+  min-width: 100%;
+}
+.fixed-table.pf-v6-c-table td,
+.fixed-table.pf-v6-c-table th,
+.fixed-table.pf-v6-c-table .pf-v6-c-table__text {
+  white-space: nowrap !important;
 }
 .cell-truncate {
-  display: block;
+  display: inline-block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 360px;
+  vertical-align: bottom;
 }
 
 /* Operations grid — 2 columns on wide, 1 column on narrow, no horizontal scroll */
