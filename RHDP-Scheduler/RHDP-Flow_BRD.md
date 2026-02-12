@@ -3,7 +3,7 @@
 **Project:** RHDP Workshop Scheduling & Automation Tool
 **Prepared for:** John and the White Glove Workshop Team
 **Date:** February 2026
-**Status:** Proposed
+**Status:** Implemented
 
 ---
 
@@ -11,7 +11,7 @@
 
 The Red Hat Demo Platform (RHDP) team currently manages white glove workshop deployments through a largely manual process. Coordinators must individually create ResourceClaims, Workshops, and WorkshopProvisions through the RHDP UI or raw `oc` commands for every scheduled event. This is time-consuming, error-prone, and does not scale as event volume grows.
 
-We propose building **RHDP-Flow**, a CLI-based automation tool that reads workshop schedules from a simple CSV spreadsheet and handles all deployment orchestration against the RHDP cluster automatically. The tool would eliminate repetitive manual work, reduce deployment errors, and give the team operational controls (lock, extend, scale) they currently lack.
+**RHDP-Flow** is a CLI and web-based automation tool that reads workshop schedules from a simple CSV spreadsheet and handles all deployment orchestration against the RHDP cluster automatically. The tool eliminates repetitive manual work, reduces deployment errors, and gives the team operational controls (lock, extend, scale) that were previously unavailable at scale.
 
 ---
 
@@ -30,7 +30,7 @@ We propose building **RHDP-Flow**, a CLI-based automation tool that reads worksh
 
 ## 3. Proposed Solution
 
-Build a Python CLI tool (**RHDP-Flow**) that automates the full workshop deployment lifecycle:
+RHDP-Flow automates the full workshop deployment lifecycle via both a Python CLI and a React/PatternFly web UI:
 
 ### 3.1 Core Capabilities
 
@@ -48,12 +48,20 @@ Build a Python CLI tool (**RHDP-Flow**) that automates the full workshop deploym
 
 | Operation | Description |
 |-----------|-------------|
-| **Lock** | Immediately stop all workshops from a schedule by setting their stop time to now. |
+| **Lock** | Toggle `demo.redhat.com/lock-enabled` label on workshops to lock/unlock UI admin settings. |
 | **Extend Stop** | Push back the auto-stop time by a specified number of days/hours. |
 | **Extend Destroy** | Push back the auto-destroy/lifespan time for both Workshops and WorkshopProvisions. |
 | **Scale** | Adjust the seat count (WorkshopProvision `spec.count`) to a target value. |
 
-### 3.3 QA & Verification
+### 3.3 Data Management
+
+| Operation | Description |
+|-----------|-------------|
+| **Update Passwords** | Detect changed passwords in the CSV and patch existing workshops on the cluster automatically. |
+| **White Glove CSV Import** | Generate a schedule CSV directly from a deployed namespace — discovers Workshops on the cluster and exports them to CSV format. |
+| **Master Sheet Sync** | Compare a master scheduling sheet against a local sheet by (CI, Namespace) key; report added, changed, and unchanged rows; write merged output. |
+
+### 3.4 QA & Verification
 
 | Function | Description |
 |----------|-------------|
@@ -62,12 +70,22 @@ Build a Python CLI tool (**RHDP-Flow**) that automates the full workshop deploym
 | **Landing Page Export** | Export student-facing landing page URLs to a CSV for distribution. |
 | **Deployment Results** | Write a results CSV after every run with GUIDs, URLs, status, and any error messages. |
 
-### 3.4 User Experience
+### 3.5 Validation & Safety
 
 | Feature | Description |
 |---------|-------------|
-| **Interactive Wizard** | A guided CLI wizard for teams unfamiliar with the CSV format to generate schedule files interactively. |
+| **Enhanced CSV Validation** | Duplicate row detection, CI format checks, namespace format checks, user count reasonableness, and date ordering warnings on upload. |
+| **Namespace Existence Validation** | After CSV upload, the tool verifies each namespace exists on the cluster and alerts for missing namespaces before deployment. |
+| **Salesforce Tracking** | Supports multi-type Salesforce items (`opportunity`, `campaign`, `project`, `cdh`) via `type:id` pairs, attached as RHDP annotations for chargeback reporting. |
+
+### 3.6 User Experience
+
+| Feature | Description |
+|---------|-------------|
+| **Web UI** | A React/PatternFly 6 web interface for uploading CSVs, configuring deploy settings (lock, redirect, white-glove, concurrency), reviewing schedules, running dry-runs and deployments, and viewing results — all without touching the command line. |
+| **Interactive CLI Wizard** | A guided CLI wizard for teams unfamiliar with the CSV format to generate schedule files interactively. |
 | **CI Filtering** | Process only a specific catalog item from a larger schedule using `--ci`. |
+| **Redirect Toggle** | Configurable `labUserInterface.redirect` setting controls whether users auto-redirect to the lab UI on workshop access. |
 | **Debug Mode** | Verbose logging for troubleshooting deployment issues. |
 
 ---
@@ -82,12 +100,14 @@ Build a Python CLI tool (**RHDP-Flow**) that automates the full workshop deploym
 
 ## 5. Technical Approach
 
-- **Language:** Python 3.7+
+- **Backend:** Python 3.7+ CLI + FastAPI REST API (uvicorn)
+- **Frontend:** React 18 + TypeScript + PatternFly 6 + Vite
 - **Cluster Interaction:** All operations via `oc` CLI (no direct API authentication needed; uses existing `oc login` session)
 - **Input:** Standard CSV files (easily editable in Excel, Google Sheets, or any spreadsheet tool)
 - **Output:** Deployment results CSV, QA verification reports, student landing page CSV
-- **Dependencies:** Minimal — standard library only for core functionality; `rich` library optional for the interactive wizard
-- **Safety:** Dry-run mode for all operations; labeled resources for tracking (`rhdp-flow.gpte.redhat.com/scheduled`)
+- **Dependencies:** Minimal — standard library for core CLI; `rich` for interactive wizard; `fastapi`/`uvicorn` for API; React/PatternFly for web UI
+- **Testing:** 212 automated tests covering all functionality (pytest)
+- **Safety:** Dry-run mode for all operations; labeled resources for tracking (`rhdp-flow.gpte.redhat.com/scheduled`); CSV validation and namespace checks before deployment
 
 ---
 
@@ -116,20 +136,34 @@ Build a Python CLI tool (**RHDP-Flow**) that automates the full workshop deploym
 
 ## 8. Scope Boundaries
 
-**In scope:**
-- Workshop deployment automation from CSV
-- Operational lifecycle commands (lock, extend, scale)
-- QA verification and reporting
+**Delivered:**
+- Workshop deployment automation from CSV (CLI and Web UI)
+- Operational lifecycle commands (lock, extend stop, extend destroy, scale)
+- QA verification and reporting (QA1, QA2, landing page export)
 - Interactive CSV generation wizard
+- Web UI dashboard (React/PatternFly 6)
+- Password update detection and patching
+- White glove namespace discovery and CSV export
+- Master sheet sync and comparison
+- Enhanced CSV validation and namespace existence checks
+- Multi-type Salesforce chargeback tracking
+- Configurable redirect toggle
 
-**Out of scope (potential future work):**
-- Direct Google Sheets / master sheet integration
-- Automatic password rotation on deployed workshops
-- CSV generation from existing cluster state (white glove namespace discovery)
-- Web UI or dashboard (CLI-only for v1)
+**Potential future work:**
+- Direct Google Sheets API integration for live master sheet sync
+- Scheduled automatic sync (cron/daemon mode)
+- Role-based access control in the web UI
+- Slack/email notifications for deployment status
 
 ---
 
-## 9. Requested Approval
+## 9. Current Status
 
-We are requesting approval to proceed with development of RHDP-Flow as described above. The tool addresses a clear operational gap in white glove workshop management and would significantly reduce manual effort and deployment errors for the team.
+RHDP-Flow is fully implemented and has been tested on the integration cluster with real deployments. The tool is ready for production use. Key metrics:
+
+- **212 automated tests** covering all deployment, operational, and edge-case scenarios
+- **End-to-end validated** on `ocp-integration.infra.open.redhat.com` — Workshop + WorkshopProvision creation, lock/unlock, URL generation, and QA verification confirmed working
+- **Web UI operational** — CSV upload, deploy settings, dry-run, deployment, and result viewing all functional via browser
+- **CLI operational** — All commands (`--dry-run`, `--lock`, `--extend-stop`, `--extend-destroy`, `--scale`, `--update-passwords`, `--import-namespace`, `--sync`, `--wizard`) working
+
+The tool is ready for team adoption and white glove event use.

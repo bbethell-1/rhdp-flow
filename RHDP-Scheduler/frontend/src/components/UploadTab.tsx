@@ -465,7 +465,7 @@ export const UploadTab: React.FC<Props> = ({
                 <SplitItem>
                   <Switch
                     id="resource-lock-switch"
-                    label="Resource Lock"
+                    label="Lock UI Admin Settings"
                     isChecked={resourceLock}
                     onChange={(_e, checked) => setResourceLock(checked)}
                   />

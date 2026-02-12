@@ -37,6 +37,8 @@ from rhdp_flow import (
     extend_stop_time,
     extend_destroy_time,
     scale_workshops,
+    update_passwords,
+    import_namespace_to_csv,
     derive_base_domain,
 )
 
@@ -618,6 +620,42 @@ def op_scale(body: ScaleRequest):
     return OperationResponse(
         success=True,
         message=f"Scaled {len(schedules)} schedule(s) to count={body.target_count}",
+    )
+
+
+@router.post("/operations/update-passwords", response_model=OperationResponse)
+def op_update_passwords(body: LockRequest = LockRequest()):
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+    schedules = _filter_schedules(body.ci_filter)
+    config = _get_config()
+    updated = update_passwords(schedules, config)
+    return OperationResponse(
+        success=True,
+        message=f"Updated passwords for {updated} workshop(s)",
+    )
+
+
+@router.post("/operations/import-namespace")
+def op_import_namespace(namespace: str):
+    config = _get_config()
+    import tempfile
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, encoding="utf-8")
+    tmp.close()
+    rows = import_namespace_to_csv(namespace, tmp.name, config)
+    if not rows:
+        os.unlink(tmp.name)
+        raise HTTPException(404, f"No workshops found in namespace {namespace}")
+
+    def _iter():
+        with open(tmp.name, "r") as f:
+            yield f.read()
+        os.unlink(tmp.name)
+
+    return StreamingResponse(
+        _iter(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=imported_{namespace}.csv"},
     )
 
 

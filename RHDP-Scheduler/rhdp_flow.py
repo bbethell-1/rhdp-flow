@@ -3842,6 +3842,195 @@ def scale_workshops(schedules, config, target_count):
                 logger.info(f"Scaled provision {name} to count={target_count}")
 
 
+def update_passwords(schedules, config):
+    """Detect changed passwords in the CSV and patch existing workshops.
+
+    For each schedule, reads the current Workshop accessPassword from the
+    cluster and patches it if the CSV value differs.
+    """
+    env = os.environ.copy()
+    if config.kubeconfig_path:
+        env['KUBECONFIG'] = config.kubeconfig_path
+
+    updated = 0
+    skipped = 0
+    for schedule in schedules:
+        ns = schedule.namespace
+        ci = schedule.ci
+        new_password = schedule.password
+
+        get_cmd = [
+            config.oc_command, "get", "workshop",
+            "-n", ns,
+            "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}",
+            "-o", "json",
+        ]
+
+        if config.dry_run:
+            logger.info(f"[DRY-RUN] Would check/update password for CI={ci} in {ns}")
+            continue
+
+        result = subprocess.run(get_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+        if result.returncode != 0:
+            logger.error(f"Failed to get workshops for CI={ci}: {result.stderr}")
+            continue
+
+        workshops = json.loads(result.stdout).get('items', [])
+        for ws in workshops:
+            name = ws['metadata']['name']
+            current_password = ws.get('spec', {}).get('accessPassword', '')
+
+            if current_password == new_password:
+                logger.info(f"Workshop {name}: password unchanged, skipping")
+                skipped += 1
+                continue
+
+            patch = {"spec": {"accessPassword": new_password}}
+            patch_cmd = [
+                config.oc_command, "patch", "workshop", name,
+                "-n", ns, "--type", "merge",
+                "-p", json.dumps(patch),
+            ]
+            pr = subprocess.run(patch_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+            if pr.returncode == 0:
+                logger.info(f"Updated password for workshop {name}")
+                updated += 1
+            else:
+                logger.error(f"Failed to patch password for {name}: {pr.stderr}")
+
+    logger.info(f"Password update complete: {updated} updated, {skipped} unchanged")
+    return updated
+
+
+def import_namespace_to_csv(namespace: str, output_path: str, config: "RHDPConfig"):
+    """Discover deployed workshops in a namespace and export to CSV.
+
+    Runs ``oc get workshop`` against the cluster and builds a schedule CSV
+    from the discovered Workshop resources.
+    """
+    env = os.environ.copy()
+    if config.kubeconfig_path:
+        env['KUBECONFIG'] = config.kubeconfig_path
+
+    get_cmd = [
+        config.oc_command, "get", "workshop",
+        "-n", namespace,
+        "-o", "json",
+    ]
+    result = subprocess.run(get_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+    if result.returncode != 0:
+        logger.error(f"Failed to list workshops in {namespace}: {result.stderr}")
+        return []
+
+    workshops = json.loads(result.stdout).get('items', [])
+    if not workshops:
+        logger.warning(f"No workshops found in namespace {namespace}")
+        return []
+
+    rows = []
+    for ws in workshops:
+        meta = ws.get('metadata', {})
+        spec = ws.get('spec', {})
+        labels = meta.get('labels', {})
+        annotations = meta.get('annotations', {})
+
+        ci = labels.get('babylon.gpte.redhat.com/catalogItemName', '')
+        ci_name = annotations.get('babylon.gpte.redhat.com/catalogItemDisplayName', spec.get('displayName', ci))
+        password = spec.get('accessPassword', '')
+        has_ui = spec.get('labUserInterface', {}).get('redirect', False)
+        action_schedule = spec.get('actionSchedule', {})
+        lifespan = spec.get('lifespan', {})
+        purpose = annotations.get('demo.redhat.com/purpose', 'QA')
+        activity = annotations.get('demo.redhat.com/purpose-activity', 'Admin')
+
+        rows.append({
+            'CI Name': ci_name,
+            'CI': ci,
+            'Namespace': namespace,
+            'Users': '',
+            'Enable_workshop_interface': 'True' if has_ui else 'False',
+            'Password': password,
+            'Activity': activity,
+            'Purpose': purpose,
+            'Workshop Name': spec.get('displayName', ''),
+            'Provisioning Date (UTC)': action_schedule.get('start', ''),
+            'Auto-stop (UTC)': action_schedule.get('stop', ''),
+            'Auto-destroy (UTC)': lifespan.get('end', ''),
+        })
+
+    import csv
+    with open(output_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            'CI Name', 'CI', 'Namespace', 'Users', 'Enable_workshop_interface',
+            'Password', 'Activity', 'Purpose', 'Workshop Name',
+            'Provisioning Date (UTC)', 'Auto-stop (UTC)', 'Auto-destroy (UTC)',
+        ])
+        writer.writeheader()
+        writer.writerows(rows)
+
+    logger.info(f"Exported {len(rows)} workshop(s) from {namespace} to {output_path}")
+    return rows
+
+
+def sync_csv(master_path: str, local_path: str, output_path: str):
+    """Compare a master scheduling CSV against a local CSV and report differences.
+
+    Writes a merged CSV to *output_path* with rows from the master that are
+    missing or different in the local CSV.  Matching is by (CI, Namespace).
+    """
+    master_schedules = read_csv_input(master_path)
+    local_schedules = read_csv_input(local_path)
+
+    local_index = {(s.ci, s.namespace): s for s in local_schedules}
+
+    added = []
+    changed = []
+    unchanged = []
+
+    for ms in master_schedules:
+        key = (ms.ci, ms.namespace)
+        ls = local_index.get(key)
+        if ls is None:
+            added.append(ms)
+            logger.info(f"NEW in master: {ms.ci_name} ({ms.ci}) in {ms.namespace}")
+        else:
+            diffs = []
+            for field in ['password', 'users', 'provisioning_date', 'auto_stop', 'auto_destroy', 'concurrency']:
+                mv = getattr(ms, field)
+                lv = getattr(ls, field)
+                if str(mv) != str(lv):
+                    diffs.append(f"{field}: {lv!r} -> {mv!r}")
+            if diffs:
+                changed.append(ms)
+                logger.info(f"CHANGED: {ms.ci_name} — {', '.join(diffs)}")
+            else:
+                unchanged.append(ms)
+
+    # Write merged output (all master rows — effectively the new local)
+    import csv
+    all_schedules = master_schedules
+    with open(output_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=[
+            'CI Name', 'CI', 'Namespace', 'Users', 'Enable_workshop_interface',
+            'Password', 'Activity', 'Purpose', 'Workshop Name',
+            'Provisioning Date (UTC)', 'Auto-stop (UTC)', 'Auto-destroy (UTC)',
+        ])
+        writer.writeheader()
+        for s in all_schedules:
+            writer.writerow({
+                'CI Name': s.ci_name, 'CI': s.ci, 'Namespace': s.namespace,
+                'Users': s.users or '', 'Enable_workshop_interface': s.enable_workshop_interface,
+                'Password': s.password, 'Activity': s.activity, 'Purpose': s.purpose,
+                'Workshop Name': s.workshop_name,
+                'Provisioning Date (UTC)': s.provisioning_date,
+                'Auto-stop (UTC)': s.auto_stop, 'Auto-destroy (UTC)': s.auto_destroy,
+            })
+
+    logger.info(f"Sync complete: {len(added)} new, {len(changed)} changed, {len(unchanged)} unchanged")
+    logger.info(f"Merged CSV written to {output_path}")
+    return {"added": len(added), "changed": len(changed), "unchanged": len(unchanged)}
+
+
 def create_parser() -> ArgumentParser:
     """Create argument parser"""
     parser = ArgumentParser(
@@ -3936,6 +4125,21 @@ Examples:
         type=int,
         default=None,
         help="Scale workshop seat count to target value"
+    )
+    parser.add_argument(
+        "--update-passwords",
+        action="store_true",
+        help="Detect changed passwords in the CSV and patch existing workshops"
+    )
+    parser.add_argument(
+        "--import-namespace",
+        default="",
+        help="Import workshops from a namespace into a CSV (e.g. --import-namespace user-jdoe-redhat-com)"
+    )
+    parser.add_argument(
+        "--sync",
+        default="",
+        help="Path to master CSV; compares against --input-csv and writes merged output"
     )
 
     return parser
@@ -4068,7 +4272,22 @@ def main():
                 logger.error(f"No schedules found for CI: {args.ci}")
                 sys.exit(1)
 
-        # Handle operations (lock, extend, scale) and exit
+        # Handle import-namespace (doesn't need schedules from CSV)
+        if args.import_namespace:
+            output = args.output_csv if args.output_csv != "deployment_results.csv" else f"imported_{args.import_namespace}.csv"
+            import_namespace_to_csv(args.import_namespace, output, config)
+            sys.exit(0)
+
+        # Handle sync
+        if args.sync:
+            output = args.output_csv if args.output_csv != "deployment_results.csv" else "synced_schedule.csv"
+            sync_csv(args.sync, args.input_csv, output)
+            sys.exit(0)
+
+        # Handle operations (lock, extend, scale, update-passwords) and exit
+        if args.update_passwords:
+            update_passwords(schedules, config)
+            sys.exit(0)
         if args.lock:
             lock_workshops(schedules, config)
             sys.exit(0)

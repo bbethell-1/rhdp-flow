@@ -22,10 +22,10 @@
 
 ## Feature Ideas
 
-- [ ] **Update Passwords** — Re-run tool to detect changed passwords in the CSV and patch existing workshops (manual trigger)
-- [ ] **White Glove CSV Import** — Generate a schedule CSV directly from a white glove workshop namespace (the tool runs `oc` against the cluster to discover deployed items and exports them to CSV format)
-- [ ] **Master Sheet Sync** — Sync changes from the master scheduling sheet to our local sheet; compare daily or sync with APT before an event
-- [ ] **Business Requirements Document** — Create high-level BRD for presenting to John and team as a white glove solution (see `RHDP-Flow_BRD.md`)
+- [x] **Update Passwords** — `--update-passwords` detects changed passwords in the CSV and patches existing workshops (`POST /api/operations/update-passwords`)
+- [x] **White Glove CSV Import** — `--import-namespace` generates a schedule CSV from a deployed namespace (`POST /api/operations/import-namespace`)
+- [x] **Master Sheet Sync** — `--sync` compares master vs local CSV by (CI, Namespace) key; reports added/changed/unchanged rows
+- [x] **Business Requirements Document** — High-level BRD for presenting to John and team as a white glove solution (see `RHDP-Flow_BRD.md`)
 
 ## Completed Features
 
