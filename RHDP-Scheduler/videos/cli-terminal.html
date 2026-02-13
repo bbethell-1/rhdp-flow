@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RHDP-Flow CLI Terminal</title>
+<style>
+  /* ── Page background ── */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ── macOS-style terminal window ── */
+  .terminal-window {
+    width: 92%;
+    height: 88%;
+    background: #1e1e2e;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 25px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.06);
+  }
+
+  /* ── Title bar ── */
+  .title-bar {
+    height: 40px;
+    background: #2b2b3d;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .traffic-lights { display: flex; gap: 8px; }
+  .traffic-light { width: 13px; height: 13px; border-radius: 50%; }
+  .tl-red    { background: #ff5f57; }
+  .tl-yellow { background: #febc2e; }
+  .tl-green  { background: #28c840; }
+  .title-text {
+    flex: 1;
+    text-align: center;
+    color: #7f849c;
+    font-family: -apple-system, 'SF Pro Text', system-ui, sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    margin-right: 60px;
+  }
+
+  /* ── Terminal body ── */
+  .terminal-body {
+    padding: 18px 22px;
+    overflow-y: auto;
+    height: calc(100% - 40px);
+    font-family: 'JetBrains Mono', 'Menlo', 'Monaco', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 14.5px;
+    line-height: 1.65;
+    color: #cdd6f4;
+    scroll-behavior: smooth;
+  }
+  .terminal-body::-webkit-scrollbar { width: 8px; }
+  .terminal-body::-webkit-scrollbar-track { background: transparent; }
+  .terminal-body::-webkit-scrollbar-thumb { background: #45475a; border-radius: 4px; }
+
+  /* ── Line styles ── */
+  .line { white-space: pre-wrap; word-break: break-all; min-height: 1.65em; }
+  .line-gap { height: 0.5em; }
+
+  /* ── Prompt and command ── */
+  .prompt { color: #a6e3a1; font-weight: 600; }
+  .command { color: #f5e0dc; }
+  .flag { color: #89b4fa; }
+  .arg { color: #f9e2af; }
+
+  /* ── Output colors (Catppuccin Mocha palette) ── */
+  .out          { color: #bac2de; }
+  .out-success  { color: #a6e3a1; }
+  .out-warning  { color: #f9e2af; }
+  .out-error    { color: #f38ba8; }
+  .out-info     { color: #89b4fa; }
+  .out-dim      { color: #6c7086; }
+  .out-section  { color: #89dceb; font-weight: 600; }
+  .out-bold     { color: #cdd6f4; font-weight: 600; }
+  .out-highlight { color: #f5c2e7; }
+  .out-json-key { color: #89b4fa; }
+  .out-json-val { color: #a6e3a1; }
+  .out-ruler    { color: #45475a; }
+
+  /* ── Blinking cursor ── */
+  .cursor {
+    display: inline-block;
+    width: 9px;
+    height: 18px;
+    background: #a6e3a1;
+    vertical-align: text-bottom;
+    animation: blink 1s step-end infinite;
+    margin-left: 1px;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ── Label for line targeting by Playwright ── */
+  [data-label] { position: relative; }
+</style>
+</head>
+<body>
+<div class="terminal-window" id="terminal-window">
+  <div class="title-bar">
+    <div class="traffic-lights">
+      <div class="traffic-light tl-red"></div>
+      <div class="traffic-light tl-yellow"></div>
+      <div class="traffic-light tl-green"></div>
+    </div>
+    <div class="title-text" id="title-text">RHDP-Scheduler &mdash; rhdp_flow.py</div>
+  </div>
+  <div class="terminal-body" id="terminal">
+    <div class="line" id="current-line" data-label="prompt">
+      <span class="prompt">[rhdp-flow] $ </span><span class="command" id="cmd"></span><span class="cursor" id="cursor"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+const terminal = document.getElementById('terminal');
+const PROMPT_HTML = '<span class="prompt">[rhdp-flow] $ </span>';
+
+function scrollToBottom() {
+  terminal.scrollTop = terminal.scrollHeight;
+}
+
+// ── Public API for Playwright ──
+window.termAPI = {
+
+  /** Type a command character-by-character. Returns when done. */
+  async typeCommand(cmd, charDelay) {
+    charDelay = charDelay || 35;
+    const cmdEl = document.getElementById('cmd');
+    if (!cmdEl) return;
+    for (let i = 0; i < cmd.length; i++) {
+      cmdEl.textContent += cmd[i];
+      scrollToBottom();
+      await new Promise(r => setTimeout(r, charDelay + Math.random() * 15));
+    }
+  },
+
+  /** Finalize the current command line (remove cursor). */
+  pressEnter() {
+    const cursor = document.getElementById('cursor');
+    if (cursor) cursor.remove();
+    const cmdEl = document.getElementById('cmd');
+    if (cmdEl) cmdEl.removeAttribute('id');
+    const line = document.getElementById('current-line');
+    if (line) line.removeAttribute('id');
+  },
+
+  /** Append pre-formatted output HTML. Can assign a data-label for targeting. */
+  showOutput(html, label) {
+    const div = document.createElement('div');
+    div.className = 'line';
+    if (label) div.setAttribute('data-label', label);
+    div.innerHTML = html;
+    terminal.appendChild(div);
+    scrollToBottom();
+  },
+
+  /** Append multiple lines of output with optional per-line delay for animation. */
+  async showOutputAnimated(lines, lineDelay) {
+    lineDelay = lineDelay || 60;
+    for (const line of lines) {
+      this.showOutput(line.html || line, line.label || '');
+      scrollToBottom();
+      await new Promise(r => setTimeout(r, lineDelay));
+    }
+  },
+
+  /** Insert a blank gap line. */
+  gap() {
+    const div = document.createElement('div');
+    div.className = 'line-gap';
+    terminal.appendChild(div);
+  },
+
+  /** Show a new prompt with blinking cursor. */
+  showPrompt() {
+    const line = document.createElement('div');
+    line.className = 'line';
+    line.id = 'current-line';
+    line.setAttribute('data-label', 'prompt');
+    line.innerHTML = PROMPT_HTML +
+      '<span class="command" id="cmd"></span>' +
+      '<span class="cursor" id="cursor"></span>';
+    terminal.appendChild(line);
+    scrollToBottom();
+  },
+
+  /** Clear all terminal content and show a fresh prompt. */
+  clear() {
+    terminal.innerHTML = '';
+    this.showPrompt();
+  },
+
+  /** Change the window title text. */
+  setTitle(text) {
+    document.getElementById('title-text').textContent = text;
+  }
+};
+</script>
+</body>
+</html>

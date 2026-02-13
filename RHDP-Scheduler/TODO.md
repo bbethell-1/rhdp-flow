@@ -2,20 +2,11 @@
 
 ## Backlog
 
-Validation 
-If num-users hardcoded then don't deploy more then that number Hardcoded in agV / catalog
-
-test mutli region split for aws items eg:
-
-<img width="1099" height="1270" alt="image" src="https://github.com/user-attachments/assets/cdca9296-ffc0-4777-845a-98248f8a4f8f" />
-
-For redirect toggle  - assume if off then leaves it to default (agV takes precidance)? eg:
-
-rdirect toggle is off - some has it hard coded - hard coding will take place and have it on for those ones?
-
-1 or 2 videos showing the CLI - espically for folks who love the cli ;) John etc
-
-Could we get a log saved in a txt file for deployments QA etc with timestamps? Thinking if anything goes bad - espically human side - then we can trace it back
+- [ ] **agV num_users validation** — Before deploying, check if the catalog item has a hardcoded `num_users` limit in agnosticV; refuse to deploy more than the cap. Requires querying the agV catalog definition per CI.
+- [x] ~~**Test multi-region split for AWS items**~~ — Covered by 8 unit tests (even/remainder user distribution, region suffixes, underscore replacement, extra_parameters, single workshop + N provisions, concurrency inheritance, 3-region distribution) plus `multi_region.csv` and `one_workshop_two_regions.csv` examples.
+- [x] ~~**Redirect toggle behavior**~~ — Implemented: toggle explicitly sets `labUserInterface.redirect = False` when off (default True). agV defaults do NOT take precedence; the toggle always overrides.
+- [x] ~~**CLI demo videos**~~ — 2 chapter videos in `videos/`: `07-cli-deploy-and-qa`, `08-cli-ops-and-wizard`.
+- [ ] **Deployment log file** — Automatically save a timestamped log (txt) for each deployment and QA run. Useful for tracing issues after the fact. Currently the backend uses structured logging (opt-in JSON via `LOG_FORMAT=json`) but does not persist per-run log files to disk.
 
 ## Testing
 
@@ -31,7 +22,7 @@ Could we get a log saved in a txt file for deployments QA etc with timestamps? T
 - [x] Write clear example commands for deploying and for QA verification — see `docs/USAGE.md`
 - [x] Write examples for operational commands: lock all, extend stop, extend destroy, scale — see `docs/USAGE.md`
 - [x] Add CSV wizard usage examples — see `docs/USAGE.md`
-- [ ] Record a short demo video showing all options
+- [x] Record demo videos — 6 web UI chapters (`videos/01`–`06`) + 2 CLI chapters (`videos/07`–`08`)
 
 ## Feature Ideas
 

@@ -446,6 +446,58 @@ export function renameLatestWebm(targetName) {
   return dest;
 }
 
+// ─── CLI Terminal helpers (for record-cli-demo.mjs) ─────────────────────────
+
+export const CLI_TERMINAL_PATH = path.resolve(__dirname, 'cli-terminal.html');
+
+/** Type a command into the browser-rendered terminal. */
+export async function termType(page, command, charDelay = 35) {
+  await page.evaluate(
+    ({ cmd, delay }) => window.termAPI.typeCommand(cmd, delay),
+    { cmd: command, delay: charDelay },
+  );
+  await wait(300);
+}
+
+/** Press Enter — finalize the command line and remove cursor. */
+export async function termEnter(page) {
+  await page.evaluate(() => window.termAPI.pressEnter());
+  await wait(200);
+}
+
+/** Append pre-formatted HTML output to the terminal. */
+export async function termOutput(page, html, label = '') {
+  await page.evaluate(({ h, l }) => window.termAPI.showOutput(h, l), { h: html, l: label });
+  await wait(80);
+}
+
+/** Append multiple lines with a per-line delay for animated reveal. */
+export async function termOutputAnimated(page, lines, lineDelay = 60) {
+  await page.evaluate(
+    ({ lines, delay }) => window.termAPI.showOutputAnimated(lines, delay),
+    { lines, delay: lineDelay },
+  );
+  // Wait for all lines to finish rendering
+  await wait(lines.length * lineDelay + 200);
+}
+
+/** Insert a visual gap in the terminal. */
+export async function termGap(page) {
+  await page.evaluate(() => window.termAPI.gap());
+}
+
+/** Show a new prompt with blinking cursor. */
+export async function termPrompt(page) {
+  await page.evaluate(() => window.termAPI.showPrompt());
+  await wait(300);
+}
+
+/** Clear the terminal and show a fresh prompt. */
+export async function termClear(page) {
+  await page.evaluate(() => window.termAPI.clear());
+  await wait(300);
+}
+
 /** Remove stray .webm files that aren't chapter outputs or the legacy single video. */
 export function cleanupStrayWebm(keepPrefixes = []) {
   const files = fs.readdirSync(VIDEOS_DIR).filter((f) => f.endsWith('.webm'));
