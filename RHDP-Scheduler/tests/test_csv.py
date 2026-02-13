@@ -5,7 +5,13 @@ import io
 import os
 import tempfile
 
-from rhdp_flow import read_csv_input, write_deployment_results, DeploymentResult
+from rhdp_flow import (
+    read_csv_input,
+    write_deployment_results,
+    DeploymentResult,
+    load_asset_passwords,
+    load_asset_num_users,
+)
 from tests.conftest import (
     BASIC_WORKSHOP_CSV,
     MULTI_ASSET_OLD_CSV,
@@ -127,3 +133,233 @@ Valid Row,valid-ci,valid-ns,20,True,pass,Admin,QA,My Workshop,15/02/2026 11:00,1
         schedules = read_csv_input(path)
         assert len(schedules) == 1
         assert schedules[0].salesforce_ids == "71403328"
+
+    def test_count_parsed(self):
+        """Test that Count column is parsed."""
+        csv_text = """\
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Count
+Twin Workshop,some-ci,some-ns,20,True,pw,Admin,QA,Twin,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,2
+"""
+        path = self._write(csv_text)
+        schedules = read_csv_input(path)
+        assert len(schedules) == 1
+        assert schedules[0].count == 2
+
+    def test_aws_regions_parsed(self):
+        """Test that AWS_Region column is parsed."""
+        csv_text = """\
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),AWS_Region
+Multi Region,aws.rosa.prod,some-ns,60,True,pw,Admin,QA,ROSA,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,"us-east-1,eu-west-1"
+"""
+        path = self._write(csv_text)
+        schedules = read_csv_input(path)
+        assert len(schedules) == 1
+        assert "us-east-1" in schedules[0].aws_regions
+        assert "eu-west-1" in schedules[0].aws_regions
+
+    def test_empty_auto_stop_allowed(self):
+        """Test that empty Auto-stop (UTC) is allowed."""
+        csv_text = """\
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC)
+No Stop,some-ci,some-ns,10,True,pw,Admin,QA,No Stop,15/02/2026 11:00,,17/02/2026 11:00
+"""
+        path = self._write(csv_text)
+        schedules = read_csv_input(path)
+        assert len(schedules) == 1
+        assert schedules[0].auto_stop == ""
+
+    def test_case_insensitive_headers(self):
+        """Test that column names are matched case-insensitively."""
+        csv_text = """\
+ci name,ci,namespace,users,enable_workshop_interface,password,activity,purpose,workshop name,provisioning date (utc),auto-stop (utc),auto-destroy (utc)
+Lower Row,lower-ci,lower-ns,5,True,secret,Admin,QA,Lower Workshop,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00
+"""
+        path = self._write(csv_text)
+        schedules = read_csv_input(path)
+        assert len(schedules) == 1
+        assert schedules[0].ci_name == "Lower Row"
+        assert schedules[0].ci == "lower-ci"
+        assert schedules[0].namespace == "lower-ns"
+        assert schedules[0].users == 5
+
+    def test_read_from_stringio(self):
+        """Test that read_csv_input accepts a file-like object (e.g. StringIO)."""
+        import io
+        csv_text = BASIC_WORKSHOP_CSV
+        f = io.StringIO(csv_text)
+        schedules = read_csv_input(f)
+        assert len(schedules) == 1
+        assert schedules[0].ci == "openshift-cnv.ocp-virt-roadshow-multi-user.prod"
+
+    def test_salesforce_type_parsed(self):
+        """Test that Salesforce_Type column is parsed (campaign, cdh, etc.)."""
+        csv_text = """\
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Salesforce IDs,Salesforce_Type
+Campaign Row,camp-ci,some-ns,20,True,pw,Admin,QA,Campaign,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,701Pe,campaign
+"""
+        path = self._write(csv_text)
+        schedules = read_csv_input(path)
+        assert len(schedules) == 1
+        assert schedules[0].salesforce_type == "campaign"
+        assert schedules[0].salesforce_ids == "701Pe"
+
+    def test_multiple_rows_same_namespace(self):
+        """Test parsing multiple workshops in the same namespace."""
+        csv_text = """\
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC)
+First Workshop,ci-one,user-team-redhat-com,20,True,pw1,Admin,QA,First,15/02/2026 09:00,15/02/2026 17:00,17/02/2026 09:00
+Second Workshop,ci-two,user-team-redhat-com,25,True,pw2,Admin,QA,Second,15/02/2026 10:00,15/02/2026 18:00,17/02/2026 10:00
+"""
+        path = self._write(csv_text)
+        schedules = read_csv_input(path)
+        assert len(schedules) == 2
+        assert schedules[0].namespace == schedules[1].namespace == "user-team-redhat-com"
+        assert schedules[0].ci_name == "First Workshop"
+        assert schedules[1].ci_name == "Second Workshop"
+
+    def test_users_optional_empty(self):
+        """Test that Users can be empty (optional)."""
+        csv_text = """\
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC)
+No Users,some-ci,some-ns,,True,pw,Admin,QA,No Users,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00
+"""
+        path = self._write(csv_text)
+        schedules = read_csv_input(path)
+        assert len(schedules) == 1
+        assert schedules[0].users is None
+
+    def test_example_minimal_workshop_parses(self):
+        """Docs example minimal_workshop.csv parses correctly."""
+        examples_dir = os.path.join(os.path.dirname(__file__), "..", "docs", "examples")
+        path = os.path.join(examples_dir, "minimal_workshop.csv")
+        if not os.path.exists(path):
+            pytest.skip("docs/examples/minimal_workshop.csv not found")
+        schedules = read_csv_input(path)
+        assert len(schedules) == 1
+        assert schedules[0].ci_name == "Minimal Workshop"
+        assert schedules[0].users == 10
+
+    def test_example_count_two_instances_parses(self):
+        """Docs example count_two_instances.csv parses Count=2."""
+        examples_dir = os.path.join(os.path.dirname(__file__), "..", "docs", "examples")
+        path = os.path.join(examples_dir, "count_two_instances.csv")
+        if not os.path.exists(path):
+            pytest.skip("docs/examples/count_two_instances.csv not found")
+        schedules = read_csv_input(path)
+        assert len(schedules) == 1
+        assert schedules[0].count == 2
+
+    def test_example_no_auto_stop_parses(self):
+        """Docs example no_auto_stop.csv has empty auto_stop."""
+        examples_dir = os.path.join(os.path.dirname(__file__), "..", "docs", "examples")
+        path = os.path.join(examples_dir, "no_auto_stop.csv")
+        if not os.path.exists(path):
+            pytest.skip("docs/examples/no_auto_stop.csv not found")
+        schedules = read_csv_input(path)
+        assert len(schedules) == 1
+        assert schedules[0].auto_stop == ""
+
+    def test_example_one_workshop_two_regions_parses(self):
+        """Docs example one_workshop_two_regions.csv: one workshop across 2 AWS regions."""
+        examples_dir = os.path.join(os.path.dirname(__file__), "..", "docs", "examples")
+        path = os.path.join(examples_dir, "one_workshop_two_regions.csv")
+        if not os.path.exists(path):
+            pytest.skip("docs/examples/one_workshop_two_regions.csv not found")
+        schedules = read_csv_input(path)
+        assert len(schedules) == 1
+        assert "us-east-1" in schedules[0].aws_regions
+        assert "eu-west-1" in schedules[0].aws_regions
+
+
+class TestLoadAssetPasswords:
+    """Tests for load_asset_passwords."""
+
+    def setup_method(self):
+        self._tmpfiles = []
+
+    def teardown_method(self):
+        for f in self._tmpfiles:
+            try:
+                os.unlink(f)
+            except OSError:
+                pass
+
+    def _write(self, csv_text):
+        path = write_csv_tempfile(csv_text)
+        self._tmpfiles.append(path)
+        return path
+
+    def test_load_asset_passwords_missing_file(self):
+        """Non-existent file returns empty dict."""
+        result = load_asset_passwords("/nonexistent/passwords.csv")
+        assert result == {}
+
+    def test_load_asset_passwords_none_path(self):
+        """None path returns empty dict."""
+        result = load_asset_passwords(None)
+        assert result == {}
+
+    def test_load_asset_passwords_ci_password_columns(self):
+        """CI and Password columns are parsed."""
+        csv_text = "CI,Password\nci-a,pass-a\nci-b,pass-b\n"
+        path = self._write(csv_text)
+        result = load_asset_passwords(path)
+        assert result["ci-a"] == "pass-a"
+        assert result["ci-b"] == "pass-b"
+
+    def test_load_asset_passwords_skips_empty_rows(self):
+        """Rows with missing CI or Password are skipped."""
+        csv_text = "CI,Password\nci-a,pass-a\n,\nci-b,\n\nci-c,pass-c\n"
+        path = self._write(csv_text)
+        result = load_asset_passwords(path)
+        assert result.get("ci-a") == "pass-a"
+        assert result.get("ci-c") == "pass-c"
+        assert "ci-b" not in result
+
+
+class TestLoadAssetNumUsers:
+    """Tests for load_asset_num_users."""
+
+    def setup_method(self):
+        self._tmpfiles = []
+
+    def teardown_method(self):
+        for f in self._tmpfiles:
+            try:
+                os.unlink(f)
+            except OSError:
+                pass
+
+    def _write(self, csv_text):
+        path = write_csv_tempfile(csv_text)
+        self._tmpfiles.append(path)
+        return path
+
+    def test_load_asset_num_users_missing_file(self):
+        """Non-existent file returns empty dict."""
+        result = load_asset_num_users("/nonexistent/asset_users.csv")
+        assert result == {}
+
+    def test_load_asset_num_users_ci_num_users_columns(self):
+        """CI and num_users (or Users) columns are parsed."""
+        csv_text = "CI,num_users\nci-a,10\nci-b,20\n"
+        path = self._write(csv_text)
+        result = load_asset_num_users(path)
+        assert result["ci-a"] == 10
+        assert result["ci-b"] == 20
+
+    def test_load_asset_num_users_users_column_fallback(self):
+        """Users column is used when num_users is not present."""
+        csv_text = "CI,Users\nci-x,30\n"
+        path = self._write(csv_text)
+        result = load_asset_num_users(path)
+        assert result["ci-x"] == 30
+
+    def test_load_asset_num_users_invalid_number_skipped(self):
+        """Invalid number in num_users is skipped (no crash)."""
+        csv_text = "CI,num_users\nci-a,10\nci-b,not-a-number\nci-c,15\n"
+        path = self._write(csv_text)
+        result = load_asset_num_users(path)
+        assert result["ci-a"] == 10
+        assert result["ci-c"] == 15
+        assert "ci-b" not in result

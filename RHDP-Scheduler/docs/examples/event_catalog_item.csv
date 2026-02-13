@@ -1,0 +1,2 @@
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC)
+Summit Event Lab,zt-ansiblebu.ansible-network-automation-basics-lab-2.event,user-summit-redhat-com,25,True,event2026,Admin,Demo,Summit Event Workshop,25/03/2026 10:00,25/03/2026 18:00,27/03/2026 10:00

@@ -4048,8 +4048,8 @@ Examples:
     
     parser.add_argument(
         "--input-csv",
-        required=True,
-        help="Path to input CSV file with workshop schedules"
+        default="",
+        help="Path to input CSV file with workshop schedules (required unless --wizard, --import-namespace, or --sync)"
     )
     parser.add_argument(
         "--output-csv",
@@ -4135,6 +4135,11 @@ Examples:
         default="",
         help="Path to master CSV; compares against --input-csv and writes merged output"
     )
+    parser.add_argument(
+        "--wizard",
+        action="store_true",
+        help="Launch interactive CSV wizard to generate a workshop schedule file"
+    )
 
     return parser
 
@@ -4142,6 +4147,20 @@ def main():
     """Main orchestration function"""
     parser = create_parser()
     args = parser.parse_args()
+    
+    # Wizard mode: launch interactive CSV wizard and exit
+    if args.wizard:
+        from rhdp_flow_wizard import RHDPWizard
+        config = RHDPConfig()
+        config.dry_run = args.dry_run
+        config.kubeconfig_path = args.kubeconfig or os.environ.get('KUBECONFIG')
+        wizard = RHDPWizard(config)
+        wizard.run()
+        sys.exit(0)
+    
+    # Require --input-csv unless using a mode that doesn't need it
+    if not args.input_csv and not args.import_namespace and not args.sync:
+        parser.error("--input-csv is required (or use --wizard, --import-namespace, or --sync)")
     
     # Configure logging
     if args.debug:

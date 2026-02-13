@@ -220,12 +220,10 @@ Multi_Asset, Asset_CIs, Multi_Workshop_Name, Instances, Concurrency
 | Instances | No | Total seat/instance count (used for multi-asset numberSeats) |
 | Concurrency | No | WorkshopProvision concurrency (default 1) |
 
-See `sample-csvs/` for working examples:
+See **sample-csvs/** for working examples and **docs/examples/** for more:
 
-- `multi-asset-event-v2.csv` — Multi-asset event with Salesforce IDs
-- `multi_asset_grouped.csv` — Grouped multi-asset rows
-- `dedicated_per_user.csv` — Dedicated per-user cluster
-- `asset_passwords_example.csv` — Per-asset password companion file
+- **sample-csvs:** `multi-asset-event-v2.csv`, `multi_asset_grouped.csv`, `dedicated_per_user.csv`, `asset_passwords_example.csv`
+- **docs/examples:** [README](docs/examples/README.md) — minimal_workshop, count_expansion, multi_region, no_auto_stop, event_catalog_item, salesforce_multi_type, two_workshops_same_namespace, and more
 
 ## CLI Usage
 
@@ -395,7 +393,7 @@ source .venv/bin/activate
 python -m pytest tests/ -v
 ```
 
-77 tests covering API endpoints, CSV parsing, date handling, and models.
+Backend tests cover API endpoints, CSV parsing (including Count, AWS_Region, Salesforce type, load_asset_passwords, load_asset_num_users), date handling, derive_base_domain, build_resource_claim_payload, and models. Run: `python -m pytest tests/ -v`
 
 ### Frontend Tests
 
