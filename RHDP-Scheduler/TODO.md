@@ -15,6 +15,8 @@ rdirect toggle is off - some has it hard coded - hard coding will take place and
 
 1 or 2 videos showing the CLI - espically for folks who love the cli ;) John etc
 
+Could we get a log saved in a txt file for deployments QA etc with timestamps? Thinking if anything goes bad - espically human side - then we can trace it back
+
 ## Testing
 
 - [x] Test multi-asset with `Multi_Asset=True` + `Asset_CIs` (old format) vs grouped rows with `Multi_Workshop_Name` (new format) — verify both paths produce correct results and that per-item passwords work in both cases (5 tests: shared password, asset parsing, per-item password propagation, mixed concurrency, graceful degradation)
