@@ -270,6 +270,59 @@ No Users,some-ci,some-ns,,True,pw,Admin,QA,No Users,15/02/2026 11:00,15/02/2026 
         assert "us-east-1" in schedules[0].aws_regions
         assert "eu-west-1" in schedules[0].aws_regions
 
+    def test_example_workshop_ui_disabled_parses(self):
+        """Docs example workshop_ui_disabled.csv: Enable_workshop_interface False."""
+        examples_dir = os.path.join(os.path.dirname(__file__), "..", "docs", "examples")
+        path = os.path.join(examples_dir, "workshop_ui_disabled.csv")
+        if not os.path.exists(path):
+            pytest.skip("docs/examples/workshop_ui_disabled.csv not found")
+        schedules = read_csv_input(path)
+        assert len(schedules) == 1
+        assert schedules[0].enable_workshop_interface is False
+
+    def test_example_single_salesforce_opportunity_parses(self):
+        """Docs example single_salesforce_opportunity.csv: one SF opportunity."""
+        examples_dir = os.path.join(os.path.dirname(__file__), "..", "docs", "examples")
+        path = os.path.join(examples_dir, "single_salesforce_opportunity.csv")
+        if not os.path.exists(path):
+            pytest.skip("docs/examples/single_salesforce_opportunity.csv not found")
+        schedules = read_csv_input(path)
+        assert len(schedules) == 1
+        assert schedules[0].salesforce_ids == "71456169"
+        assert schedules[0].salesforce_type == "opportunity"
+
+    def test_example_users_omitted_parses(self):
+        """Docs example users_omitted.csv: Users column empty."""
+        examples_dir = os.path.join(os.path.dirname(__file__), "..", "docs", "examples")
+        path = os.path.join(examples_dir, "users_omitted.csv")
+        if not os.path.exists(path):
+            pytest.skip("docs/examples/users_omitted.csv not found")
+        schedules = read_csv_input(path)
+        assert len(schedules) == 1
+        assert schedules[0].users is None
+
+    def test_example_multi_asset_with_instances_parses(self):
+        """Docs example multi_asset_with_instances.csv: Instances and Concurrency."""
+        examples_dir = os.path.join(os.path.dirname(__file__), "..", "docs", "examples")
+        path = os.path.join(examples_dir, "multi_asset_with_instances.csv")
+        if not os.path.exists(path):
+            pytest.skip("docs/examples/multi_asset_with_instances.csv not found")
+        schedules = read_csv_input(path)
+        assert len(schedules) == 2
+        assert schedules[0].instances == 30
+        assert schedules[0].concurrency == 2
+        assert schedules[0].multi_workshop_name == "summit-30-seats"
+
+    def test_example_multi_asset_companion_parses(self):
+        """Docs example multi_asset_companion.csv: grouped multi-asset with companion passwords."""
+        examples_dir = os.path.join(os.path.dirname(__file__), "..", "docs", "examples")
+        path = os.path.join(examples_dir, "multi_asset_companion.csv")
+        if not os.path.exists(path):
+            pytest.skip("docs/examples/multi_asset_companion.csv not found")
+        schedules = read_csv_input(path)
+        assert len(schedules) == 2
+        assert schedules[0].multi_workshop_name == "summit-demo-2026"
+
 
 class TestLoadAssetPasswords:
     """Tests for load_asset_passwords."""
