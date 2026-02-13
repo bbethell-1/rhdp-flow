@@ -377,9 +377,29 @@ export async function scrollSection(page, top) {
   await wait(800);
 }
 
-// ─── CSV upload via API (reliable for PF6 FileUpload) ───────────────────────
+// ─── CSV upload via UI (setInputFiles + click Upload button) ────────────────
 
-export async function uploadCSVviaAPI(page, csvPath = CSV_PATH) {
+/**
+ * Upload a CSV through the UI so React state is set correctly.
+ * Falls back to API upload + client-side fetch if UI upload fails.
+ */
+export async function uploadCSV(page, csvPath = CSV_PATH) {
+  // Try the UI approach first: set the file input, then click Upload
+  const fileInput = page.locator('input[type="file"]').first();
+  await fileInput.setInputFiles(csvPath);
+  await wait(1000);
+
+  const uploadBtn = page.locator('button').filter({ hasText: /^Upload$/ }).first();
+  if (await uploadBtn.count() > 0) {
+    await uploadBtn.click();
+    await wait(2500);
+  }
+
+  // Verify the table appeared (schedules loaded)
+  const table = page.locator('.pf-v6-c-table');
+  if (await table.count() > 0) return;
+
+  // Fallback: upload via API then trigger client-side fetch
   const csvContent = fs.readFileSync(csvPath, 'utf8');
   const csvName = path.basename(csvPath);
   await page.evaluate(async ({ csv, name }) => {
@@ -388,7 +408,16 @@ export async function uploadCSVviaAPI(page, csvPath = CSV_PATH) {
     fd.append('file', blob, name);
     await fetch('/api/schedules/upload', { method: 'POST', body: fd });
   }, { csv: csvContent, name: csvName });
-  await page.reload({ waitUntil: 'networkidle' });
+
+  // Trigger the "Back to current" flow which fetches schedules from API
+  await page.evaluate(async () => {
+    const res = await fetch('/api/schedules');
+    if (!res.ok) return;
+    // Dispatch a custom event the app can pick up, or just reload
+    window.location.reload();
+  });
+  await page.waitForLoadState('networkidle');
+  await wait(1500);
 }
 
 // ─── Video file management ──────────────────────────────────────────────────

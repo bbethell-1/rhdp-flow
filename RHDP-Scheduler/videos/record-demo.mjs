@@ -22,7 +22,7 @@ import {
   VIDEOS_DIR, CSV_PATH, BASE_URL, VIEWPORT, wait,
   injectOverlays, moveCursorTo, moveCursorToCoords, clickWithCursor,
   highlight, showCallout, hideCallout, showSection, hideSection,
-  showTitleCard, hideTitleCard, scrollSection, uploadCSVviaAPI,
+  showTitleCard, hideTitleCard, scrollSection, uploadCSV,
   renameLatestWebm, cleanupStrayWebm,
 } from './recording-helpers.mjs';
 
@@ -148,7 +148,7 @@ async function chapter01_uploadAndSchedule(page, step) {
 
 async function chapter02_deploySettings(page, step) {
   // Pre-load CSV via API so the table is populated
-  await uploadCSVviaAPI(page, CSV_PATH);
+  await uploadCSV(page, CSV_PATH);
   await showSection(page, 'Deploy Settings');
 
   // Scroll deploy settings into view
@@ -236,7 +236,7 @@ async function chapter02_deploySettings(page, step) {
 
 async function chapter03_deploymentsTab(page, step) {
   // Pre-load CSV and trigger dry-run deploy so there are results
-  await uploadCSVviaAPI(page, CSV_PATH);
+  await uploadCSV(page, CSV_PATH);
   // Deploy dry-run via button
   const deployBtn = page.locator('button:has-text("Deploy (dry-run)")');
   if (await deployBtn.count() > 0) {
@@ -291,7 +291,7 @@ async function chapter03_deploymentsTab(page, step) {
 
 async function chapter04_operationsTab(page, step) {
   // Pre-load CSV and deploy so ops tab has targets
-  await uploadCSVviaAPI(page, CSV_PATH);
+  await uploadCSV(page, CSV_PATH);
   const deployBtn = page.locator('button:has-text("Deploy (dry-run)")');
   if (await deployBtn.count() > 0) {
     await deployBtn.first().click();
@@ -358,7 +358,7 @@ async function chapter04_operationsTab(page, step) {
 
 async function chapter05_qaAndStudents(page, step) {
   // Pre-load CSV and deploy
-  await uploadCSVviaAPI(page, CSV_PATH);
+  await uploadCSV(page, CSV_PATH);
   const deployBtn = page.locator('button:has-text("Deploy (dry-run)")');
   if (await deployBtn.count() > 0) {
     await deployBtn.first().click();
@@ -418,7 +418,7 @@ async function chapter05_qaAndStudents(page, step) {
 
 async function chapter06_extras(page, step) {
   // Pre-load CSV so Upload tab has content
-  await uploadCSVviaAPI(page, CSV_PATH);
+  await uploadCSV(page, CSV_PATH);
 
   // === Live mode warning ===
   await showSection(page, 'Extras');
