@@ -3,6 +3,8 @@
 RHDP-Flow Interactive CSV Wizard (v2.0)
 Generates workshop schedule CSV files through a guided CLI experience.
 
+Authors: Josh Disraeli, Billy Bethell
+
 Requires: pip install rich
 """
 

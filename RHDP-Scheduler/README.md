@@ -416,6 +416,10 @@ npm run test:coverage # with coverage report
 | Frontend won't start | Run `npm install` in the `frontend/` directory |
 | Port 5173 in use | Vite will auto-pick the next port (check terminal output) |
 
+## Authors
+
+**Josh Disraeli**, **Billy Bethell** — White Glove / RHDP team. Equal maintainers; Josh has driven much of the recent development (Web UI, operations, QA, examples, and tests).
+
 ## License
 
 Internal Red Hat tool for RHDP automation.

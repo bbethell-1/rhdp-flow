@@ -3,6 +3,8 @@
 RHDP-Flow: Red Hat Demo Platform Workshop Automation Tool
 Automates scheduling and deployment for RHDP workshops with safety features.
 
+Authors: Josh Disraeli, Billy Bethell
+
 This script uses oc commands directly (no API authentication needed if already logged in).
 """
 
@@ -900,9 +902,9 @@ def create_resource_claim_via_oc(
             # Clean up temp file
             try:
                 os.unlink(tmp_file_path)
-            except:
+            except OSError:
                 pass
-        
+
     except subprocess.TimeoutExpired:
         error_msg = f"oc command timed out after {config.timeout}s"
         logger.error(error_msg)
@@ -972,7 +974,7 @@ def wait_for_workshop_from_resourceclaim(
                     rc_result = subprocess.run(rc_cmd, capture_output=True, text=True, timeout=10, env=env)
                     if rc_result.returncode == 0 and rc_result.stdout:
                         logger.info(f"   ResourceClaim status: {rc_result.stdout.strip()}")
-                except:
+                except Exception:
                     pass
             if attempt < max_wait - 1:
                 time.sleep(2)
@@ -1240,9 +1242,9 @@ def create_workshop_with_ui(
         finally:
             try:
                 os.unlink(tmp_file_path)
-            except:
+            except OSError:
                 pass
-    
+
     except Exception as e:
         logger.warning(f"Error creating Workshop: {e}")
         return None
@@ -1373,9 +1375,9 @@ def create_workshop_provision(
         finally:
             try:
                 os.unlink(tmp_file_path)
-            except:
+            except OSError:
                 pass
-    
+
     except Exception as e:
         logger.warning(f"Error creating WorkshopProvision: {e}")
         return None
@@ -1480,9 +1482,9 @@ def wait_for_workshop_id(workshop_name: str, namespace: str, config: RHDPConfig,
             
             if result.returncode == 0:
                 break  # Workshop exists
-        except:
+        except Exception:
             pass
-        
+
         if attempt < 29:
             time.sleep(2)
     
@@ -1983,9 +1985,9 @@ def create_multi_workshop(
         finally:
             try:
                 os.unlink(tmp_file_path)
-            except:
+            except OSError:
                 pass
-    
+
     except Exception as e:
         logger.error(f"Error creating MultiWorkshop: {e}")
         import traceback
@@ -2764,9 +2766,9 @@ def qa1_verify_setup(
                         if name.split('-')[-1] in w_name or schedule.ci in w_name:
                             workshop_name = w_name
                             break
-            except:
+            except Exception:
                 pass
-            
+
             # Get both URLs
             if workshop_name:
                 full_url, catalog_url = get_workshop_urls(workshop_name, namespace, schedule.ci, config)
@@ -3143,9 +3145,9 @@ def qa2_verify_deployment_status(
                         if name.split('-')[-1] in w_name or schedule.ci in w_name:
                             workshop_name = w_name
                             break
-            except:
+            except Exception:
                 pass
-            
+
             # Get both URLs
             if workshop_name:
                 full_url, catalog_url = get_workshop_urls(workshop_name, namespace, schedule.ci, config)
