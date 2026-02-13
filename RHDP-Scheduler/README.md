@@ -1,6 +1,6 @@
 # RHDP-Flow: Red Hat Demo Platform Workshop Automation Tool
 
-Automates scheduling, deployment, and lifecycle management for RHDP workshops — with built-in safety features to prevent costly mistakes.
+Automates scheduling, deployment, and lifecycle management for RHDP workshops — with built-in safety features to prevent costly mistakes. **Flow** = smooth, automated flow from schedule → deploy → ops.
 
 ## Quick Start
 
