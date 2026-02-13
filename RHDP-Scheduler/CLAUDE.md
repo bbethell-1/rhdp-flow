@@ -77,56 +77,43 @@ These were discovered through extensive debugging. Follow them exactly:
 
 ## Demo Video Recording
 
-### Current State
-- `videos/record-demo.mjs` — Playwright recording script with overlays
-- `videos/rhdp-flow-demo.mp4` (4.4MB) + `.webm` (9.7MB) — 1:50 at 1920x1080
-- `videos/README.md` — viewing guide
+### Architecture
+- `videos/recording-helpers.mjs` — Shared overlay utilities (cursor, callouts, highlights, title cards, scrolling, CSV upload)
+- `videos/record-demo.mjs` — Main recording script — outputs 6 chapter videos, each with own browser context
+- `videos/README.md` — Viewing guide with per-chapter content descriptions
 
-### NEXT TASK: Split Videos and Improve Overlays
+### 6 Chapter Videos (15-30s each, <2MB MP4 target)
 
-The current single video has these problems:
-1. **Too large for GitHub** — shows "Sorry, can't show files this big"
-2. **Top of video is cut off** — PF6 Masthead clipped at viewport top
-3. **Bottom banner text hard to read** — competes for attention with UI actions
-4. **Not user-friendly** — new associates can't jump to specific features
+| # | File | Content |
+|---|------|---------|
+| 1 | `01-upload-and-schedule` | CSV upload, schedule table, row expand |
+| 2 | `02-deploy-settings` | Lock UI, White Glove, Redirect toggles, dry-run deploy |
+| 3 | `03-deployments-tab` | Results, status cards, search/filter, export |
+| 4 | `04-operations-tab` | Lock, Extend Stop/Destroy, Scale, CI filter, history |
+| 5 | `05-qa-and-students` | QA types, run QA, students, export |
+| 6 | `06-extras` | Live mode, dark mode, shortcuts, diff view |
 
-**Implementation plan:**
+### Overlay System
+- **Inline callout boxes** — positioned near relevant elements (replaced old bottom banner)
+- **Title cards** — full-screen intro (2-3s) at start of each video
+- **Animated cursor** — SVG arrow with click animation
+- **Red highlight glow** — outline + box-shadow on focused elements
+- **Section badges** — red pill in top-right showing current tab name
+- **Viewport** — 1920x1120 (40px taller than 1080p to fix PF6 masthead clipping)
 
-Split into 6 short videos (~15-30s each, target <2MB MP4 each):
-
-| # | File | Content | Sections |
-|---|------|---------|----------|
-| 1 | `01-upload-and-schedule.mp4` | CSV upload, schedule table, row expand, search | Landing → table review |
-| 2 | `02-deploy-settings.mp4` | Toggle switches, dry-run deployment | Settings → deploy |
-| 3 | `03-deployments-tab.mp4` | Results, status cards, search/filter, auto-refresh, export | Deployments |
-| 4 | `04-operations-tab.mp4` | Lock, Extend Stop/Destroy, Scale, CI filter, history | Operations |
-| 5 | `05-qa-and-students.mp4` | QA types, run QA, results, students, export | QA + Students |
-| 6 | `06-extras.mp4` | Live mode warning, dark mode, keyboard shortcuts, diff view | Misc features |
-
-**Overlay improvements:**
-- Replace bottom banner with **inline callout boxes** positioned near the relevant element (use absolute positioning based on element boundingBox)
-- Add **top padding** (increase viewport to 1920x1120 or add 40px padding to body) to fix masthead cutoff
-- Keep animated cursor and red highlights
-- Add a **title card** (2-3 seconds) at the start of each video with the feature name
-
-**Technical approach:**
-- Refactor `record-demo.mjs` into a shared `recording-helpers.mjs` with overlay/cursor functions
-- Create 6 separate recording scripts OR one script with chapter markers that outputs separate files
-- Each video: own browser context with `recordVideo` → own WebM → ffmpeg to MP4
-- After uploading CSV (needed for most videos), reuse the API upload approach
-
-**Commands to run:**
+### Recording Commands
 ```bash
 # Start servers
 uvicorn api.server:app --port 8000 &
 cd frontend && npm run dev &
 
-# Record all videos
+# Record all 6 chapters
 node videos/record-demo.mjs
 
 # Convert all WebM to MP4
-for f in videos/*.webm; do
-  ffmpeg -i "$f" -c:v libx264 -preset slow -crf 22 -pix_fmt yuv420p -movflags +faststart "${f%.webm}.mp4"
+for f in videos/0*.webm; do
+  ffmpeg -i "$f" -c:v libx264 -preset slow -crf 22 \
+    -pix_fmt yuv420p -movflags +faststart "${f%.webm}.mp4"
 done
 ```
 

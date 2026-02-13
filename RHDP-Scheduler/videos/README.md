@@ -1,103 +1,131 @@
 # RHDP-Flow Demo Videos
 
-## Files
+## Videos
 
-| File | Format | Size | Duration |
-|------|--------|------|----------|
-| `rhdp-flow-demo.mp4` | H.264/MP4 | ~4.4 MB | ~1:50 |
-| `rhdp-flow-demo.webm` | VP8/WebM | ~9.7 MB | ~1:50 |
-| `record-demo.mjs` | Script | — | — |
+| # | File | Content | Duration |
+|---|------|---------|----------|
+| 1 | `01-upload-and-schedule.mp4` | CSV upload, schedule table, row expansion | ~15-25s |
+| 2 | `02-deploy-settings.mp4` | Lock UI, White Glove, Redirect toggles, dry-run deploy | ~15-25s |
+| 3 | `03-deployments-tab.mp4` | Results table, status cards, search/filter, export | ~15-25s |
+| 4 | `04-operations-tab.mp4` | Resource Lock, Extend Stop/Destroy, Scale, CI filter, history | ~15-25s |
+| 5 | `05-qa-and-students.mp4` | QA1/QA2 types, run QA, results, student URLs, export | ~15-25s |
+| 6 | `06-extras.mp4` | Live mode warning, dark mode, keyboard shortcuts, diff view | ~20-30s |
 
-Both videos are 1920x1080 and cover the same content. Use **MP4** for widest
-compatibility.
+All videos are 1920x1120 (extra 40px height to prevent masthead clipping). Use **MP4** for widest compatibility.
 
 ## How to Watch
 
 ### Option 1 — Local player (recommended)
 
 ```bash
-# macOS (QuickTime)
-open videos/rhdp-flow-demo.mp4
+# macOS
+open videos/01-upload-and-schedule.mp4
 
 # Linux
-xdg-open videos/rhdp-flow-demo.mp4
+xdg-open videos/01-upload-and-schedule.mp4
 
-# Windows
-start videos\rhdp-flow-demo.mp4
+# All chapters
+for f in videos/0*.mp4; do open "$f"; done
 ```
-
-Any video player works: QuickTime, VLC, Windows Media Player, mpv, etc.
 
 ### Option 2 — Download from GitHub
 
-1. Navigate to `RHDP-Scheduler/videos/rhdp-flow-demo.mp4` in the repo
-2. Click the **Download raw file** button (down-arrow icon, top-right of the file view)
-3. Open the downloaded file in any local video player
+1. Navigate to `RHDP-Scheduler/videos/` in the repo
+2. Click a video file, then click **Download raw file** (down-arrow icon)
+3. Open in any local video player
 
-> GitHub does **not** play video files inline on the file view page. You must
-> download the raw file first.
-
-### Option 3 — Browser playback via raw URL
-
-Copy the raw file URL from GitHub and paste it directly into your browser
-address bar:
-
-```
-https://github.com/rhpds/rhpds-utils/raw/main/RHDP-Scheduler/videos/rhdp-flow-demo.mp4
-```
-
-Most browsers (Chrome, Firefox, Edge, Safari) will play MP4 files natively
-when opened as a direct URL.
-
-### Option 4 — Embed in markdown
-
-To embed the video in a GitHub README, issue, or PR description:
+### Option 3 — Embed in markdown
 
 ```html
-<video src="https://github.com/rhpds/rhpds-utils/raw/main/RHDP-Scheduler/videos/rhdp-flow-demo.mp4" controls width="100%"></video>
+<video src="https://github.com/rhpds/rhpds-utils/raw/main/RHDP-Scheduler/videos/01-upload-and-schedule.mp4" controls width="100%"></video>
 ```
 
-> Note: `<video>` tags work in GitHub markdown (READMEs, issues, PR
-> descriptions) but not in all markdown renderers.
+## What Each Video Covers
 
-## What the Demo Covers
+### 01 — Upload & Schedule
+- Landing page and masthead controls (dry-run, health, timezone, theme)
+- CSV file upload with validation
+- Parsed workshop schedule table
+- Expandable row details (password, Salesforce IDs, concurrency)
 
-The video walks through every major feature of the RHDP-Flow web UI:
+### 02 — Deploy Settings
+- Lock UI Admin Settings toggle
+- White Glove toggle
+- Redirect toggle
+- Dry-run deployment (JSON payload generation)
 
-1. **Landing page** — empty state, masthead controls (dry-run, health, timezone, theme)
-2. **CSV upload** — schedule file upload and validation
-3. **Schedule table** — parsed workshops with expandable row details
-4. **Deploy settings** — Lock UI, Resource Pools, White Glove, Redirect toggles
-5. **Dry-run deployment** — JSON payload preview without provisioning
-6. **Deployments tab** — results table, status cards, search/filter, auto-refresh, CSV export
-7. **Operations tab** — Resource Lock, Extend Stop, Extend Destroy, Scale with per-CI filtering
-8. **QA tab** — QA1/QA2 types, run controls, results table, status filters
-9. **Students tab** — landing page URLs, copy-to-clipboard, CSV export
-10. **Live mode** — dry-run toggle with danger banner warning
-11. **Dark mode & keyboard shortcuts** — theme toggle, shortcut modal
-12. **Diff view** — compare schedules for added/removed/changed workshops
+### 03 — Deployments
+- Deployment results table with GUIDs, status, URLs
+- Status summary cards (Total, Verified, Unverified, Failed)
+- Search and filter toolbar
+- Auto-refresh and CSV export
 
-## Re-recording
+### 04 — Operations
+- Resource Lock card
+- Extend Stop Time controls
+- Extend Destroy Time and Scale controls
+- Per-CI target filtering dropdown
+- Operations History log table
 
-To record a new version of the demo:
+### 05 — QA & Students
+- QA guidance (QA1 vs QA2 timing)
+- QA type selector (QA1, QA2, Both)
+- QA1 & QA2 explanations
+- Students tab with landing page URLs
+- Copy-to-clipboard and CSV export
+
+### 06 — Extras
+- Live mode: disable dry-run and danger banner warning
+- Dark mode theme toggle
+- Keyboard shortcuts modal (? key)
+- Compare Schedules diff view
+
+## Recording
+
+### Prerequisites
+
+- **Node.js** with Playwright: `npm install playwright`
+- **ffmpeg**: for WebM → MP4 conversion
+- **Servers running**:
+  - Backend: `uvicorn api.server:app --port 8000`
+  - Frontend: `cd frontend && npm run dev`
+
+### Record all 6 chapters
 
 ```bash
-# 1. Start the servers
-uvicorn api.server:app --port 8000 &
-cd frontend && npm run dev &
-
-# 2. Record (requires Playwright: npm i -g playwright)
 node videos/record-demo.mjs
-
-# 3. Convert to MP4 (requires ffmpeg)
-ffmpeg -i videos/rhdp-flow-demo.webm \
-  -c:v libx264 -preset slow -crf 20 \
-  -pix_fmt yuv420p -movflags +faststart \
-  videos/rhdp-flow-demo.mp4
 ```
 
-The recording script (`record-demo.mjs`) includes:
-- Animated cursor that moves to each interactive element
-- Step-by-step text banners describing every action
-- Red highlight outlines on key elements
-- Section title badges in the corner
+This outputs 6 WebM files (`01-upload-and-schedule.webm` through `06-extras.webm`).
+
+### Convert to MP4
+
+```bash
+for f in videos/0*.webm; do
+  ffmpeg -i "$f" -c:v libx264 -preset slow -crf 22 \
+    -pix_fmt yuv420p -movflags +faststart "${f%.webm}.mp4"
+done
+```
+
+### Record a single chapter
+
+To re-record one video, edit the `CHAPTERS` array in `record-demo.mjs` to include only the desired chapter, or comment out others.
+
+## Architecture
+
+| File | Purpose |
+|------|---------|
+| `record-demo.mjs` | Main recording script — 6 chapters, each with own browser context |
+| `recording-helpers.mjs` | Shared utilities: cursor, callouts, highlights, title cards, scrolling |
+
+### Overlay system
+
+- **Inline callout boxes** — positioned near the relevant UI element (replaces the old bottom banner)
+- **Title cards** — full-screen intro at the start of each video (2-3 seconds)
+- **Animated cursor** — SVG arrow with click animation
+- **Red highlight glow** — outline + box-shadow on focused elements
+- **Section badges** — red pill in the top-right corner showing current tab name
+
+### Viewport
+
+1920x1120 (40px taller than standard 1080p) to prevent the PatternFly 6 masthead from being clipped at the top of the recording.
