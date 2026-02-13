@@ -5,6 +5,10 @@
 Validation 
 If num-users hardcoded then don't deploy more then that number Hardcoded in agV / catalog
 
+test mutli region split for aws items eg:
+
+<img width="1099" height="1270" alt="image" src="https://github.com/user-attachments/assets/cdca9296-ffc0-4777-845a-98248f8a4f8f" />
+
 ## Testing
 
 - [x] Test multi-asset with `Multi_Asset=True` + `Asset_CIs` (old format) vs grouped rows with `Multi_Workshop_Name` (new format) — verify both paths produce correct results and that per-item passwords work in both cases (5 tests: shared password, asset parsing, per-item password propagation, mixed concurrency, graceful degradation)
