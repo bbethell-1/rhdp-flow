@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rhdp-scheduler-service
+spec:
+  selector:
+    app.kubernetes.io/name: rhdp-scheduler
+  ports:
+    - port: 8000
+      targetPort: 8000
+      protocol: TCP
+      name: http
+  type: ClusterIP

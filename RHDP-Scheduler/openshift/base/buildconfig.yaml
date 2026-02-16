@@ -1,0 +1,32 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: rhdp-scheduler
+spec:
+  source:
+    type: Git
+    git:
+      uri: https://github.com/rhpds/rhpds-utils.git
+      ref: main
+    contextDir: RHDP-Scheduler
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: dockerfiles/Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: rhdp-scheduler:latest
+  triggers:
+    - type: ConfigChange
+    - type: GitHub
+      github:
+        secretReference:
+          name: rhdp-scheduler-webhook
+  resources:
+    limits:
+      memory: 2Gi
+      cpu: "1"
+    requests:
+      memory: 1Gi
+      cpu: 500m
