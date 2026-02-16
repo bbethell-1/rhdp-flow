@@ -1,5 +1,6 @@
 # RHDP-Flow TODO List
 
+Destory Qa (NEVER touch deltions)
 ## Backlog
 
 - [ ] **agV num_users validation** — Before deploying, check if the catalog item has a hardcoded `num_users` limit in agnosticV; refuse to deploy more than the cap. Requires querying the agV catalog definition per CI.
