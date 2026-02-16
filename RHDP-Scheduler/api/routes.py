@@ -7,6 +7,7 @@ import csv
 import io
 import logging
 import subprocess
+import threading
 from dataclasses import asdict
 from typing import Dict, List, Optional
 
@@ -96,6 +97,9 @@ MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
 # Cached base domain derived from the connected cluster
 _cached_base_domain: Optional[str] = None
 
+# Thread-safe lock for global state mutations (sync endpoints run in threadpool)
+_state_lock = threading.Lock()
+
 
 def _rate_limit(limit_string: str):
     """Apply per-route rate limit if slowapi is available, otherwise no-op."""
@@ -107,8 +111,9 @@ def _rate_limit(limit_string: str):
 def _detect_and_cache_base_domain() -> str:
     """Run `oc whoami --show-server`, derive base domain, and cache it."""
     global _cached_base_domain
-    if _cached_base_domain is not None:
-        return _cached_base_domain
+    with _state_lock:
+        if _cached_base_domain is not None:
+            return _cached_base_domain
     try:
         env = os.environ.copy()
         kc = os.environ.get("KUBECONFIG")
@@ -118,13 +123,15 @@ def _detect_and_cache_base_domain() -> str:
             ["oc", "whoami", "--show-server"],
             capture_output=True, text=True, timeout=10, env=env,
         )
-        if r.returncode == 0:
-            _cached_base_domain = derive_base_domain(r.stdout.strip())
-        else:
-            _cached_base_domain = "integration.demo.redhat.com"
+        with _state_lock:
+            if r.returncode == 0:
+                _cached_base_domain = derive_base_domain(r.stdout.strip())
+            else:
+                _cached_base_domain = "integration.demo.redhat.com"
     except Exception as exc:
         logger.warning("Base domain detection failed, using fallback: %s", exc)
-        _cached_base_domain = "integration.demo.redhat.com"
+        with _state_lock:
+            _cached_base_domain = "integration.demo.redhat.com"
     return _cached_base_domain
 
 
@@ -207,17 +214,18 @@ def _archive_current_session():
 def clear_session():
     """Archive current session and reset state for a new upload."""
     global _schedules, _deployment_results, _qa_results, _csv_filepath, _current_filename, _asset_passwords, _deploy_log_path, _qa_log_path, _destroy_check_results
-    _archive_current_session()
-    _schedules = []
-    _deployment_results = []
-    _qa_results = []
-    _destroy_check_results = []
-    _csv_filepath = None
-    _current_filename = ""
-    _asset_passwords = None
-    _deploy_log_path = None
-    _qa_log_path = None
-    return {"message": "Session cleared", "session_count": len(_sessions)}
+    with _state_lock:
+        _archive_current_session()
+        _schedules = []
+        _deployment_results = []
+        _qa_results = []
+        _destroy_check_results = []
+        _csv_filepath = None
+        _current_filename = ""
+        _asset_passwords = None
+        _deploy_log_path = None
+        _qa_log_path = None
+        return {"message": "Session cleared", "session_count": len(_sessions)}
 
 
 @router.get("/sessions", response_model=List[SessionSummary])
@@ -293,7 +301,8 @@ async def health():
         if r_user.returncode == 0 and r_server.returncode == 0:
             cluster_url = r_server.stdout.strip()
             global _cached_base_domain
-            _cached_base_domain = derive_base_domain(cluster_url)
+            with _state_lock:
+                _cached_base_domain = derive_base_domain(cluster_url)
             # RHDP API probe — also non-blocking
             rhdp_ok = False
             try:
@@ -370,9 +379,10 @@ async def upload_csv(request: Request, file: UploadFile = File(...)):
         os.unlink(tmp.name)
         raise HTTPException(400, str(e))
 
-    _schedules = schedules
-    _current_filename = file.filename or "unknown.csv"
-    _csv_filepath = tmp.name
+    with _state_lock:
+        _schedules = schedules
+        _current_filename = file.filename or "unknown.csv"
+        _csv_filepath = tmp.name
 
     skipped = total_rows - len(schedules)
 
@@ -400,10 +410,12 @@ async def upload_passwords(request: Request, file: UploadFile = File(...)):
     tmp = _tf.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, encoding="utf-8")
     tmp.write(text)
     tmp.close()
-    _asset_passwords = load_asset_passwords(tmp.name)
+    passwords = load_asset_passwords(tmp.name)
     os.unlink(tmp.name)
+    with _state_lock:
+        _asset_passwords = passwords
 
-    return {"count": len(_asset_passwords), "message": f"Loaded {len(_asset_passwords)} asset password(s)"}
+    return {"count": len(passwords), "message": f"Loaded {len(passwords)} asset password(s)"}
 
 
 @router.get("/schedules", response_model=List[WorkshopScheduleResponse])
@@ -651,8 +663,9 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                     await asyncio.sleep(1)
 
             global _deployment_results
-            _deployment_results = results
-            _deploy_log_path = log_path
+            with _state_lock:
+                _deployment_results = results
+                _deploy_log_path = log_path
             jobs.update_job(
                 job.job_id,
                 status=jobs.Status.completed,
@@ -662,7 +675,8 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                 log_path=log_path,
             )
         except Exception as exc:
-            _deploy_log_path = log_path
+            with _state_lock:
+                _deploy_log_path = log_path
             jobs.update_job(
                 job.job_id,
                 status=jobs.Status.failed,
@@ -732,8 +746,9 @@ def deploy_dry_run(request: Request, body: DeployRequest = DeployRequest(), _key
             results.append(result)
 
         global _deployment_results
-        _deployment_results = results
-        _deploy_log_path = log_path
+        with _state_lock:
+            _deployment_results = results
+            _deploy_log_path = log_path
         return [_result_to_response(r) for r in results]
     finally:
         stop_log_capture(handler)
@@ -810,11 +825,11 @@ async def deploy_retry(request: Request, body: RetryRequest, _key=Depends(verify
             # Update global results: replace matching entries, keep the rest
             global _deployment_results
             result_map = {r.ci_name: r for r in results}
-            _deployment_results = [
-                result_map.get(r.ci_name, r) for r in _deployment_results
-            ] + [r for r in results if r.ci_name not in {dr.ci_name for dr in _deployment_results}]
-
-            _deploy_log_path = log_path
+            with _state_lock:
+                _deployment_results = [
+                    result_map.get(r.ci_name, r) for r in _deployment_results
+                ] + [r for r in results if r.ci_name not in {dr.ci_name for dr in _deployment_results}]
+                _deploy_log_path = log_path
             jobs.update_job(
                 job.job_id,
                 status=jobs.Status.completed,
@@ -824,7 +839,8 @@ async def deploy_retry(request: Request, body: RetryRequest, _key=Depends(verify
                 log_path=log_path,
             )
         except Exception as exc:
-            _deploy_log_path = log_path
+            with _state_lock:
+                _deploy_log_path = log_path
             jobs.update_job(
                 job.job_id,
                 status=jobs.Status.failed,
@@ -907,7 +923,7 @@ def op_scale(body: ScaleRequest, _key=Depends(verify_api_key)):
 
 
 @router.post("/operations/update-passwords", response_model=OperationResponse)
-def op_update_passwords(body: LockRequest = LockRequest()):
+def op_update_passwords(body: LockRequest = LockRequest(), _key=Depends(verify_api_key)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     schedules = _filter_schedules(body.ci_filter)
@@ -920,7 +936,7 @@ def op_update_passwords(body: LockRequest = LockRequest()):
 
 
 @router.post("/operations/import-namespace")
-def op_import_namespace(namespace: str):
+def op_import_namespace(namespace: str, _key=Depends(verify_api_key)):
     config = _get_config()
     import tempfile
     tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, encoding="utf-8")
@@ -968,8 +984,9 @@ def qa_run(request: Request, body: QARequest = QARequest()):
             r2 = qa2_verify_deployment_status(_csv_filepath, namespace, config)
             all_results.extend(r2)
 
-        _qa_results = all_results
-        _qa_log_path = log_path
+        with _state_lock:
+            _qa_results = all_results
+            _qa_log_path = log_path
         return {
             "count": len(all_results),
             "results": all_results,
@@ -1006,7 +1023,8 @@ def qa_destroy_check_endpoint(request: Request):
                 r = qa_destroy_check(_csv_filepath, s.namespace, config)
                 all_results.extend(r)
 
-        _destroy_check_results = all_results
+        with _state_lock:
+            _destroy_check_results = all_results
         return DestroyCheckResponse(count=len(all_results), results=all_results)
     finally:
         stop_log_capture(handler)
