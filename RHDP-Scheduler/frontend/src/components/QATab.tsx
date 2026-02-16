@@ -287,6 +287,20 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
   );
 };
 
+/** Format an ISO8601 UTC string as local browser time */
+function utcToLocal(utcStr: string): string {
+  if (!utcStr) return '';
+  try {
+    const d = new Date(utcStr);
+    return d.toLocaleString('en-GB', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    });
+  } catch {
+    return '';
+  }
+}
+
 /** Color for destroy-check resource/overall status */
 function destroyStatusColor(status: string): 'green' | 'blue' | 'red' | 'orange' | 'grey' {
   switch (status) {
@@ -315,6 +329,7 @@ const DestroyQASection: React.FC<{
   const [running, setRunning] = useState(false);
   const [dcPage, setDcPage] = useState(1);
   const [dcPerPage, setDcPerPage] = useState(DEFAULT_PER_PAGE);
+  const [showLocal, setShowLocal] = useState(false);
 
   const handleRun = async () => {
     setRunning(true);
@@ -366,6 +381,18 @@ const DestroyQASection: React.FC<{
             <Button variant="secondary" onClick={handleRefresh}>Refresh</Button>
           </SplitItem>
         )}
+        {results.length > 0 && (
+          <SplitItem>
+            <Tooltip content={`Show times in your local timezone (${Intl.DateTimeFormat().resolvedOptions().timeZone})`}>
+              <Switch
+                id="destroy-qa-local-time"
+                label="Local time"
+                isChecked={showLocal}
+                onChange={(_e, checked) => setShowLocal(checked)}
+              />
+            </Tooltip>
+          </SplitItem>
+        )}
       </Split>
 
       {results.length > 0 && (
@@ -398,7 +425,13 @@ const DestroyQASection: React.FC<{
                 <Tr key={i}>
                   <Td dataLabel="CI Name">{r.ci_name}</Td>
                   <Td dataLabel="Namespace">{r.namespace}</Td>
-                  <Td dataLabel="Scheduled Destroy" className="monospace-date">{r.scheduled_destroy || '-'}</Td>
+                  <Td dataLabel="Scheduled Destroy" className="monospace-date">
+                    {r.scheduled_destroy
+                      ? showLocal
+                        ? <>{utcToLocal(r.scheduled_destroy)}<br /><span style={{ fontSize: '0.8em', opacity: 0.7 }}>{r.scheduled_destroy}</span></>
+                        : r.scheduled_destroy
+                      : '-'}
+                  </Td>
                   <Td dataLabel="Workshop"><Label color={destroyStatusColor(r.workshop.status)}>{r.workshop.status}</Label></Td>
                   <Td dataLabel="WP"><Label color={destroyStatusColor(r.workshop_provision.status)}>{r.workshop_provision.status}</Label></Td>
                   <Td dataLabel="RC"><Label color={destroyStatusColor(r.resource_claim.status)}>{r.resource_claim.status}</Label></Td>
