@@ -1,8 +1,7 @@
 # RHDP-Flow TODO List
 
-Destory Qa (NEVER touch deltions)
 ## Backlog
-
+- [ ] Destory Qa (NEVER touch deletions) 
 - [x] ~~**agV num_users validation** — Before deploying, check if the catalog item has a hardcoded `num_users` limit in agnosticV; refuse to deploy more than the cap. `get_catalog_item_num_users_limit()` extracts `openAPIV3Schema.maximum` from the CI definition. Frontend shows danger alert after upload, deploy is blocked when violations exist. API endpoint `POST /api/schedules/validate-num-users` + deploy guard in both `process_schedule()` and the deploy endpoint.~~
 - [x] ~~**Test multi-region split for AWS items**~~ — Covered by 8 unit tests (even/remainder user distribution, region suffixes, underscore replacement, extra_parameters, single workshop + N provisions, concurrency inheritance, 3-region distribution) plus `multi_region.csv` and `one_workshop_two_regions.csv` examples.
 - [x] ~~**Redirect toggle behavior**~~ — Implemented: toggle explicitly sets `labUserInterface.redirect = False` when off (default True). agV defaults do NOT take precedence; the toggle always overrides.
