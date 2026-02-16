@@ -33,6 +33,7 @@ class WorkshopScheduleResponse(BaseModel):
     instances: Optional[int] = None
     concurrency: Optional[int] = None
     salesforce_ids: str = ""
+    redirect: bool = True
 
 
 class DeploymentResultResponse(BaseModel):
@@ -176,6 +177,27 @@ class DiffResponse(BaseModel):
     removed: List[DiffEntry]
     changed: List[DiffEntry]
     unchanged: int
+
+
+class NumUsersViolation(BaseModel):
+    """A single num_users limit violation."""
+
+    ci_name: str
+    ci: str
+    namespace: str
+    requested_users: int
+    maximum: int
+    minimum: Optional[int] = None
+    default_value: Optional[int] = None
+
+
+class NumUsersValidationResponse(BaseModel):
+    """Response for POST /schedules/validate-num-users."""
+
+    violations: List[NumUsersViolation] = Field(default_factory=list)
+    checked: int = 0
+    skipped: int = 0
+    limits: dict = Field(default_factory=dict, description="Per-CI maximum map, e.g. {'ci-name': 40}")
 
 
 class SessionSummary(BaseModel):

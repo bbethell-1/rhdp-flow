@@ -28,6 +28,7 @@ export interface WorkshopSchedule {
   concurrency: number | null;
   instances: number | null;
   salesforce_ids: string;
+  redirect: boolean;
 }
 
 export interface UploadResponse {
@@ -133,6 +134,23 @@ export interface DiffResponse {
   removed: DiffEntry[];
   changed: DiffEntry[];
   unchanged: number;
+}
+
+export interface NumUsersViolation {
+  ci_name: string;
+  ci: string;
+  namespace: string;
+  requested_users: number;
+  maximum: number;
+  minimum: number | null;
+  default_value: number | null;
+}
+
+export interface NumUsersValidationResponse {
+  violations: NumUsersViolation[];
+  checked: number;
+  skipped: number;
+  limits: Record<string, number>;
 }
 
 export interface SessionSummary {

@@ -78,6 +78,7 @@ def make_schedule(**overrides):
         multi_workshop_name="",
         concurrency=1,
         salesforce_ids="",
+        redirect=True,
     )
     defaults.update(overrides)
     return WorkshopSchedule(**defaults)

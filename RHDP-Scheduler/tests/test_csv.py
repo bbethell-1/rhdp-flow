@@ -313,6 +313,28 @@ No Users,some-ci,some-ns,,True,pw,Admin,QA,No Users,15/02/2026 11:00,15/02/2026 
         assert schedules[0].concurrency == 2
         assert schedules[0].multi_workshop_name == "summit-30-seats"
 
+    def test_redirect_column_false(self):
+        """Test that Redirect=False sets schedule.redirect to False."""
+        csv_text = """\
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Redirect
+No Redirect,some-ci,some-ns,20,True,pw,Admin,QA,No Redir,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,False
+"""
+        path = self._write(csv_text)
+        schedules = read_csv_input(path)
+        assert len(schedules) == 1
+        assert schedules[0].redirect is False
+
+    def test_redirect_column_missing_defaults_true(self):
+        """Test that missing Redirect column defaults to True."""
+        csv_text = """\
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC)
+Default Redirect,some-ci,some-ns,20,True,pw,Admin,QA,Default,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00
+"""
+        path = self._write(csv_text)
+        schedules = read_csv_input(path)
+        assert len(schedules) == 1
+        assert schedules[0].redirect is True
+
     def test_example_multi_asset_companion_parses(self):
         """Docs example multi_asset_companion.csv: grouped multi-asset with companion passwords."""
         examples_dir = os.path.join(os.path.dirname(__file__), "..", "docs", "examples")

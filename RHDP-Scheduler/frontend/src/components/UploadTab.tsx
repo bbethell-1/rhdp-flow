@@ -26,7 +26,7 @@ import UploadIcon from '@patternfly/react-icons/dist/esm/icons/upload-icon';
 
 import { api } from '../services/api';
 import { DiffView } from './DiffView';
-import type { WorkshopSchedule, DeploymentResult } from '../types';
+import type { WorkshopSchedule, DeploymentResult, NumUsersViolation } from '../types';
 
 /* ── Schedule date validation helpers ── */
 
@@ -89,6 +89,10 @@ export const UploadTab: React.FC<Props> = ({
 
   // Namespace validation
   const [missingNamespaces, setMissingNamespaces] = useState<string[]>([]);
+
+  // num_users limit validation
+  const [numUsersViolations, setNumUsersViolations] = useState<NumUsersViolation[]>([]);
+  const [numUsersLimits, setNumUsersLimits] = useState<Record<string, number>>({});
 
   // Confirmation modal state
   const [showDeployConfirm, setShowDeployConfirm] = useState(false);
@@ -159,6 +163,10 @@ export const UploadTab: React.FC<Props> = ({
       if (s.users !== null && s.users < 1)
         warns.push({ index: i, field: 'users', message: `"${s.ci_name}" has an invalid user count (${s.users})` });
 
+      // num_users catalog limit check
+      if (s.users !== null && s.ci in numUsersLimits && s.users > numUsersLimits[s.ci])
+        warns.push({ index: i, field: 'users', message: `"${s.ci_name}" exceeds catalog limit: ${s.users} users requested, max ${numUsersLimits[s.ci]}` });
+
       // Blank optional fields (informational)
       if (!s.password?.trim())
         warns.push({ index: i, field: 'password', message: `"${s.ci_name}" has no password set` });
@@ -168,7 +176,7 @@ export const UploadTab: React.FC<Props> = ({
         warns.push({ index: i, field: 'purpose', message: `"${s.ci_name}" has a blank Purpose field` });
     });
     return warns;
-  }, [schedules]);
+  }, [schedules, numUsersLimits]);
 
   const warningRowIndices = useMemo(() => new Set(warnings.map(w => w.index)), [warnings]);
 
@@ -221,6 +229,15 @@ export const UploadTab: React.FC<Props> = ({
       api.validateNamespaces()
         .then(r => { if (r.missing.length) setMissingNamespaces(r.missing); })
         .catch((e) => { console.warn('Namespace validation failed', e); });
+      // Validate num_users limits in background
+      setNumUsersViolations([]);
+      setNumUsersLimits({});
+      api.validateNumUsers()
+        .then(r => {
+          if (r.violations.length) setNumUsersViolations(r.violations);
+          if (Object.keys(r.limits).length) setNumUsersLimits(r.limits);
+        })
+        .catch((e) => { console.warn('num_users validation failed', e); });
     } catch (e) {
       showToast(`Upload failed: ${e}`, 'danger');
     }
@@ -256,6 +273,9 @@ export const UploadTab: React.FC<Props> = ({
       setResourceLock(true);
       setEnableResourcePools(false);
       setWhiteGlove(true);
+      setRedirect(true);
+      setNumUsersViolations([]);
+      setNumUsersLimits({});
       showToast('Session cleared', 'success');
     } catch (e) {
       showToast(`Clear failed: ${e}`, 'danger');
@@ -286,6 +306,10 @@ export const UploadTab: React.FC<Props> = ({
     setShowDeployConfirm(false);
 
     if (schedules.length === 0) { showToast('Upload a CSV first', 'danger'); return; }
+    if (!dryRun && numUsersViolations.length > 0) {
+      showToast('Deploy blocked: one or more schedules exceed the catalog num_users limit', 'danger');
+      return;
+    }
     setDeploying(true);
     setProgress(0);
     setProgressMsg('Starting...');
@@ -358,7 +382,7 @@ export const UploadTab: React.FC<Props> = ({
     }
   };
 
-  const columnCount = 10;
+  const columnCount = 11;
 
   return (
     <PageSection>
@@ -461,6 +485,20 @@ export const UploadTab: React.FC<Props> = ({
             </Alert>
           )}
 
+          {/* num_users limit violations */}
+          {numUsersViolations.length > 0 && (
+            <Alert variant="danger" isInline title={`${numUsersViolations.length} schedule(s) exceed num_users limit`} style={{ marginBottom: 12 }}>
+              <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+                {numUsersViolations.map((v, i) => (
+                  <li key={i}>
+                    <strong>{v.ci_name}</strong> ({v.ci}): {v.requested_users} users requested, catalog max is {v.maximum}
+                  </li>
+                ))}
+              </ul>
+              Deployment will be blocked until user counts are reduced below the catalog limit.
+            </Alert>
+          )}
+
           {/* Multi-asset password warning */}
           {needsPasswordWarning && (
             <Alert variant="warning" isInline title="Multi-asset passwords not loaded" style={{ marginBottom: 12 }}>
@@ -485,6 +523,7 @@ export const UploadTab: React.FC<Props> = ({
                   <Th>Users</Th>
                   <Th>Instances</Th>
                   <Th>UI</Th>
+                  <Th>Redirect</Th>
                   <Th>Prov. Date (UTC)</Th>
                   <Th>Auto-Stop (UTC)</Th>
                   <Th>Auto-Destroy (UTC)</Th>
@@ -508,6 +547,17 @@ export const UploadTab: React.FC<Props> = ({
                       <Td dataLabel="Users">{s.users ?? '-'}</Td>
                       <Td dataLabel="Instances">{s.instances ?? '-'}</Td>
                       <Td dataLabel="UI">{s.enable_workshop_interface ? 'Yes' : 'No'}</Td>
+                      <Td dataLabel="Redirect">
+                        <Switch
+                          id={`redirect-row-${i}`}
+                          aria-label={`Redirect ${s.ci_name}`}
+                          isChecked={s.redirect}
+                          onChange={() => {
+                            setSchedules(schedules.map((sc, idx) => idx === i ? { ...sc, redirect: !sc.redirect } : sc));
+                          }}
+                          isReversed
+                        />
+                      </Td>
                       <Td dataLabel="Prov. Date (UTC)" className="date-cell">{s.provisioning_date}</Td>
                       <Td dataLabel="Auto-Stop (UTC)" className="date-cell">{s.auto_stop}</Td>
                       <Td dataLabel="Auto-Destroy (UTC)" className="date-cell">{s.auto_destroy}</Td>
@@ -576,12 +626,17 @@ export const UploadTab: React.FC<Props> = ({
                   </Tooltip>
                 </SplitItem>
                 <SplitItem>
-                  <Tooltip content="Automatically redirect students to the lab UI after they log in to the workshop.">
+                  <Tooltip content="Automatically redirect students to the lab UI after they log in to the workshop. Toggles all rows; override individual rows in the table.">
                     <Switch
                       id="redirect-switch"
-                      label="Redirect"
+                      label="Redirect (all)"
                       isChecked={redirect}
-                      onChange={(_e, checked) => setRedirect(checked)}
+                      onChange={(_e, checked) => {
+                        setRedirect(checked);
+                        if (schedules.length > 0) {
+                          setSchedules(schedules.map(s => ({ ...s, redirect: checked })));
+                        }
+                      }}
                     />
                   </Tooltip>
                 </SplitItem>

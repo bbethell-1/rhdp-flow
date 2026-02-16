@@ -42,6 +42,7 @@ from rhdp_flow import (
     import_namespace_to_csv,
     derive_base_domain,
     utc_timestamp_str,
+    get_catalog_item_num_users_limit,
 )
 
 from api.models import (
@@ -53,6 +54,8 @@ from api.models import (
     HealthResponse,
     JobResponse,
     LockRequest,
+    NumUsersValidationResponse,
+    NumUsersViolation,
     OperationResponse,
     QARequest,
     RetryRequest,
@@ -148,6 +151,7 @@ def _schedule_to_response(s: WorkshopSchedule) -> WorkshopScheduleResponse:
         multi_workshop_name=s.multi_workshop_name,
         concurrency=s.concurrency, instances=s.instances,
         salesforce_ids=s.salesforce_ids,
+        redirect=s.redirect,
     )
 
 
@@ -414,6 +418,58 @@ def validate_namespaces():
     return {"namespaces": results, "missing": missing}
 
 
+@router.post("/schedules/validate-num-users", response_model=NumUsersValidationResponse)
+def validate_num_users():
+    """Check whether any loaded schedules exceed the catalog item's num_users maximum."""
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+    config = _get_config()
+    violations: List[NumUsersViolation] = []
+    limits: Dict[str, int] = {}
+    checked = 0
+    skipped = 0
+    ci_cache: Dict[str, Optional[Dict]] = {}
+
+    def _check_ci(ci: str, requested_users: Optional[int], ci_name: str, namespace: str):
+        nonlocal checked, skipped
+        if requested_users is None or requested_users <= 0:
+            skipped += 1
+            return
+        if ci not in ci_cache:
+            ci_cache[ci] = get_catalog_item_num_users_limit(ci, config)
+        info = ci_cache[ci]
+        if info is None:
+            skipped += 1
+            return
+        checked += 1
+        if info.get("maximum") is not None:
+            limits[ci] = info["maximum"]
+            if requested_users > info["maximum"]:
+                violations.append(NumUsersViolation(
+                    ci_name=ci_name,
+                    ci=ci,
+                    namespace=namespace,
+                    requested_users=requested_users,
+                    maximum=info["maximum"],
+                    minimum=info.get("minimum"),
+                    default_value=info.get("default"),
+                ))
+
+    for s in _schedules:
+        _check_ci(s.ci, s.users, s.ci_name, s.namespace)
+        # Also check individual asset CIs for multi-asset workshops
+        if s.is_multi_asset and s.asset_cis:
+            for asset_ci in (c.strip() for c in s.asset_cis.split(",") if c.strip()):
+                _check_ci(asset_ci, s.users, s.ci_name, s.namespace)
+
+    return NumUsersValidationResponse(
+        violations=violations,
+        checked=checked,
+        skipped=skipped,
+        limits=limits,
+    )
+
+
 @router.post("/schedules/diff", response_model=DiffResponse)
 async def diff_schedules(request: Request, file: UploadFile = File(...)):
     """Compare a new CSV against the currently loaded schedules."""
@@ -488,6 +544,27 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
         raise HTTPException(400, "No schedules loaded. Upload a CSV first.")
 
     schedules = _filter_schedules(body.ci_filter)
+
+    # Pre-deploy num_users limit check (live deploys only)
+    if not body.dry_run:
+        config_check = _get_config()
+        ci_cache: Dict[str, Optional[Dict]] = {}
+        limit_errors: List[str] = []
+        for s in schedules:
+            if s.users is not None and s.users > 0:
+                if s.ci not in ci_cache:
+                    ci_cache[s.ci] = get_catalog_item_num_users_limit(s.ci, config_check)
+                info = ci_cache[s.ci]
+                if info and info.get("maximum") is not None and s.users > info["maximum"]:
+                    limit_errors.append(
+                        f"{s.ci_name} ({s.ci}): {s.users} requested, max {info['maximum']}"
+                    )
+        if limit_errors:
+            raise HTTPException(
+                400,
+                f"num_users limit exceeded: {'; '.join(limit_errors)}"
+            )
+
     job = jobs.create_job()
 
     async def _run():

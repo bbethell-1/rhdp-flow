@@ -146,6 +146,7 @@ class WorkshopSchedule:
     aws_regions: str = ""  # Optional comma-separated AWS regions for multi-region deployment (e.g., "us-east-1,eu-west-1")
     count: Optional[int] = None  # Optional deployment count (from Count CSV column); distinct from instances
     white_glove: bool = True  # Optional white-glove mode flag (default: enabled)
+    redirect: bool = True  # labUserInterface.redirect (default: enabled)
 
 @dataclass
 class DeploymentResult:
@@ -411,6 +412,7 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                     salesforce_type = row.get(header_map.get('salesforce_type', header_map.get('salesforce type', 'Salesforce_Type')), '').strip().lower() or 'opportunity'
                     count_str = row.get(header_map.get('count', 'Count'), '').strip()
                     aws_regions = row.get(header_map.get('aws_region', 'AWS_Region'), '').strip()
+                    redirect_str = row.get(header_map.get('redirect', 'Redirect'), '').strip()
                     is_multi_asset = is_multi_asset_str.lower() in ['true', '1', 'yes', 'y'] if is_multi_asset_str else False
                     
                     # Support both old and new header formats (with/without UTC suffix)
@@ -483,8 +485,9 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                         except ValueError:
                             logger.warning(f"Row {row_num}: Invalid count value '{count_str}', treating as unspecified")
                     
-                    # Parse boolean
+                    # Parse booleans
                     enable_workshop_interface = enable_interface.lower() in ['true', '1', 'yes', 'y']
+                    redirect_val = redirect_str.lower() not in ['false', '0', 'no', 'n'] if redirect_str else True
                     
                     schedule = WorkshopSchedule(
                         ci_name=ci_name,
@@ -508,6 +511,7 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                         salesforce_type=salesforce_type,
                         aws_regions=aws_regions,
                         count=count,
+                        redirect=redirect_val,
                     )
                     
                     schedules.append(schedule)
@@ -1079,20 +1083,24 @@ def create_workshop_with_ui(
     workshop_name_or_prefix: str,
     namespace: str,
     resourceclaim_payload: Dict,
-    config: RHDPConfig
+    config: RHDPConfig,
+    redirect: Optional[bool] = None,
 ) -> Optional[str]:
     """
     Create Workshop resource directly with UI enabled and annotation.
-    
+
     Args:
         workshop_name_or_prefix: Name of the Workshop or generateName prefix (e.g., "ci-name-" or "ci-name-abc123")
         namespace: Kubernetes namespace
         resourceclaim_payload: Original ResourceClaim payload
         config: RHDPConfig object
-        
+        redirect: Per-schedule redirect override; falls back to config.redirect if None
+
     Returns:
         Workshop name if successful, None otherwise
     """
+    if redirect is None:
+        redirect = config.redirect
     if config.dry_run:
         ci = resourceclaim_payload['spec']['provider']['name']
         pv = resourceclaim_payload['spec']['provider'].get('parameterValues', {})
@@ -1161,7 +1169,7 @@ def create_workshop_with_ui(
                     "relativeMaximum": "30d"
                 },
                 "labUserInterface": {
-                    "redirect": config.redirect
+                    "redirect": redirect
                 },
                 "multiuserServices": "num_users" in param_values,
                 "openRegistration": True
@@ -1569,6 +1577,55 @@ def get_catalog_item_has_num_users(ci: str, config: RHDPConfig) -> Optional[bool
         return None
 
 
+def get_catalog_item_num_users_limit(ci: str, config: RHDPConfig) -> Optional[Dict]:
+    """
+    Query the cluster for the num_users parameter limits of a catalog item.
+
+    Returns a dict with keys: has_num_users, maximum, minimum, default.
+    Returns None if the cluster is unreachable or the CI cannot be fetched.
+    """
+    try:
+        catalog_namespace = "babylon-catalog-event" if ci.endswith(".event") else "babylon-catalog-prod"
+        cmd = [
+            config.oc_command,
+            "get", "catalogitem", ci,
+            "-n", catalog_namespace,
+            "-o", "json"
+        ]
+        env = os.environ.copy()
+        if config.kubeconfig_path:
+            env['KUBECONFIG'] = config.kubeconfig_path
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+        if result.returncode != 0:
+            return None
+        data = json.loads(result.stdout)
+        spec = data.get("spec", {})
+
+        # Search all known parameter locations for num_users
+        all_params = []
+        params = spec.get("parameters", [])
+        if isinstance(params, list):
+            all_params.extend(p for p in params if isinstance(p, dict))
+        param_defs = spec.get("parameterDefinitions", []) or []
+        all_params.extend(p for p in param_defs if isinstance(p, dict))
+        provider_defs = spec.get("providerSpec", {}).get("parameterDefinitions", []) or []
+        all_params.extend(p for p in provider_defs if isinstance(p, dict))
+
+        for p in all_params:
+            if p.get("name") == "num_users":
+                schema = p.get("openAPIV3Schema", {})
+                return {
+                    "has_num_users": True,
+                    "maximum": schema.get("maximum"),
+                    "minimum": schema.get("minimum"),
+                    "default": schema.get("default"),
+                }
+
+        return {"has_num_users": False, "maximum": None, "minimum": None, "default": None}
+    except Exception:
+        return None
+
+
 def get_catalog_item_info(ci: str, config: RHDPConfig) -> Dict[str, str]:
     """
     Get catalog item information (namespace, displayName) from the catalog.
@@ -1876,7 +1933,7 @@ def create_multi_workshop(
             }
 
             # Create Workshop for this asset
-            asset_workshop_name = create_workshop_with_ui(asset_workshop_prefix, schedule.namespace, asset_payload, config)
+            asset_workshop_name = create_workshop_with_ui(asset_workshop_prefix, schedule.namespace, asset_payload, config, redirect=schedule.redirect)
             
             if not asset_workshop_name:
                 logger.warning(f"Failed to create Workshop for asset {asset_ci}, continuing...")
@@ -2024,7 +2081,7 @@ def create_multi_region_workshop(
     payload = build_resource_claim_payload(schedule)
     generate_name = f"{schedule.ci}-"
 
-    workshop_name = create_workshop_with_ui(generate_name, schedule.namespace, payload, config)
+    workshop_name = create_workshop_with_ui(generate_name, schedule.namespace, payload, config, redirect=schedule.redirect)
     if not workshop_name:
         return None
 
@@ -2048,21 +2105,25 @@ def enable_workshop_lab_interface(
     workshop_name: str,
     namespace: str,
     config: RHDPConfig,
-    max_wait: int = 120
+    max_wait: int = 120,
+    redirect: Optional[bool] = None,
 ) -> bool:
     """
     Enable labUserInterface.redirect in the Workshop resource.
     This sets the "Enable workshop user interface" toggle to true.
-    
+
     Args:
         workshop_name: Workshop name (from WorkshopProvision)
         namespace: Kubernetes namespace
         config: RHDPConfig object
         max_wait: Maximum seconds to wait for Workshop to be created
-        
+        redirect: Per-schedule redirect override; falls back to config.redirect if None
+
     Returns:
         True if successful, False otherwise
     """
+    if redirect is None:
+        redirect = config.redirect
     logger.info(f"Waiting for Workshop '{workshop_name}' to be created (this may take up to {max_wait}s)...")
     
     for attempt in range(max_wait):
@@ -2092,15 +2153,15 @@ def enable_workshop_lab_interface(
                 workshop_data = json.loads(result.stdout)
                 current_redirect = workshop_data.get('spec', {}).get('labUserInterface', {}).get('redirect', False)
                 
-                if current_redirect == config.redirect:
-                    logger.info(f"✅ Workshop '{workshop_name}' already has labUserInterface.redirect={'true' if config.redirect else 'false'} (Enable workshop user interface: {'ON' if config.redirect else 'OFF'})")
+                if current_redirect == redirect:
+                    logger.info(f"✅ Workshop '{workshop_name}' already has labUserInterface.redirect={'true' if redirect else 'false'} (Enable workshop user interface: {'ON' if redirect else 'OFF'})")
                     return True
 
                 # Patch it to set labUserInterface
                 patch = {
                     "spec": {
                         "labUserInterface": {
-                            "redirect": config.redirect
+                            "redirect": redirect
                         }
                     }
                 }
@@ -2122,7 +2183,7 @@ def enable_workshop_lab_interface(
                 )
                 
                 if patch_result.returncode == 0:
-                    logger.info(f"✅ Set labUserInterface.redirect={'true' if config.redirect else 'false'} (Enable workshop user interface: {'ON' if config.redirect else 'OFF'}) for Workshop: {workshop_name}")
+                    logger.info(f"✅ Set labUserInterface.redirect={'true' if redirect else 'false'} (Enable workshop user interface: {'ON' if redirect else 'OFF'}) for Workshop: {workshop_name}")
                     return True
                 else:
                     logger.warning(f"Could not patch Workshop: {patch_result.stderr}")
@@ -3386,7 +3447,30 @@ def process_schedule(
         DeploymentResult object
     """
     logger.info(f"Processing schedule: {schedule.ci_name} ({schedule.ci})")
-    
+
+    # num_users limit guard — refuse to deploy more than the catalog cap
+    if not config.dry_run and _should_include_users(schedule) and schedule.users is not None:
+        limit_info = get_catalog_item_num_users_limit(schedule.ci, config)
+        if limit_info and limit_info.get("maximum") is not None:
+            if schedule.users > limit_info["maximum"]:
+                logger.error(
+                    f"num_users validation failed for {schedule.ci_name}: "
+                    f"{schedule.users} requested, max is {limit_info['maximum']}"
+                )
+                return DeploymentResult(
+                    ci_name=schedule.ci_name,
+                    ci=schedule.ci,
+                    namespace=schedule.namespace,
+                    guid="failed",
+                    url="",
+                    status="failed",
+                    provisioning_date=schedule.provisioning_date,
+                    auto_stop=schedule.auto_stop,
+                    auto_destroy=schedule.auto_destroy,
+                    timestamp=utc_timestamp_str(),
+                    error_message=f"num_users validation failed: {schedule.users} requested, max is {limit_info['maximum']}",
+                )
+
     try:
         # Check if this is a multi-asset workshop
         if schedule.is_multi_asset:
@@ -3470,7 +3554,7 @@ def process_schedule(
             ci = schedule.ci
             generate_name = f"{ci}-"
             # Create Workshop directly
-            workshop_name = create_workshop_with_ui(generate_name, schedule.namespace, payload, config)
+            workshop_name = create_workshop_with_ui(generate_name, schedule.namespace, payload, config, redirect=schedule.redirect)
             if workshop_name:
                 logger.info(f"✅ Successfully created Workshop: {workshop_name} with UI enabled")
                 # Create WorkshopProvision to manage the Workshop
