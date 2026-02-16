@@ -32,6 +32,8 @@ def reset_state():
     routes._session_counter = 0
     routes._asset_passwords = None
     routes._cached_base_domain = None
+    routes._deploy_log_path = None
+    routes._qa_log_path = None
     # Reset rate limiter storage so per-route limits don't bleed across tests
     if _test_limiter:
         _test_limiter.reset()
@@ -631,3 +633,129 @@ def test_extend_days_cap(uploaded_client):
         "/api/operations/extend-stop", json={"days": 31, "hours": 0}
     )
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# num_users Validation
+# ---------------------------------------------------------------------------
+
+def test_validate_num_users_no_schedules(client):
+    """Should 400 when no schedules are loaded."""
+    resp = client.post("/api/schedules/validate-num-users")
+    assert resp.status_code == 400
+
+
+@patch("api.routes.get_catalog_item_num_users_limit")
+def test_validate_num_users_no_violations(mock_limit, uploaded_client):
+    """No violations when users are within the catalog limit."""
+    mock_limit.return_value = {"has_num_users": True, "maximum": 40, "minimum": 2, "default": 2}
+    resp = uploaded_client.post("/api/schedules/validate-num-users")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["violations"] == []
+    assert data["checked"] == 1
+    assert data["limits"]["openshift-cnv.ocp-virt-roadshow-multi-user.prod"] == 40
+
+
+@patch("api.routes.get_catalog_item_num_users_limit")
+def test_validate_num_users_violation(mock_limit, uploaded_client):
+    """Violation returned when users exceed the catalog maximum."""
+    mock_limit.return_value = {"has_num_users": True, "maximum": 10, "minimum": 2, "default": 2}
+    resp = uploaded_client.post("/api/schedules/validate-num-users")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["violations"]) == 1
+    v = data["violations"][0]
+    assert v["requested_users"] == 20
+    assert v["maximum"] == 10
+
+
+@patch("api.routes.get_catalog_item_num_users_limit")
+def test_validate_num_users_cluster_unreachable(mock_limit, uploaded_client):
+    """Gracefully skips when cluster is unreachable (returns None)."""
+    mock_limit.return_value = None
+    resp = uploaded_client.post("/api/schedules/validate-num-users")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["violations"] == []
+    assert data["skipped"] == 1
+    assert data["checked"] == 0
+
+
+@patch("api.routes.get_catalog_item_num_users_limit")
+def test_deploy_blocked_when_limit_exceeded(mock_limit, uploaded_client):
+    """Live deploy returns 400 when users exceed the catalog limit."""
+    mock_limit.return_value = {"has_num_users": True, "maximum": 10, "minimum": 2, "default": 2}
+    resp = uploaded_client.post("/api/deploy", json={"dry_run": False})
+    assert resp.status_code == 400
+    assert "num_users limit exceeded" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Log Capture
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def log_dir(tmp_path, monkeypatch):
+    """Redirect log output to a temp directory."""
+    monkeypatch.setenv("RHDP_LOG_DIR", str(tmp_path))
+    return tmp_path
+
+
+def test_dry_run_creates_log_file(uploaded_client, log_dir):
+    """Dry-run deploy creates a deploy log file."""
+    resp = uploaded_client.post("/api/deploy/dry-run", json={})
+    assert resp.status_code == 200
+    log_files = list(log_dir.glob("deploy-dryrun_*.log"))
+    assert len(log_files) >= 1
+
+
+def test_list_logs(uploaded_client, log_dir):
+    """GET /api/logs lists log files after a deploy."""
+    uploaded_client.post("/api/deploy/dry-run", json={})
+    resp = uploaded_client.get("/api/logs")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["files"]) >= 1
+    assert data["files"][0].endswith(".log")
+
+
+def test_download_log(uploaded_client, log_dir):
+    """GET /api/logs/{filename} returns log content."""
+    uploaded_client.post("/api/deploy/dry-run", json={})
+    # Get the filename from the listing
+    list_resp = uploaded_client.get("/api/logs")
+    filename = list_resp.json()["files"][0]
+    resp = uploaded_client.get(f"/api/logs/{filename}")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "text/plain; charset=utf-8"
+
+
+def test_download_log_traversal_protection(client, log_dir):
+    """Directory traversal in log filename returns 400."""
+    resp = client.get("/api/logs/..%2F..%2Fetc%2Fpasswd")
+    assert resp.status_code in (400, 404)
+    # Also test that a filename with .. is rejected
+    resp2 = client.get("/api/logs/..secret.log")
+    assert resp2.status_code == 400
+
+
+def test_download_log_not_found(client, log_dir):
+    """Non-existent log file returns 404."""
+    resp = client.get("/api/logs/nonexistent.log")
+    assert resp.status_code == 404
+
+
+def test_list_logs_empty(client, log_dir):
+    """GET /api/logs returns empty list when no logs exist."""
+    resp = client.get("/api/logs")
+    assert resp.status_code == 200
+    assert resp.json()["files"] == []
+
+
+def test_deploy_status_includes_log_file(uploaded_client, log_dir):
+    """Deploy dry-run sets _deploy_log_path, visible via session archive."""
+    uploaded_client.post("/api/deploy/dry-run", json={})
+    # The log path should be set on the module state
+    assert routes._deploy_log_path is not None
+    assert routes._deploy_log_path.endswith(".log")

@@ -57,6 +57,7 @@ const App: React.FC = () => {
   const [results, setResults] = useState<DeploymentResult[]>([]);
   const [qaResults, setQAResults] = useState<QAResult[]>([]);
   const [viewingSession, setViewingSession] = useState(false);
+  const [deployLogFile, setDeployLogFile] = useState<string | null>(null);
   const [toast, setToast] = useState<{ msg: string; variant: 'success' | 'danger' | 'info' } | null>(null);
   const [showHelp, setShowHelp] = useState(false);
 
@@ -99,6 +100,7 @@ const App: React.FC = () => {
     setSchedules([]);
     setResults([]);
     setQAResults([]);
+    setDeployLogFile(null);
     setViewingSession(false);
   }, []);
 
@@ -216,6 +218,7 @@ const App: React.FC = () => {
                 setResults={setResults}
                 showToast={showToast}
                 onClear={handleClear}
+                setDeployLogFile={setDeployLogFile}
               />
             </Suspense>
           </Tab>
@@ -228,6 +231,7 @@ const App: React.FC = () => {
                 results={results}
                 setResults={setResults}
                 showToast={showToast}
+                deployLogFile={deployLogFile}
               />
             </Suspense>
           </Tab>

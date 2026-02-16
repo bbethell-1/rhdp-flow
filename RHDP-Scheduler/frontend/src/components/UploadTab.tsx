@@ -56,10 +56,11 @@ interface Props {
   setResults: (r: DeploymentResult[]) => void;
   showToast: (msg: string, variant: 'success' | 'danger' | 'info') => void;
   onClear: () => void;
+  setDeployLogFile?: (f: string | null) => void;
 }
 
 export const UploadTab: React.FC<Props> = ({
-  dryRun, schedules, setSchedules, setResults, showToast, onClear,
+  dryRun, schedules, setSchedules, setResults, showToast, onClear, setDeployLogFile,
 }) => {
   const logRef = useRef<HTMLDivElement>(null);
   const esRef = useRef<EventSource | null>(null);
@@ -330,6 +331,7 @@ export const UploadTab: React.FC<Props> = ({
           es.close();
           esRef.current = null;
           setDeploying(false);
+          if (d.log_file) setDeployLogFile?.(d.log_file);
           if (d.status === 'completed') {
             showToast('Deployment completed', 'success');
             api.deployResults().then(r => setResults(r)).catch((err) => { console.warn('Failed to fetch results after deploy', err); });
@@ -361,6 +363,7 @@ export const UploadTab: React.FC<Props> = ({
                 retryEs.close();
                 esRef.current = null;
                 setDeploying(false);
+                if (d.log_file) setDeployLogFile?.(d.log_file);
                 if (d.status === 'completed') {
                   showToast('Deployment completed', 'success');
                   api.deployResults().then(r => setResults(r)).catch((err) => { console.warn('Failed to fetch results after retry deploy', err); });

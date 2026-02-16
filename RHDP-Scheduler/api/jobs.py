@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
@@ -26,6 +27,7 @@ class Job:
     message: str = ""
     results: Optional[List[Any]] = None
     error: Optional[str] = None
+    log_path: Optional[str] = None
     _events: asyncio.Queue = field(default_factory=asyncio.Queue, repr=False)
 
 
@@ -53,6 +55,7 @@ def update_job(
     message: Optional[str] = None,
     results: Optional[List[Any]] = None,
     error: Optional[str] = None,
+    log_path: Optional[str] = None,
 ) -> Optional[Job]:
     """Update fields on an existing job. Pushes an SSE event."""
     job = _jobs.get(job_id)
@@ -68,6 +71,8 @@ def update_job(
         job.results = results
     if error is not None:
         job.error = error
+    if log_path is not None:
+        job.log_path = log_path
     # Push event for SSE listeners (non-blocking)
     try:
         job._events.put_nowait(_job_to_dict(job))
@@ -109,6 +114,7 @@ def _job_to_dict(job: Job) -> dict:
         "progress": job.progress,
         "message": job.message,
         "error": job.error,
+        "log_file": os.path.basename(job.log_path) if job.log_path else None,
     }
 
 

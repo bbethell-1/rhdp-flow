@@ -12,6 +12,7 @@ import type {
   QARequest,
   QAResponse,
   RetryRequest,
+  NumUsersValidationResponse,
   SessionSummary,
   SessionDetail,
 } from '../types';
@@ -76,6 +77,8 @@ export const api = {
   getSchedules: () => cachedRequest<WorkshopSchedule[]>('/schedules'),
   validateNamespaces: () =>
     request<{ namespaces: Record<string, boolean>; missing: string[] }>('/schedules/validate-namespaces', { method: 'POST', body: '{}' }),
+  validateNumUsers: () =>
+    request<NumUsersValidationResponse>('/schedules/validate-num-users', { method: 'POST', body: '{}' }),
   diffSchedules: async (file: File): Promise<import('../types').DiffResponse> => {
     const form = new FormData();
     form.append('file', file);
@@ -118,6 +121,9 @@ export const api = {
   // Export
   exportResultsURL: `${API}/export/results`,
   exportStudentsURL: `${API}/export/students`,
+
+  // Logs
+  logURL: (filename: string) => `${API}/logs/${filename}`,
 
   // Sessions
   getSessions: () => cachedRequest<SessionSummary[]>('/sessions'),

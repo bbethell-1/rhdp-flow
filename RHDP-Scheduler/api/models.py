@@ -129,6 +129,7 @@ class JobResponse(BaseModel):
     message: str = ""
     results: Optional[List[DeploymentResultResponse]] = None
     error: Optional[str] = None
+    log_file: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -207,3 +208,5 @@ class SessionSummary(BaseModel):
     result_count: int
     timestamp: str
     has_results: bool
+    deploy_log_file: Optional[str] = None
+    qa_log_file: Optional[str] = None

@@ -39,6 +39,7 @@ interface Props {
   results: DeploymentResult[];
   setResults: (r: DeploymentResult[]) => void;
   showToast: (msg: string, variant: 'success' | 'danger' | 'info') => void;
+  deployLogFile?: string | null;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -58,7 +59,7 @@ type StatusFilter = 'all' | 'verified' | 'unverified' | 'failed';
 
 type SortableColumn = 'ci_name' | 'ci' | 'namespace' | 'status' | 'timestamp';
 
-export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast }) => {
+export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast, deployLogFile }) => {
   const [searchText, setSearchText] = useState(() => sessionStorage.getItem('rhdp-deploy-search') || '');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => (sessionStorage.getItem('rhdp-deploy-filter') as StatusFilter) || 'all');
   const [autoRefresh, setAutoRefresh] = useState(false);
@@ -320,6 +321,16 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
             isDisabled={results.length === 0}
           >
             Download CSV
+          </Button>
+        </SplitItem>
+        <SplitItem>
+          <Button
+            variant="secondary"
+            component="a"
+            href={deployLogFile ? api.logURL(deployLogFile) : '#'}
+            isDisabled={!deployLogFile}
+          >
+            Download Log
           </Button>
         </SplitItem>
         {selectedRows.size > 0 && (

@@ -59,6 +59,7 @@ export interface JobResponse {
   message: string;
   results: DeploymentResult[] | null;
   error: string | null;
+  log_file: string | null;
 }
 
 export interface DeployRequest {
@@ -160,6 +161,8 @@ export interface SessionSummary {
   result_count: number;
   timestamp: string;
   has_results: boolean;
+  deploy_log_file: string | null;
+  qa_log_file: string | null;
 }
 
 export interface SessionDetail {
@@ -169,4 +172,6 @@ export interface SessionDetail {
   schedules: WorkshopSchedule[];
   results: DeploymentResult[];
   qa_results: QAResult[];
+  deploy_log_file: string | null;
+  qa_log_file: string | null;
 }

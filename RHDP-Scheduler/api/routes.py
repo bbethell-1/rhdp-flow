@@ -65,6 +65,7 @@ from api.models import (
     WorkshopScheduleResponse,
 )
 from api import jobs
+from api.log_capture import start_log_capture, stop_log_capture, get_log_dir
 from api.limiter import limiter as _route_limiter
 
 logger = logging.getLogger("rhdp_flow.api")
@@ -80,6 +81,8 @@ _qa_results: List[dict] = []
 _csv_filepath: Optional[str] = None  # stashed for QA functions that need a path
 _current_filename: str = ""
 _asset_passwords: Optional[Dict[str, str]] = None
+_deploy_log_path: Optional[str] = None
+_qa_log_path: Optional[str] = None
 
 # Session history — each completed upload+deploy cycle gets archived here
 _sessions: List[dict] = []
@@ -184,6 +187,8 @@ def _archive_current_session():
         "schedule_count": len(_schedules),
         "result_count": len(_deployment_results),
         "timestamp": utc_timestamp_str(),
+        "deploy_log_file": os.path.basename(_deploy_log_path) if _deploy_log_path else None,
+        "qa_log_file": os.path.basename(_qa_log_path) if _qa_log_path else None,
     }
     _sessions.append(session)
     if len(_sessions) > MAX_SESSIONS:
@@ -197,7 +202,7 @@ def _archive_current_session():
 @router.post("/sessions/clear")
 def clear_session():
     """Archive current session and reset state for a new upload."""
-    global _schedules, _deployment_results, _qa_results, _csv_filepath, _current_filename, _asset_passwords
+    global _schedules, _deployment_results, _qa_results, _csv_filepath, _current_filename, _asset_passwords, _deploy_log_path, _qa_log_path
     _archive_current_session()
     _schedules = []
     _deployment_results = []
@@ -205,6 +210,8 @@ def clear_session():
     _csv_filepath = None
     _current_filename = ""
     _asset_passwords = None
+    _deploy_log_path = None
+    _qa_log_path = None
     return {"message": "Session cleared", "session_count": len(_sessions)}
 
 
@@ -219,6 +226,8 @@ def list_sessions():
             result_count=s["result_count"],
             timestamp=s["timestamp"],
             has_results=s["result_count"] > 0,
+            deploy_log_file=s.get("deploy_log_file"),
+            qa_log_file=s.get("qa_log_file"),
         )
         for s in _sessions
     ]
@@ -568,6 +577,8 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
     job = jobs.create_job()
 
     async def _run():
+        global _deploy_log_path
+        handler, log_path = start_log_capture("deploy", job.job_id)
         try:
             config = _get_config(
                 dry_run=body.dry_run,
@@ -631,20 +642,26 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
 
             global _deployment_results
             _deployment_results = results
+            _deploy_log_path = log_path
             jobs.update_job(
                 job.job_id,
                 status=jobs.Status.completed,
                 progress=100,
                 message=f"Completed: {len(results)} deployment(s)",
                 results=[asdict(r) for r in results],
+                log_path=log_path,
             )
         except Exception as exc:
+            _deploy_log_path = log_path
             jobs.update_job(
                 job.job_id,
                 status=jobs.Status.failed,
                 error=str(exc),
                 message=f"Deployment failed: {exc}",
+                log_path=log_path,
             )
+        finally:
+            stop_log_capture(handler)
 
     asyncio.create_task(_run())
     return JobResponse(job_id=job.job_id, status=job.status)
@@ -653,6 +670,7 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
 @router.post("/deploy/dry-run", response_model=List[DeploymentResultResponse])
 @_rate_limit("10/minute")
 def deploy_dry_run(request: Request, body: DeployRequest = DeployRequest(), _key=Depends(verify_api_key)):
+    global _deploy_log_path
     if not _schedules:
         raise HTTPException(400, "No schedules loaded. Upload a CSV first.")
 
@@ -665,45 +683,50 @@ def deploy_dry_run(request: Request, body: DeployRequest = DeployRequest(), _key
         redirect=body.redirect,
     )
 
-    # Replicate main() grouping logic for accurate preview
-    grouped_multi = {}
-    regular_schedules = []
-    for s in schedules:
-        if s.multi_workshop_name and s.is_multi_asset:
-            grouped_multi.setdefault(s.multi_workshop_name, []).append(s)
-        else:
-            regular_schedules.append(s)
+    handler, log_path = start_log_capture("deploy-dryrun")
+    try:
+        # Replicate main() grouping logic for accurate preview
+        grouped_multi = {}
+        regular_schedules = []
+        for s in schedules:
+            if s.multi_workshop_name and s.is_multi_asset:
+                grouped_multi.setdefault(s.multi_workshop_name, []).append(s)
+            else:
+                regular_schedules.append(s)
 
-    results = []
-    for group_name, group_scheds in grouped_multi.items():
-        mw_name = create_multi_workshop_from_group(group_scheds, config)
-        first = group_scheds[0]
-        if mw_name:
-            url = f"https://{config.base_domain}/multi-workshop/{first.namespace}/{mw_name}"
-            results.append(DeploymentResult(
-                ci_name=group_name, ci=first.ci, namespace=first.namespace,
-                guid=mw_name, url=url, status="deployed_unverified",
-                provisioning_date=first.provisioning_date,
-                auto_stop=first.auto_stop, auto_destroy=first.auto_destroy,
-                timestamp=utc_timestamp_str(),
-            ))
-        else:
-            results.append(DeploymentResult(
-                ci_name=group_name, ci=first.ci, namespace=first.namespace,
-                guid="failed", url="", status="failed",
-                provisioning_date=first.provisioning_date,
-                auto_stop=first.auto_stop, auto_destroy=first.auto_destroy,
-                timestamp=utc_timestamp_str(),
-                error_message="Failed to create grouped MultiWorkshop",
-            ))
+        results = []
+        for group_name, group_scheds in grouped_multi.items():
+            mw_name = create_multi_workshop_from_group(group_scheds, config)
+            first = group_scheds[0]
+            if mw_name:
+                url = f"https://{config.base_domain}/multi-workshop/{first.namespace}/{mw_name}"
+                results.append(DeploymentResult(
+                    ci_name=group_name, ci=first.ci, namespace=first.namespace,
+                    guid=mw_name, url=url, status="deployed_unverified",
+                    provisioning_date=first.provisioning_date,
+                    auto_stop=first.auto_stop, auto_destroy=first.auto_destroy,
+                    timestamp=utc_timestamp_str(),
+                ))
+            else:
+                results.append(DeploymentResult(
+                    ci_name=group_name, ci=first.ci, namespace=first.namespace,
+                    guid="failed", url="", status="failed",
+                    provisioning_date=first.provisioning_date,
+                    auto_stop=first.auto_stop, auto_destroy=first.auto_destroy,
+                    timestamp=utc_timestamp_str(),
+                    error_message="Failed to create grouped MultiWorkshop",
+                ))
 
-    for s in regular_schedules:
-        result = process_schedule(s, config, asset_passwords=_asset_passwords)
-        results.append(result)
+        for s in regular_schedules:
+            result = process_schedule(s, config, asset_passwords=_asset_passwords)
+            results.append(result)
 
-    global _deployment_results
-    _deployment_results = results
-    return [_result_to_response(r) for r in results]
+        global _deployment_results
+        _deployment_results = results
+        _deploy_log_path = log_path
+        return [_result_to_response(r) for r in results]
+    finally:
+        stop_log_capture(handler)
 
 
 @router.get("/deploy/status/{job_id}", response_model=JobResponse)
@@ -718,6 +741,7 @@ def deploy_status(job_id: str):
         message=job.message,
         error=job.error,
         results=[DeploymentResultResponse(**r) for r in (job.results or [])],
+        log_file=os.path.basename(job.log_path) if job.log_path else None,
     )
 
 
@@ -749,6 +773,8 @@ async def deploy_retry(request: Request, body: RetryRequest, _key=Depends(verify
     job = jobs.create_job()
 
     async def _run():
+        global _deploy_log_path
+        handler, log_path = start_log_capture("deploy-retry", job.job_id)
         try:
             config = _get_config(
                 dry_run=body.dry_run,
@@ -778,20 +804,26 @@ async def deploy_retry(request: Request, body: RetryRequest, _key=Depends(verify
                 result_map.get(r.ci_name, r) for r in _deployment_results
             ] + [r for r in results if r.ci_name not in {dr.ci_name for dr in _deployment_results}]
 
+            _deploy_log_path = log_path
             jobs.update_job(
                 job.job_id,
                 status=jobs.Status.completed,
                 progress=100,
                 message=f"Retry completed: {len(results)} deployment(s)",
                 results=[asdict(r) for r in results],
+                log_path=log_path,
             )
         except Exception as exc:
+            _deploy_log_path = log_path
             jobs.update_job(
                 job.job_id,
                 status=jobs.Status.failed,
                 error=str(exc),
                 message=f"Retry failed: {exc}",
+                log_path=log_path,
             )
+        finally:
+            stop_log_capture(handler)
 
     asyncio.create_task(_run())
     return JobResponse(job_id=job.job_id, status=job.status)
@@ -907,7 +939,7 @@ def op_import_namespace(namespace: str):
 @router.post("/qa/run")
 @_rate_limit("10/minute")
 def qa_run(request: Request, body: QARequest = QARequest()):
-    global _qa_results
+    global _qa_results, _qa_log_path
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     if not _csv_filepath:
@@ -917,20 +949,62 @@ def qa_run(request: Request, body: QARequest = QARequest()):
     namespace = _schedules[0].namespace
     all_results = []
 
-    if body.type.value in ("1", "both"):
-        r1 = qa1_verify_setup(_csv_filepath, namespace, config)
-        all_results.extend(r1)
-    if body.type.value in ("2", "both"):
-        r2 = qa2_verify_deployment_status(_csv_filepath, namespace, config)
-        all_results.extend(r2)
+    handler, log_path = start_log_capture("qa")
+    try:
+        if body.type.value in ("1", "both"):
+            r1 = qa1_verify_setup(_csv_filepath, namespace, config)
+            all_results.extend(r1)
+        if body.type.value in ("2", "both"):
+            r2 = qa2_verify_deployment_status(_csv_filepath, namespace, config)
+            all_results.extend(r2)
 
-    _qa_results = all_results
-    return {"count": len(all_results), "results": all_results}
+        _qa_results = all_results
+        _qa_log_path = log_path
+        return {
+            "count": len(all_results),
+            "results": all_results,
+            "log_file": os.path.basename(log_path),
+        }
+    finally:
+        stop_log_capture(handler)
 
 
 @router.get("/qa/results")
 def qa_get_results():
     return {"count": len(_qa_results), "results": _qa_results}
+
+
+# ---------------------------------------------------------------------------
+# Logs
+# ---------------------------------------------------------------------------
+
+@router.get("/logs")
+def list_logs():
+    """List available log files, newest first."""
+    log_dir = get_log_dir()
+    try:
+        files = [f for f in os.listdir(log_dir) if f.endswith(".log")]
+    except FileNotFoundError:
+        files = []
+    files.sort(reverse=True)
+    return {"files": files}
+
+
+@router.get("/logs/{filename}")
+def download_log(filename: str):
+    """Download a specific log file."""
+    # Directory traversal protection
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(400, "Invalid filename")
+    log_dir = get_log_dir()
+    filepath = os.path.join(log_dir, filename)
+    if not os.path.isfile(filepath):
+        raise HTTPException(404, "Log file not found")
+    return StreamingResponse(
+        open(filepath, "r", encoding="utf-8"),
+        media_type="text/plain",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 # ---------------------------------------------------------------------------
