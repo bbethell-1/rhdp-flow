@@ -1,10 +1,15 @@
 """Tests for derive_base_domain, build_resource_claim_payload, and related flow helpers."""
 
+import json
+import subprocess
+from unittest.mock import patch, MagicMock
+
 import pytest
 
 from rhdp_flow import (
     derive_base_domain,
     build_resource_claim_payload,
+    get_catalog_item_num_users_limit,
     WorkshopSchedule,
     RHDPConfig,
 )
@@ -73,3 +78,91 @@ class TestBuildResourceClaimPayload:
         ann = payload.get("metadata", {}).get("annotations", {})
         assert ann.get("demo.redhat.com/requester") == "jdoe@redhat.com"
         assert ann.get("demo.redhat.com/orderedBy") == "jdoe@redhat.com"
+
+
+class TestGetCatalogItemNumUsersLimit:
+    """Tests for get_catalog_item_num_users_limit."""
+
+    @patch("subprocess.run")
+    def test_returns_maximum_from_schema(self, mock_run):
+        """Returns maximum/minimum/default from openAPIV3Schema."""
+        ci_json = {
+            "spec": {
+                "parameters": [
+                    {
+                        "name": "num_users",
+                        "openAPIV3Schema": {
+                            "type": "integer",
+                            "default": 2,
+                            "minimum": 2,
+                            "maximum": 40,
+                        },
+                    }
+                ]
+            }
+        }
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=json.dumps(ci_json), stderr=""
+        )
+        config = make_config()
+        result = get_catalog_item_num_users_limit("test.ci.prod", config)
+        assert result is not None
+        assert result["has_num_users"] is True
+        assert result["maximum"] == 40
+        assert result["minimum"] == 2
+        assert result["default"] == 2
+
+    @patch("subprocess.run")
+    def test_returns_false_when_no_num_users(self, mock_run):
+        """Returns has_num_users=False when CI has no num_users parameter."""
+        ci_json = {
+            "spec": {
+                "parameters": [
+                    {"name": "other_param", "openAPIV3Schema": {"type": "string"}}
+                ]
+            }
+        }
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=json.dumps(ci_json), stderr=""
+        )
+        config = make_config()
+        result = get_catalog_item_num_users_limit("test.ci.prod", config)
+        assert result is not None
+        assert result["has_num_users"] is False
+        assert result["maximum"] is None
+
+    @patch("subprocess.run")
+    def test_returns_none_when_cluster_unreachable(self, mock_run):
+        """Returns None when oc command fails (cluster unreachable)."""
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
+        config = make_config()
+        result = get_catalog_item_num_users_limit("test.ci.prod", config)
+        assert result is None
+
+    @patch("subprocess.run")
+    def test_searches_provider_spec(self, mock_run):
+        """Finds num_users in spec.providerSpec.parameterDefinitions."""
+        ci_json = {
+            "spec": {
+                "parameters": [],
+                "providerSpec": {
+                    "parameterDefinitions": [
+                        {
+                            "name": "num_users",
+                            "openAPIV3Schema": {
+                                "type": "integer",
+                                "maximum": 100,
+                            },
+                        }
+                    ]
+                },
+            }
+        }
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=json.dumps(ci_json), stderr=""
+        )
+        config = make_config()
+        result = get_catalog_item_num_users_limit("test.ci.prod", config)
+        assert result is not None
+        assert result["has_num_users"] is True
+        assert result["maximum"] == 100

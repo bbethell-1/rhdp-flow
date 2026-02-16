@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, Fragment } from 'react';
 import {
   Alert,
   Button,
@@ -487,8 +487,8 @@ const DestroyQASection: React.FC<{
   const sorted = useMemo(() => {
     if (!dcSortBy) return filtered;
     return [...filtered].sort((a, b) => {
-      const aVal = String((a as Record<string, unknown>)[dcSortBy] ?? '').toLowerCase();
-      const bVal = String((b as Record<string, unknown>)[dcSortBy] ?? '').toLowerCase();
+      const aVal = String((a as unknown as Record<string, unknown>)[dcSortBy] ?? '').toLowerCase();
+      const bVal = String((b as unknown as Record<string, unknown>)[dcSortBy] ?? '').toLowerCase();
       const cmp = aVal.localeCompare(bVal);
       return dcSortDir === 'asc' ? cmp : -cmp;
     });
@@ -690,7 +690,7 @@ const DestroyQASection: React.FC<{
                   ? overdueText(r.scheduled_destroy)
                   : null;
                 return (
-                  <React.Fragment key={rowIdx}>
+                  <Fragment key={rowIdx}>
                     <Tr className={destroyRowClass(r.overall_status)}>
                       <Td
                         expand={{
@@ -765,7 +765,7 @@ const DestroyQASection: React.FC<{
                         </Td>
                       </Tr>
                     )}
-                  </React.Fragment>
+                  </Fragment>
                 );
               })}
             </Tbody>

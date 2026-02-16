@@ -22,10 +22,3 @@ patches:
         path: /spec/template/spec/containers/0/resources/limits/memory
         value: 256Mi
 
-  - target:
-      kind: BuildConfig
-      name: rhdp-scheduler
-    patch: |
-      - op: replace
-        path: /spec/source/git/ref
-        value: main

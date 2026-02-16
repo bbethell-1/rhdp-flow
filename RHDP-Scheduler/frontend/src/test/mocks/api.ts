@@ -46,6 +46,7 @@ export const mockSchedule: WorkshopSchedule = {
   concurrency: null,
   instances: null,
   salesforce_ids: '',
+  redirect: true,
 };
 
 export const mockResult: DeploymentResult = {

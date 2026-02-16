@@ -33,8 +33,5 @@ patches:
       name: rhdp-scheduler
     patch: |
       - op: replace
-        path: /spec/source/git/ref
-        value: main
-      - op: replace
         path: /spec/resources/limits/memory
         value: 4Gi

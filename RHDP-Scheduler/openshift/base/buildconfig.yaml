@@ -4,11 +4,8 @@ metadata:
   name: rhdp-scheduler
 spec:
   source:
-    type: Git
-    git:
-      uri: https://github.com/rhpds/rhpds-utils.git
-      ref: main
-    contextDir: RHDP-Scheduler
+    type: Binary
+    binary: {}
   strategy:
     type: Docker
     dockerStrategy:
@@ -19,10 +16,6 @@ spec:
       name: rhdp-scheduler:latest
   triggers:
     - type: ConfigChange
-    - type: GitHub
-      github:
-        secretReference:
-          name: rhdp-scheduler-webhook
   resources:
     limits:
       memory: 2Gi
