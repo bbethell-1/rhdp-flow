@@ -201,6 +201,32 @@ class NumUsersValidationResponse(BaseModel):
     limits: dict = Field(default_factory=dict, description="Per-CI maximum map, e.g. {'ci-name': 40}")
 
 
+class ResourceStatus(BaseModel):
+    exists: bool
+    status: str           # "not_found" | "active" | "overdue"
+    lifespan_end: Optional[str] = None
+    count: Optional[int] = None
+    healthy: Optional[bool] = None
+
+
+class DestroyCheckResult(BaseModel):
+    ci_name: str
+    ci: str
+    namespace: str
+    scheduled_destroy: str
+    scheduled_stop: str
+    workshop: ResourceStatus
+    workshop_provision: ResourceStatus
+    resource_claim: ResourceStatus
+    overall_status: str   # "destroyed" | "active" | "overdue" | "not_deployed"
+    stop_status: str      # "stopped" | "pending" | "stop_overdue" | "n/a"
+
+
+class DestroyCheckResponse(BaseModel):
+    count: int
+    results: List[DestroyCheckResult]
+
+
 class SessionSummary(BaseModel):
     session_id: str
     filename: str

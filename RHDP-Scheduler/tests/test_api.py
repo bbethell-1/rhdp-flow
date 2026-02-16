@@ -34,6 +34,7 @@ def reset_state():
     routes._cached_base_domain = None
     routes._deploy_log_path = None
     routes._qa_log_path = None
+    routes._destroy_check_results = []
     # Reset rate limiter storage so per-route limits don't bleed across tests
     if _test_limiter:
         _test_limiter.reset()
@@ -759,3 +760,83 @@ def test_deploy_status_includes_log_file(uploaded_client, log_dir):
     # The log path should be set on the module state
     assert routes._deploy_log_path is not None
     assert routes._deploy_log_path.endswith(".log")
+
+
+# ---------------------------------------------------------------------------
+# Destroy QA
+# ---------------------------------------------------------------------------
+
+def test_destroy_check_no_csv(client):
+    """POST /qa/destroy-check returns 400 when no CSV uploaded."""
+    resp = client.post("/api/qa/destroy-check")
+    assert resp.status_code == 400
+
+
+@patch("rhdp_flow.subprocess.run")
+def test_destroy_check_runs(mock_run, uploaded_client):
+    """Upload CSV, mock oc get, run destroy-check, verify response structure."""
+    def dispatcher(*args, **kwargs):
+        cmd = args[0] if args else kwargs.get("args", [])
+        if not cmd:
+            return MagicMock(returncode=0, stdout="", stderr="")
+        # Return empty items for all oc get calls
+        if "get" in cmd:
+            return MagicMock(
+                returncode=0,
+                stdout=json.dumps({"items": []}),
+                stderr="",
+            )
+        return MagicMock(returncode=0, stdout="", stderr="")
+    mock_run.side_effect = dispatcher
+    resp = uploaded_client.post("/api/qa/destroy-check")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["count"] >= 1
+    r = data["results"][0]
+    assert "ci_name" in r
+    assert "overall_status" in r
+    assert "stop_status" in r
+    assert "workshop" in r
+    assert r["workshop"]["exists"] is False
+
+
+def test_destroy_check_results_empty(client):
+    """GET /qa/destroy-check/results returns empty list before any run."""
+    resp = client.get("/api/qa/destroy-check/results")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["count"] == 0
+    assert data["results"] == []
+
+
+@patch("rhdp_flow.subprocess.run")
+def test_destroy_check_results_after_run(mock_run, uploaded_client):
+    """GET returns stored results after running destroy-check."""
+    mock_run.side_effect = lambda *a, **kw: MagicMock(
+        returncode=0,
+        stdout=json.dumps({"items": []}),
+        stderr="",
+    )
+    uploaded_client.post("/api/qa/destroy-check")
+    resp = uploaded_client.get("/api/qa/destroy-check/results")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["count"] >= 1
+    assert len(data["results"]) >= 1
+
+
+@patch("rhdp_flow.subprocess.run")
+def test_destroy_check_in_session(mock_run, uploaded_client):
+    """Verify destroy check results are included in session archive."""
+    mock_run.side_effect = lambda *a, **kw: MagicMock(
+        returncode=0,
+        stdout=json.dumps({"items": []}),
+        stderr="",
+    )
+    uploaded_client.post("/api/qa/destroy-check")
+    uploaded_client.post("/api/sessions/clear", json={})
+    resp = uploaded_client.get("/api/sessions/1")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "destroy_check_results" in data
+    assert len(data["destroy_check_results"]) >= 1

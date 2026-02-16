@@ -32,6 +32,7 @@ from rhdp_flow import (
     create_multi_workshop_from_group,
     qa1_verify_setup,
     qa2_verify_deployment_status,
+    qa_destroy_check,
     export_student_landing_page_csv,
     lock_workshops,
     unlock_workshops,
@@ -48,6 +49,7 @@ from rhdp_flow import (
 from api.models import (
     DeploymentResultResponse,
     DeployRequest,
+    DestroyCheckResponse,
     DiffEntry,
     DiffResponse,
     ExtendRequest,
@@ -83,6 +85,7 @@ _current_filename: str = ""
 _asset_passwords: Optional[Dict[str, str]] = None
 _deploy_log_path: Optional[str] = None
 _qa_log_path: Optional[str] = None
+_destroy_check_results: List[dict] = []
 
 # Session history — each completed upload+deploy cycle gets archived here
 _sessions: List[dict] = []
@@ -183,6 +186,7 @@ def _archive_current_session():
         "schedules": list(_schedules),
         "deployment_results": list(_deployment_results),
         "qa_results": list(_qa_results),
+        "destroy_check_results": list(_destroy_check_results),
         "csv_filepath": _csv_filepath,
         "schedule_count": len(_schedules),
         "result_count": len(_deployment_results),
@@ -202,11 +206,12 @@ def _archive_current_session():
 @router.post("/sessions/clear")
 def clear_session():
     """Archive current session and reset state for a new upload."""
-    global _schedules, _deployment_results, _qa_results, _csv_filepath, _current_filename, _asset_passwords, _deploy_log_path, _qa_log_path
+    global _schedules, _deployment_results, _qa_results, _csv_filepath, _current_filename, _asset_passwords, _deploy_log_path, _qa_log_path, _destroy_check_results
     _archive_current_session()
     _schedules = []
     _deployment_results = []
     _qa_results = []
+    _destroy_check_results = []
     _csv_filepath = None
     _current_filename = ""
     _asset_passwords = None
@@ -245,6 +250,7 @@ def get_session(session_id: str):
                 "schedules": [_schedule_to_response(sc) for sc in s["schedules"]],
                 "results": [_result_to_response(r) for r in s["deployment_results"]],
                 "qa_results": s["qa_results"],
+                "destroy_check_results": s.get("destroy_check_results", []),
             }
     raise HTTPException(404, "Session not found")
 
@@ -972,6 +978,40 @@ def qa_run(request: Request, body: QARequest = QARequest()):
 @router.get("/qa/results")
 def qa_get_results():
     return {"count": len(_qa_results), "results": _qa_results}
+
+
+@router.post("/qa/destroy-check", response_model=DestroyCheckResponse)
+@_rate_limit("10/minute")
+def qa_destroy_check_endpoint(request: Request):
+    """Read-only check whether deployments have been properly destroyed/stopped."""
+    global _destroy_check_results
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+    if not _csv_filepath:
+        raise HTTPException(400, "No CSV file available. Upload a CSV first.")
+
+    config = _get_config()
+    all_results: List[dict] = []
+
+    handler, log_path = start_log_capture("destroy-check")
+    try:
+        namespaces_seen: set = set()
+        for s in _schedules:
+            if s.namespace not in namespaces_seen:
+                namespaces_seen.add(s.namespace)
+                r = qa_destroy_check(_csv_filepath, s.namespace, config)
+                all_results.extend(r)
+
+        _destroy_check_results = all_results
+        return DestroyCheckResponse(count=len(all_results), results=all_results)
+    finally:
+        stop_log_capture(handler)
+
+
+@router.get("/qa/destroy-check/results")
+def qa_destroy_check_results():
+    """Return stored destroy-check results."""
+    return {"count": len(_destroy_check_results), "results": _destroy_check_results}
 
 
 # ---------------------------------------------------------------------------

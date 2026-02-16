@@ -1,12 +1,12 @@
 # RHDP-Flow TODO List
 
 ## Backlog
-- [ ] Destroy QA (NEVER touch deletions) 
+- [x] ~~**Destroy QA (read-only lifecycle check)** — `POST /api/qa/destroy-check` queries Workshop, WorkshopProvision, and ResourceClaim resources to verify they've been properly destroyed/stopped after scheduled times. Reports per-resource status (not_found/active/overdue) and overall lifecycle status. Never deletes anything. Frontend "Destroy QA" section in QA tab with summary cards and results table. 5 new backend tests.~~
 - [x] ~~**agV num_users validation** — Before deploying, check if the catalog item has a hardcoded `num_users` limit in agnosticV; refuse to deploy more than the cap. `get_catalog_item_num_users_limit()` extracts `openAPIV3Schema.maximum` from the CI definition. Frontend shows danger alert after upload, deploy is blocked when violations exist. API endpoint `POST /api/schedules/validate-num-users` + deploy guard in both `process_schedule()` and the deploy endpoint.~~
 - [x] ~~**Test multi-region split for AWS items**~~ — Covered by 8 unit tests (even/remainder user distribution, region suffixes, underscore replacement, extra_parameters, single workshop + N provisions, concurrency inheritance, 3-region distribution) plus `multi_region.csv` and `one_workshop_two_regions.csv` examples.
 - [x] ~~**Redirect toggle behavior**~~ — Implemented: toggle explicitly sets `labUserInterface.redirect = False` when off (default True). agV defaults do NOT take precedence; the toggle always overrides.
 - [x] ~~**CLI demo videos**~~ — 2 chapter videos in `videos/`: `07-cli-deploy-and-qa`, `08-cli-ops-and-wizard`.
-- [ ] **Deployment log file** — Automatically save a timestamped log (txt) for each deployment and QA run. Useful for tracing issues after the fact. Currently the backend uses structured logging (opt-in JSON via `LOG_FORMAT=json`) but does not persist per-run log files to disk.
+- [x] ~~**Deployment log file** — Automatically save a timestamped log (txt) for each deployment and QA run. `api/log_capture.py` attaches a FileHandler per deploy/QA run; `GET /api/logs` lists files, `GET /api/logs/{file}` serves them; frontend "Download Log" button on Deployments tab. 7 new tests.~~
 
 ## Testing
 
@@ -52,7 +52,7 @@
 - [x] **Scale** — `--scale N` sets WorkshopProvision count to target value
 - [x] **Regions (Multi-Region Provisioning)** — `AWS_Region` column supports comma-separated regions; creates one Workshop with multiple regional WorkshopProvisions, users distributed evenly
 - [x] **Interactive CSV Wizard** — `--wizard` launches a rich CLI wizard to generate workshop schedule CSVs interactively
-- [x] **Test Suite** — 123 backend + 47 frontend = 170 tests (see `tests/` and `frontend/src/`)
+- [x] **Test Suite** — 130 backend + 47 frontend = 177 tests (see `tests/` and `frontend/src/`)
 - [x] **Fix Workshop URLs** — Map infra domain (`ocp-{env}.infra.open.redhat.com`) to RHDP UI domain (`{env}.demo.redhat.com`) and append `/details` suffix
 - [x] **Fix Lock Label** — Use correct `demo.redhat.com/lock-enabled` label matching RHDP UI (was `resource-lock`)
 - [x] **Remove False-Positive Warning** — Auto-destroy before auto-stop is valid (destroy nullifies stop)

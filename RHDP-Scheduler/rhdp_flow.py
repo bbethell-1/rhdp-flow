@@ -3283,13 +3283,199 @@ def qa2_verify_deployment_status(
     
     return results
 
+
+def qa_destroy_check(
+    csv_file: str,
+    namespace: str,
+    config: RHDPConfig
+) -> List[Dict]:
+    """
+    Destroy QA: Read-only check whether deployments have been properly
+    destroyed/stopped after their scheduled times.
+
+    Checks Workshop, WorkshopProvision, and ResourceClaim resources —
+    reports existence, timing status (destroyed/active/overdue), and stop
+    readiness.  Strictly read-only: only ``oc get``, never ``oc delete``.
+
+    Args:
+        csv_file: Path to input CSV with scheduled workshops
+        namespace: Kubernetes namespace to check
+        config: RHDPConfig object
+
+    Returns:
+        List of dicts, one per CSV row, with per-resource and overall status.
+    """
+    logger.info("=" * 70)
+    logger.info("Destroy QA: Checking resource lifecycle status (read-only)")
+    logger.info("=" * 70)
+
+    schedules = read_csv_input(csv_file)
+    now = datetime.now(timezone.utc)
+    results = []
+
+    env = os.environ.copy()
+    if config.kubeconfig_path:
+        env["KUBECONFIG"] = config.kubeconfig_path
+
+    for schedule in schedules:
+        ci = schedule.ci
+        ci_name = schedule.ci_name
+        ns = namespace
+
+        scheduled_destroy = parse_date_time(schedule.auto_destroy)
+        scheduled_stop = parse_date_time(schedule.auto_stop)
+
+        # -- Workshop ----------------------------------------------------------
+        ws_status = {"exists": False, "status": "not_found", "lifespan_end": None}
+        ws_action_stop = None
+        try:
+            r = subprocess.run(
+                [config.oc_command, "get", "workshop",
+                 "-n", ns,
+                 "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}",
+                 "-o", "json"],
+                capture_output=True, text=True, timeout=30, env=env,
+            )
+            if r.returncode == 0:
+                data = json.loads(r.stdout)
+                items = data.get("items", [])
+                if items:
+                    ws = items[0]
+                    ws_status["exists"] = True
+                    lifespan_end_str = ws.get("spec", {}).get("lifespan", {}).get("end")
+                    ws_status["lifespan_end"] = lifespan_end_str
+                    ws_action_stop = ws.get("spec", {}).get("actionSchedule", {}).get("stop")
+                    ws_end = parse_date_time(lifespan_end_str) if lifespan_end_str else None
+                    if ws_end and now > ws_end:
+                        ws_status["status"] = "overdue"
+                    else:
+                        ws_status["status"] = "active"
+        except Exception as e:
+            logger.debug(f"Error checking Workshop for {ci_name}: {e}")
+
+        # -- WorkshopProvision -------------------------------------------------
+        wp_status = {"exists": False, "status": "not_found", "lifespan_end": None, "count": None}
+        try:
+            r = subprocess.run(
+                [config.oc_command, "get", "workshopprovision",
+                 "-n", ns,
+                 "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}",
+                 "-o", "json"],
+                capture_output=True, text=True, timeout=30, env=env,
+            )
+            if r.returncode == 0:
+                data = json.loads(r.stdout)
+                items = data.get("items", [])
+                if items:
+                    wp = items[0]
+                    wp_status["exists"] = True
+                    lifespan_end_str = wp.get("spec", {}).get("lifespan", {}).get("end")
+                    wp_status["lifespan_end"] = lifespan_end_str
+                    wp_status["count"] = wp.get("spec", {}).get("count")
+                    wp_end = parse_date_time(lifespan_end_str) if lifespan_end_str else None
+                    if wp_end and now > wp_end:
+                        wp_status["status"] = "overdue"
+                    else:
+                        wp_status["status"] = "active"
+        except Exception as e:
+            logger.debug(f"Error checking WorkshopProvision for {ci_name}: {e}")
+
+        # -- ResourceClaim -----------------------------------------------------
+        rc_status = {"exists": False, "status": "not_found", "healthy": None}
+        try:
+            r = subprocess.run(
+                [config.oc_command, "get", "resourceclaim",
+                 "-n", ns,
+                 "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}",
+                 "-o", "json"],
+                capture_output=True, text=True, timeout=30, env=env,
+            )
+            if r.returncode == 0:
+                data = json.loads(r.stdout)
+                items = data.get("items", [])
+                if items:
+                    rc = items[0]
+                    rc_status["exists"] = True
+                    rc_status["healthy"] = rc.get("status", {}).get("healthy")
+                    # ResourceClaims don't have their own lifespan — use
+                    # scheduled destroy time to determine overdue.
+                    if scheduled_destroy and now > scheduled_destroy:
+                        rc_status["status"] = "overdue"
+                    else:
+                        rc_status["status"] = "active"
+        except Exception as e:
+            logger.debug(f"Error checking ResourceClaim for {ci_name}: {e}")
+
+        # -- Overall status ----------------------------------------------------
+        all_not_found = (
+            not ws_status["exists"]
+            and not wp_status["exists"]
+            and not rc_status["exists"]
+        )
+        any_exists = ws_status["exists"] or wp_status["exists"] or rc_status["exists"]
+        destroy_passed = scheduled_destroy is not None and now > scheduled_destroy
+
+        if all_not_found and destroy_passed:
+            overall = "destroyed"
+        elif all_not_found:
+            overall = "not_deployed"
+        elif any_exists and destroy_passed:
+            overall = "overdue"
+        else:
+            overall = "active"
+
+        # -- Stop status -------------------------------------------------------
+        if scheduled_stop is None:
+            stop_status = "n/a"
+        elif now < scheduled_stop:
+            stop_status = "pending"
+        else:
+            # Stop time has passed — check if workshop confirms stop
+            if ws_action_stop:
+                stop_status = "stopped"
+            elif ws_status["exists"]:
+                stop_status = "stop_overdue"
+            else:
+                stop_status = "stopped"  # resource gone = effectively stopped
+
+        entry = {
+            "ci_name": ci_name,
+            "ci": ci,
+            "namespace": ns,
+            "scheduled_destroy": format_iso8601(scheduled_destroy) if scheduled_destroy else "",
+            "scheduled_stop": format_iso8601(scheduled_stop) if scheduled_stop else "",
+            "workshop": ws_status,
+            "workshop_provision": wp_status,
+            "resource_claim": rc_status,
+            "overall_status": overall,
+            "stop_status": stop_status,
+        }
+        results.append(entry)
+
+        logger.info(f"  {ci_name} ({ci}): overall={overall}, stop={stop_status}")
+        logger.info(f"    Workshop: {ws_status['status']}, WP: {wp_status['status']}, RC: {rc_status['status']}")
+
+    # Summary
+    destroyed = sum(1 for r in results if r["overall_status"] == "destroyed")
+    active = sum(1 for r in results if r["overall_status"] == "active")
+    overdue = sum(1 for r in results if r["overall_status"] == "overdue")
+    not_deployed = sum(1 for r in results if r["overall_status"] == "not_deployed")
+
+    logger.info("=" * 70)
+    logger.info("Destroy QA Summary")
+    logger.info(f"  Destroyed: {destroyed}  Active: {active}  Overdue: {overdue}  Not deployed: {not_deployed}")
+    logger.info("=" * 70)
+
+    return results
+
+
 def qa_export_results(
     results: List[Dict],
     output_file: str = "qa_results.csv"
 ) -> None:
     """
     Export QA results to CSV.
-    
+
     Args:
         results: List of QA verification results
         output_file: Output CSV file path

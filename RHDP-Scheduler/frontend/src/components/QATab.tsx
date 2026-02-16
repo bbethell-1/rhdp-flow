@@ -5,6 +5,7 @@ import {
   Card,
   CardBody,
   CardTitle,
+  Divider,
   PageSection,
   Pagination,
   SearchInput,
@@ -28,7 +29,7 @@ import SearchIcon from '@patternfly/react-icons/dist/esm/icons/search-icon';
 import { api } from '../services/api';
 import { AUTO_REFRESH_INTERVAL_MS, DEFAULT_PER_PAGE } from '../constants';
 import { statusColorClass, statusIcon } from '../utils/statusColors';
-import type { QAResult } from '../types';
+import type { QAResult, DestroyCheckResult } from '../types';
 
 interface Props {
   qaResults: QAResult[];
@@ -278,7 +279,154 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
           <EmptyStateBody>Select a QA type above and click Run QA after deploying your workshops.</EmptyStateBody>
         </EmptyState>
       )}
+
+      {/* Destroy QA section */}
+      <Divider style={{ margin: '24px 0' }} />
+      <DestroyQASection showToast={showToast} />
     </PageSection>
+  );
+};
+
+/** Color for destroy-check resource/overall status */
+function destroyStatusColor(status: string): 'green' | 'blue' | 'red' | 'orange' | 'grey' {
+  switch (status) {
+    case 'destroyed':
+    case 'not_found':
+    case 'stopped':
+      return 'green';
+    case 'active':
+    case 'pending':
+      return 'blue';
+    case 'overdue':
+    case 'stop_overdue':
+      return 'red';
+    case 'not_deployed':
+      return 'orange';
+    default:
+      return 'grey';
+  }
+}
+
+/** Destroy QA section — read-only lifecycle status checks */
+const DestroyQASection: React.FC<{
+  showToast: (msg: string, variant: 'success' | 'danger' | 'info') => void;
+}> = ({ showToast }) => {
+  const [results, setResults] = useState<DestroyCheckResult[]>([]);
+  const [running, setRunning] = useState(false);
+  const [dcPage, setDcPage] = useState(1);
+  const [dcPerPage, setDcPerPage] = useState(DEFAULT_PER_PAGE);
+
+  const handleRun = async () => {
+    setRunning(true);
+    try {
+      const data = await api.destroyCheck();
+      setResults(data.results);
+      showToast(`Destroy check complete: ${data.count} result(s)`, 'success');
+    } catch (e) {
+      showToast(`Destroy check failed: ${e}`, 'danger');
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    try {
+      const data = await api.destroyCheckResults();
+      setResults(data.results);
+    } catch (e) {
+      console.warn('Refresh destroy-check results failed', e);
+    }
+  };
+
+  const destroyed = results.filter(r => r.overall_status === 'destroyed').length;
+  const active = results.filter(r => r.overall_status === 'active').length;
+  const overdue = results.filter(r => r.overall_status === 'overdue').length;
+  const notDeployed = results.filter(r => r.overall_status === 'not_deployed').length;
+
+  const paginated = useMemo(() => {
+    const start = (dcPage - 1) * dcPerPage;
+    return results.slice(start, start + dcPerPage);
+  }, [results, dcPage, dcPerPage]);
+
+  return (
+    <>
+      <Title headingLevel="h3" style={{ marginBottom: 8 }}>Destroy QA</Title>
+      <Alert variant="info" isInline isPlain title="Read-only lifecycle check" style={{ marginBottom: 12 }}>
+        Checks whether Workshop, WorkshopProvision, and ResourceClaim resources still exist after their scheduled destroy time. Does not delete anything.
+      </Alert>
+
+      <Split hasGutter style={{ marginBottom: 16, alignItems: 'center' }}>
+        <SplitItem>
+          <Button variant="primary" onClick={handleRun} isDisabled={running} isLoading={running}>
+            Run Destroy Check
+          </Button>
+        </SplitItem>
+        {results.length > 0 && (
+          <SplitItem>
+            <Button variant="secondary" onClick={handleRefresh}>Refresh</Button>
+          </SplitItem>
+        )}
+      </Split>
+
+      {results.length > 0 && (
+        <>
+          {/* Summary cards */}
+          <Split hasGutter style={{ marginBottom: 16 }}>
+            <SplitItem><Label color="green">Destroyed: {destroyed}</Label></SplitItem>
+            <SplitItem><Label color="blue">Active: {active}</Label></SplitItem>
+            <SplitItem><Label color="red">Overdue: {overdue}</Label></SplitItem>
+            <SplitItem><Label color="orange">Not deployed: {notDeployed}</Label></SplitItem>
+          </Split>
+
+          {/* Results table */}
+          <div className="table-sticky-wrapper">
+          <Table aria-label="Destroy check results" variant="compact" className="fixed-table" isStickyHeader>
+            <Thead>
+              <Tr>
+                <Th>CI Name</Th>
+                <Th>Namespace</Th>
+                <Th info={{ tooltip: 'Scheduled auto-destroy time from CSV' }}>Scheduled Destroy</Th>
+                <Th info={{ tooltip: 'Workshop resource status' }}>Workshop</Th>
+                <Th info={{ tooltip: 'WorkshopProvision resource status' }}>WP</Th>
+                <Th info={{ tooltip: 'ResourceClaim resource status' }}>RC</Th>
+                <Th info={{ tooltip: 'Overall lifecycle status: destroyed, active, overdue, or not_deployed' }}>Overall</Th>
+                <Th info={{ tooltip: 'Auto-stop lifecycle status' }}>Stop Status</Th>
+              </Tr>
+            </Thead>
+            <Tbody>
+              {paginated.map((r, i) => (
+                <Tr key={i}>
+                  <Td dataLabel="CI Name">{r.ci_name}</Td>
+                  <Td dataLabel="Namespace">{r.namespace}</Td>
+                  <Td dataLabel="Scheduled Destroy" className="monospace-date">{r.scheduled_destroy || '-'}</Td>
+                  <Td dataLabel="Workshop"><Label color={destroyStatusColor(r.workshop.status)}>{r.workshop.status}</Label></Td>
+                  <Td dataLabel="WP"><Label color={destroyStatusColor(r.workshop_provision.status)}>{r.workshop_provision.status}</Label></Td>
+                  <Td dataLabel="RC"><Label color={destroyStatusColor(r.resource_claim.status)}>{r.resource_claim.status}</Label></Td>
+                  <Td dataLabel="Overall"><Label color={destroyStatusColor(r.overall_status)}>{r.overall_status}</Label></Td>
+                  <Td dataLabel="Stop Status"><Label color={destroyStatusColor(r.stop_status)}>{r.stop_status}</Label></Td>
+                </Tr>
+              ))}
+            </Tbody>
+          </Table>
+          </div>
+          {results.length > dcPerPage && (
+            <Pagination
+              itemCount={results.length}
+              perPage={dcPerPage}
+              page={dcPage}
+              onSetPage={(_e, p) => setDcPage(p)}
+              onPerPageSelect={(_e, pp) => { setDcPerPage(pp); setDcPage(1); }}
+              perPageOptions={[
+                { title: '10', value: 10 },
+                { title: '20', value: 20 },
+                { title: '50', value: 50 },
+              ]}
+              style={{ marginTop: 8 }}
+            />
+          )}
+        </>
+      )}
+    </>
   );
 };
 

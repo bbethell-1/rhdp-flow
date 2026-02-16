@@ -154,6 +154,32 @@ export interface NumUsersValidationResponse {
   limits: Record<string, number>;
 }
 
+export interface ResourceStatus {
+  exists: boolean;
+  status: string;
+  lifespan_end: string | null;
+  count?: number | null;
+  healthy?: boolean | null;
+}
+
+export interface DestroyCheckResult {
+  ci_name: string;
+  ci: string;
+  namespace: string;
+  scheduled_destroy: string;
+  scheduled_stop: string;
+  workshop: ResourceStatus;
+  workshop_provision: ResourceStatus;
+  resource_claim: ResourceStatus;
+  overall_status: string;
+  stop_status: string;
+}
+
+export interface DestroyCheckResponse {
+  count: number;
+  results: DestroyCheckResult[];
+}
+
 export interface SessionSummary {
   session_id: string;
   filename: string;
