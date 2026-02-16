@@ -92,7 +92,7 @@ export const DiffView: React.FC<Props> = ({ hasSchedules, showToast }) => {
               </Thead>
               <Tbody>
                 {diff.added.map((e, i) => (
-                  <Tr key={`a-${i}`} style={{ backgroundColor: 'rgba(62, 134, 53, 0.08)' }}>
+                  <Tr key={`a-${i}`} className="diff-added">
                     <Td><span className="status-verified">Added</span></Td>
                     <Td>{e.ci_name}</Td>
                     <Td>{e.ci}</Td>
@@ -101,7 +101,7 @@ export const DiffView: React.FC<Props> = ({ hasSchedules, showToast }) => {
                   </Tr>
                 ))}
                 {diff.removed.map((e, i) => (
-                  <Tr key={`r-${i}`} style={{ backgroundColor: 'rgba(238, 0, 0, 0.06)' }}>
+                  <Tr key={`r-${i}`} className="diff-removed">
                     <Td><span className="status-failed">Removed</span></Td>
                     <Td>{e.ci_name}</Td>
                     <Td>{e.ci}</Td>
@@ -110,7 +110,7 @@ export const DiffView: React.FC<Props> = ({ hasSchedules, showToast }) => {
                   </Tr>
                 ))}
                 {diff.changed.map((e, i) => (
-                  <Tr key={`c-${i}`} style={{ backgroundColor: 'rgba(240, 171, 0, 0.08)' }}>
+                  <Tr key={`c-${i}`} className="diff-changed">
                     <Td><span className="status-deployed_unverified">Changed</span></Td>
                     <Td>{e.ci_name}</Td>
                     <Td>{e.ci}</Td>

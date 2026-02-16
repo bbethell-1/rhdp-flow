@@ -12,11 +12,30 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@patternfly/react-charts": "^8.4.1",
     "@patternfly/react-core": "^6.4.0",
     "@patternfly/react-icons": "^6.4.0",
     "@patternfly/react-table": "^6.4.0",
+    "@testing-library/dom": "^10.4.1",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "victory-area": "^37.3.6",
+    "victory-axis": "^37.3.6",
+    "victory-bar": "^37.3.6",
+    "victory-box-plot": "^37.3.6",
+    "victory-chart": "^37.3.6",
+    "victory-core": "^37.3.6",
+    "victory-create-container": "^37.3.6",
+    "victory-cursor-container": "^37.3.6",
+    "victory-group": "^37.3.6",
+    "victory-legend": "^37.3.6",
+    "victory-line": "^37.3.6",
+    "victory-pie": "^37.3.6",
+    "victory-scatter": "^37.3.6",
+    "victory-stack": "^37.3.6",
+    "victory-tooltip": "^37.3.6",
+    "victory-voronoi-container": "^37.3.6",
+    "victory-zoom-container": "^37.3.6"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",

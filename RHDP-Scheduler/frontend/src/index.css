@@ -7,6 +7,22 @@
   --rh-green: #3e8635;
   --rh-yellow: #f0ab00;
   --rh-blue: #06c;
+
+  /* ── Glassmorphism tokens (dark theme defaults) ── */
+  --glass-bg: rgba(255, 255, 255, 0.06);
+  --glass-bg-hover: rgba(255, 255, 255, 0.10);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  --glass-blur: blur(16px);
+  --glass-radius: 12px;
+}
+
+/* ── Light theme glass adjustments ── */
+:root:not(.pf-v6-theme-dark) {
+  --glass-bg: rgba(255, 255, 255, 0.65);
+  --glass-bg-hover: rgba(255, 255, 255, 0.80);
+  --glass-border: rgba(0, 0, 0, 0.08);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
 }
 
 html, body, #root {
@@ -314,4 +330,181 @@ html, body, #root {
   .summary-card-value {
     font-size: 1.2rem;
   }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   GLASSMORPHISM — PF6 Component Overrides
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── Page background gradient ── */
+.pf-v6-theme-dark .pf-v6-c-page__main-section,
+.pf-v6-theme-dark .pf-v6-c-page__main {
+  background: radial-gradient(ellipse at 20% 0%, #1a1a2e 0%, #0f0f23 50%, #0a0a0a 100%);
+}
+:root:not(.pf-v6-theme-dark) .pf-v6-c-page__main-section,
+:root:not(.pf-v6-theme-dark) .pf-v6-c-page__main {
+  background: linear-gradient(135deg, #f0f2f5 0%, #e8edf2 100%);
+}
+
+/* ── Cards ── */
+.pf-v6-c-card {
+  background: var(--glass-bg) !important;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border) !important;
+  box-shadow: var(--glass-shadow) !important;
+  border-radius: var(--glass-radius) !important;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+.pf-v6-c-card:hover {
+  background: var(--glass-bg-hover) !important;
+}
+
+/* ── Tables ── */
+.pf-v6-c-table {
+  background: var(--glass-bg) !important;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-radius: var(--glass-radius) !important;
+  overflow: hidden;
+}
+.pf-v6-c-table thead tr {
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+:root:not(.pf-v6-theme-dark) .pf-v6-c-table thead tr {
+  background: rgba(0, 0, 0, 0.03) !important;
+}
+.pf-v6-c-table tbody tr {
+  transition: background 0.15s ease;
+}
+.pf-v6-c-table tbody tr:hover {
+  background: var(--glass-bg-hover) !important;
+}
+
+/* ── Masthead — glass with bottom glow ── */
+.pf-v6-c-masthead {
+  background: rgba(26, 26, 26, 0.85) !important;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-bottom: 1px solid var(--glass-border);
+  box-shadow: 0 1px 20px rgba(238, 0, 0, 0.08);
+}
+
+/* ── Tabs ── */
+.pf-v6-c-tabs__link {
+  border-radius: 8px 8px 0 0 !important;
+  transition: background 0.15s ease;
+}
+.pf-v6-c-tabs__link:hover {
+  background: var(--glass-bg-hover) !important;
+}
+.pf-v6-c-tabs__item.pf-m-current .pf-v6-c-tabs__link {
+  background: var(--glass-bg) !important;
+  border-bottom: 2px solid var(--rh-red) !important;
+}
+
+/* ── Modals ── */
+.pf-v6-c-modal-box {
+  background: var(--glass-bg) !important;
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--glass-border) !important;
+  box-shadow: 0 16px 64px rgba(0, 0, 0, 0.4) !important;
+  border-radius: var(--glass-radius) !important;
+}
+
+/* ── Alerts — glass but keep colored left border ── */
+.pf-v6-c-alert {
+  background: var(--glass-bg) !important;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-radius: 8px !important;
+}
+
+/* ── Labels — subtle glass ── */
+.pf-v6-c-label {
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+/* ── Toolbar — transparent ── */
+.pf-v6-c-toolbar {
+  background: transparent !important;
+}
+
+/* ── Empty states ── */
+.pf-v6-c-empty-state {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--glass-radius);
+  padding: 32px;
+}
+
+/* ── Pagination — transparent ── */
+.pf-v6-c-pagination {
+  background: transparent !important;
+}
+
+/* ── Sticky table header — glass instead of opaque ── */
+.table-sticky-wrapper .pf-v6-c-table thead {
+  background: var(--glass-bg) !important;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+
+/* ── DiffView row classes ── */
+.diff-added {
+  background-color: rgba(62, 134, 53, 0.08) !important;
+}
+.diff-added:hover {
+  background-color: rgba(62, 134, 53, 0.14) !important;
+}
+.diff-removed {
+  background-color: rgba(238, 0, 0, 0.06) !important;
+}
+.diff-removed:hover {
+  background-color: rgba(238, 0, 0, 0.12) !important;
+}
+.diff-changed {
+  background-color: rgba(240, 171, 0, 0.08) !important;
+}
+.diff-changed:hover {
+  background-color: rgba(240, 171, 0, 0.14) !important;
+}
+
+/* ── Destroy QA row coloring ── */
+.destroy-row-destroyed {
+  background-color: rgba(62, 134, 53, 0.06) !important;
+}
+.destroy-row-destroyed:hover {
+  background-color: rgba(62, 134, 53, 0.12) !important;
+}
+.destroy-row-active {
+  background-color: transparent !important;
+}
+.destroy-row-overdue {
+  background-color: rgba(238, 0, 0, 0.06) !important;
+}
+.destroy-row-overdue:hover {
+  background-color: rgba(238, 0, 0, 0.12) !important;
+}
+.destroy-row-not_deployed {
+  background-color: rgba(106, 110, 115, 0.06) !important;
+}
+.destroy-row-not_deployed:hover {
+  background-color: rgba(106, 110, 115, 0.12) !important;
+}
+
+/* ── Donut chart card ── */
+.destroy-chart-card {
+  padding: 16px;
+  min-width: 200px;
+}
+
+/* ── Overdue badge ── */
+.overdue-badge {
+  font-size: 0.75rem;
+  margin-left: 6px;
 }
