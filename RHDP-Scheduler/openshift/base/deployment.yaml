@@ -17,6 +17,13 @@ spec:
         app.kubernetes.io/name: rhdp-scheduler
     spec:
       serviceAccountName: rhdp-scheduler
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 0
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: rhdp-scheduler
           image: rhdp-scheduler:latest
@@ -29,6 +36,12 @@ spec:
           env:
             - name: KUBECONFIG
               value: ""
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
           resources:
             requests:
               memory: 256Mi
@@ -53,6 +66,10 @@ spec:
           volumeMounts:
             - name: logs
               mountPath: /app/logs
+            - name: tmp
+              mountPath: /tmp
       volumes:
         - name: logs
+          emptyDir: {}
+        - name: tmp
           emptyDir: {}

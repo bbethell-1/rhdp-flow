@@ -260,7 +260,7 @@ def get_session(session_id: str):
 # ---------------------------------------------------------------------------
 
 @router.get("/health", response_model=HealthResponse)
-def health():
+async def health():
     config = _get_config()
     env = os.environ.copy()
     if config.kubeconfig_path:
@@ -275,28 +275,32 @@ def health():
             message="oc command not found or not working",
         )
 
-    # 2. Check actual cluster connectivity with oc whoami
-    try:
-        r_user = subprocess.run(
-            [config.oc_command, "whoami"],
+    # 2. Check cluster connectivity — run blocking subprocess calls off the
+    #    event loop so we don't starve other requests while waiting on oc.
+    loop = asyncio.get_event_loop()
+
+    def _run_oc(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [config.oc_command, *args],
             capture_output=True, text=True, timeout=10, env=env,
         )
-        r_server = subprocess.run(
-            [config.oc_command, "whoami", "--show-server"],
-            capture_output=True, text=True, timeout=10, env=env,
+
+    try:
+        r_user, r_server = await asyncio.gather(
+            loop.run_in_executor(None, _run_oc, "whoami"),
+            loop.run_in_executor(None, _run_oc, "whoami", "--show-server"),
         )
         if r_user.returncode == 0 and r_server.returncode == 0:
             cluster_url = r_server.stdout.strip()
-            # Cache and return the derived base domain
             global _cached_base_domain
             _cached_base_domain = derive_base_domain(cluster_url)
-            # Lightweight RHDP API probe: check if catalogitems are accessible
+            # RHDP API probe — also non-blocking
             rhdp_ok = False
             try:
-                r_cat = subprocess.run(
-                    [config.oc_command, "get", "catalogitem", "-n", "babylon-catalog-prod",
-                     "--no-headers", "-o", "name", "--limit=1"],
-                    capture_output=True, text=True, timeout=10, env=env,
+                r_cat = await loop.run_in_executor(
+                    None, _run_oc,
+                    "get", "catalogitem", "-n", "babylon-catalog-prod",
+                    "--no-headers", "-o", "name", "--limit=1",
                 )
                 rhdp_ok = r_cat.returncode == 0
             except Exception as exc:

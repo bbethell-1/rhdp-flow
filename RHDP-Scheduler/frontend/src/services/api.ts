@@ -20,8 +20,16 @@ import type {
 const API = '/api';
 
 function getApiKey(): string | null {
-  // API key can be set via localStorage for authenticated environments
-  return localStorage.getItem('rhdp-api-key');
+  // Use sessionStorage — cleared on tab close, not vulnerable to persistent XSS
+  return sessionStorage.getItem('rhdp-api-key');
+}
+
+export function setApiKey(key: string): void {
+  sessionStorage.setItem('rhdp-api-key', key);
+}
+
+export function clearApiKey(): void {
+  sessionStorage.removeItem('rhdp-api-key');
 }
 
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
