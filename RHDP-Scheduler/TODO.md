@@ -3,7 +3,7 @@
 Destory Qa (NEVER touch deltions)
 ## Backlog
 
-- [ ] **agV num_users validation** — Before deploying, check if the catalog item has a hardcoded `num_users` limit in agnosticV; refuse to deploy more than the cap. Requires querying the agV catalog definition per CI.
+- [x] ~~**agV num_users validation** — Before deploying, check if the catalog item has a hardcoded `num_users` limit in agnosticV; refuse to deploy more than the cap. `get_catalog_item_num_users_limit()` extracts `openAPIV3Schema.maximum` from the CI definition. Frontend shows danger alert after upload, deploy is blocked when violations exist. API endpoint `POST /api/schedules/validate-num-users` + deploy guard in both `process_schedule()` and the deploy endpoint.~~
 - [x] ~~**Test multi-region split for AWS items**~~ — Covered by 8 unit tests (even/remainder user distribution, region suffixes, underscore replacement, extra_parameters, single workshop + N provisions, concurrency inheritance, 3-region distribution) plus `multi_region.csv` and `one_workshop_two_regions.csv` examples.
 - [x] ~~**Redirect toggle behavior**~~ — Implemented: toggle explicitly sets `labUserInterface.redirect = False` when off (default True). agV defaults do NOT take precedence; the toggle always overrides.
 - [x] ~~**CLI demo videos**~~ — 2 chapter videos in `videos/`: `07-cli-deploy-and-qa`, `08-cli-ops-and-wizard`.
@@ -53,11 +53,11 @@ Destory Qa (NEVER touch deltions)
 - [x] **Scale** — `--scale N` sets WorkshopProvision count to target value
 - [x] **Regions (Multi-Region Provisioning)** — `AWS_Region` column supports comma-separated regions; creates one Workshop with multiple regional WorkshopProvisions, users distributed evenly
 - [x] **Interactive CSV Wizard** — `--wizard` launches a rich CLI wizard to generate workshop schedule CSVs interactively
-- [x] **Test Suite** — 77 backend + 36 frontend = 113 API/component tests (see `tests/` and `frontend/src/`)
+- [x] **Test Suite** — 123 backend + 47 frontend = 170 tests (see `tests/` and `frontend/src/`)
 - [x] **Fix Workshop URLs** — Map infra domain (`ocp-{env}.infra.open.redhat.com`) to RHDP UI domain (`{env}.demo.redhat.com`) and append `/details` suffix
 - [x] **Fix Lock Label** — Use correct `demo.redhat.com/lock-enabled` label matching RHDP UI (was `resource-lock`)
 - [x] **Remove False-Positive Warning** — Auto-destroy before auto-stop is valid (destroy nullifies stop)
-- [x] **Redirect Toggle** — `labUserInterface.redirect` configurable via Deploy Settings switch (default on); controls whether users auto-redirect to lab UI
+- [x] **Redirect Toggle** — `labUserInterface.redirect` configurable per-schedule via `Redirect` CSV column (default: True) and per-row toggles in the schedule table. Global "Redirect (all)" switch in Deploy Settings flips all rows; per-row overrides individual schedules
 - [x] **Enhanced CSV Validation** — Duplicate row detection, CI format check, namespace format check, user count reasonableness, auto-stop before provisioning warning
 - [x] **Namespace Existence Validation** — API endpoint checks namespaces exist on cluster after upload; frontend shows danger alert for missing namespaces
 - [x] **Salesforce Campaign vs Opportunity** — New `Salesforce_Type` CSV column (default: `opportunity`) allows specifying `campaign` or `opportunity` type for chargeback
@@ -122,7 +122,7 @@ python3 rhdp_flow.py --wizard
 | CI Name | Yes | - | Display name for the catalog item |
 | CI | Yes | - | Catalog Item ID |
 | Namespace | Yes | - | Kubernetes namespace |
-| Users | Yes | 20 | Number of users/seats |
+| Users | No | unset | Number of users/seats; empty = no override |
 | Enable_workshop_interface | Yes | - | Enable Workshop UI (True/False) |
 | Password | Yes | - | Access password |
 | Activity | Yes | Admin | Purpose activity |
@@ -135,7 +135,9 @@ python3 rhdp_flow.py --wizard
 | Asset_CIs | No | - | Old-style comma-separated asset CIs |
 | Multi_Workshop_Name | No | - | Group rows into a multi-asset workshop (new style: per-item passwords) |
 | Concurrency | No | 1 | Deployment concurrency |
+| Instances | No | - | Seat count for multi-asset workshops |
 | Count | No | 1 | Number of instances to create |
 | AWS_Region | No | - | Comma-separated AWS regions for multi-region |
 | Salesforce IDs | No | - | Salesforce items; plain ID or `type:id` pairs separated by `;` (e.g. `opportunity:71456169;campaign:701Pe00000wHJg2IAG;project:P144`) |
 | Salesforce_Type | No | opportunity | Default type when IDs have no prefix: `opportunity`, `campaign`, `project`, or `cdh` |
+| Redirect | No | True | Per-schedule `labUserInterface.redirect`; False/0/No/N disables |
