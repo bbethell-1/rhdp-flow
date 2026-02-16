@@ -11,18 +11,37 @@
   /* ── Glassmorphism tokens (dark theme defaults) ── */
   --glass-bg: rgba(255, 255, 255, 0.06);
   --glass-bg-hover: rgba(255, 255, 255, 0.10);
+  --glass-bg-strong: rgba(255, 255, 255, 0.12);
+  --glass-bg-input: rgba(255, 255, 255, 0.08);
   --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-border-focus: rgba(238, 0, 0, 0.4);
   --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  --glass-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
+  --glass-shadow-lg: 0 16px 64px rgba(0, 0, 0, 0.4);
   --glass-blur: blur(16px);
+  --glass-blur-sm: blur(8px);
+  --glass-blur-lg: blur(24px);
   --glass-radius: 12px;
+  --glass-radius-sm: 8px;
+  --glass-text-primary: rgba(255, 255, 255, 0.95);
+  --glass-text-secondary: rgba(255, 255, 255, 0.65);
+  --glass-highlight: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 50%);
 }
 
 /* ── Light theme glass adjustments ── */
 :root:not(.pf-v6-theme-dark) {
   --glass-bg: rgba(255, 255, 255, 0.65);
   --glass-bg-hover: rgba(255, 255, 255, 0.80);
+  --glass-bg-strong: rgba(255, 255, 255, 0.85);
+  --glass-bg-input: rgba(255, 255, 255, 0.70);
   --glass-border: rgba(0, 0, 0, 0.08);
+  --glass-border-focus: rgba(238, 0, 0, 0.3);
   --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+  --glass-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
+  --glass-shadow-lg: 0 16px 64px rgba(0, 0, 0, 0.12);
+  --glass-text-primary: rgba(0, 0, 0, 0.9);
+  --glass-text-secondary: rgba(0, 0, 0, 0.55);
+  --glass-highlight: linear-gradient(135deg, rgba(255,255,255,0.6) 0%, rgba(255,255,255,0) 50%);
 }
 
 html, body, #root {
@@ -102,18 +121,22 @@ html, body, #root {
 
 /* Theme toggle in masthead */
 .theme-toggle {
-  background: none;
-  border: 1px solid rgba(255,255,255,0.3);
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px;
   color: var(--rh-white);
   cursor: pointer;
-  padding: 4px 8px;
+  padding: 4px 10px;
   font-size: 0.8rem;
   white-space: nowrap;
+  transition: all 0.2s ease;
 }
 .theme-toggle:hover {
-  border-color: rgba(255,255,255,0.6);
-  background: rgba(255,255,255,0.1);
+  border-color: rgba(255,255,255,0.35);
+  background: rgba(255,255,255,0.12);
+  box-shadow: 0 0 12px rgba(238, 0, 0, 0.1);
 }
 
 .tz-indicator {
@@ -122,23 +145,34 @@ html, body, #root {
   font-family: 'Red Hat Mono', 'Menlo', monospace;
   white-space: nowrap;
   padding: 2px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
 }
 
 /* ── Log display ── */
 .log-box {
-  background: #1e1e1e;
+  background: rgba(15, 15, 20, 0.85);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
   color: #d4d4d4;
   font-family: 'Red Hat Mono', 'Menlo', monospace;
   font-size: 0.8rem;
   padding: 12px;
-  border-radius: 6px;
+  border-radius: var(--glass-radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.3);
   max-height: 350px;
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.5;
+}
+:root:not(.pf-v6-theme-dark) .log-box {
+  background: rgba(30, 30, 30, 0.92);
+  border: 1px solid rgba(0, 0, 0, 0.15);
 }
 
 /* ── Status badges ── */
@@ -242,8 +276,13 @@ html, body, #root {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px 24px;
-  padding: 8px 0;
+  padding: 12px 16px;
   font-size: 0.85rem;
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur-sm);
+  -webkit-backdrop-filter: var(--glass-blur-sm);
+  border-radius: var(--glass-radius-sm);
+  border: 1px solid var(--glass-border);
 }
 @media (max-width: 768px) {
   .schedule-detail-grid {
@@ -336,14 +375,20 @@ html, body, #root {
    GLASSMORPHISM — PF6 Component Overrides
    ══════════════════════════════════════════════════════════════════ */
 
-/* ── Page background gradient ── */
+/* ── Page background gradient with subtle ambient orbs ── */
 .pf-v6-theme-dark .pf-v6-c-page__main-section,
 .pf-v6-theme-dark .pf-v6-c-page__main {
-  background: radial-gradient(ellipse at 20% 0%, #1a1a2e 0%, #0f0f23 50%, #0a0a0a 100%);
+  background:
+    radial-gradient(ellipse 600px 400px at 15% 10%, rgba(238, 0, 0, 0.04) 0%, transparent 70%),
+    radial-gradient(ellipse 500px 300px at 80% 80%, rgba(0, 102, 204, 0.03) 0%, transparent 70%),
+    radial-gradient(ellipse at 20% 0%, #1a1a2e 0%, #0f0f23 50%, #0a0a0a 100%);
 }
 :root:not(.pf-v6-theme-dark) .pf-v6-c-page__main-section,
 :root:not(.pf-v6-theme-dark) .pf-v6-c-page__main {
-  background: linear-gradient(135deg, #f0f2f5 0%, #e8edf2 100%);
+  background:
+    radial-gradient(ellipse 600px 400px at 15% 10%, rgba(238, 0, 0, 0.03) 0%, transparent 70%),
+    radial-gradient(ellipse 500px 300px at 80% 80%, rgba(0, 102, 204, 0.03) 0%, transparent 70%),
+    linear-gradient(135deg, #f0f2f5 0%, #e4e9f0 50%, #e8edf2 100%);
 }
 
 /* ── Cards ── */
@@ -354,10 +399,15 @@ html, body, #root {
   border: 1px solid var(--glass-border) !important;
   box-shadow: var(--glass-shadow) !important;
   border-radius: var(--glass-radius) !important;
-  transition: background 0.2s ease, box-shadow 0.2s ease;
+  transition: background 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 .pf-v6-c-card:hover {
   background: var(--glass-bg-hover) !important;
+  box-shadow: var(--glass-shadow), 0 0 0 1px var(--glass-border) !important;
+}
+/* Card header/title subtle top highlight */
+.pf-v6-c-card__title {
+  border-bottom: 1px solid var(--glass-border);
 }
 
 /* ── Tables ── */
@@ -365,17 +415,24 @@ html, body, #root {
   background: var(--glass-bg) !important;
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border) !important;
   border-radius: var(--glass-radius) !important;
   overflow: hidden;
+  box-shadow: var(--glass-shadow-sm);
 }
 .pf-v6-c-table thead tr {
   background: rgba(255, 255, 255, 0.04) !important;
+  border-bottom: 1px solid var(--glass-border);
 }
 :root:not(.pf-v6-theme-dark) .pf-v6-c-table thead tr {
   background: rgba(0, 0, 0, 0.03) !important;
 }
 .pf-v6-c-table tbody tr {
   transition: background 0.15s ease;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+:root:not(.pf-v6-theme-dark) .pf-v6-c-table tbody tr {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
 }
 .pf-v6-c-table tbody tr:hover {
   background: var(--glass-bg-hover) !important;
@@ -383,17 +440,20 @@ html, body, #root {
 
 /* ── Masthead — glass with bottom glow ── */
 .pf-v6-c-masthead {
-  background: rgba(26, 26, 26, 0.85) !important;
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  border-bottom: 1px solid var(--glass-border);
-  box-shadow: 0 1px 20px rgba(238, 0, 0, 0.08);
+  background: rgba(20, 20, 24, 0.88) !important;
+  backdrop-filter: blur(20px) saturate(1.2);
+  -webkit-backdrop-filter: blur(20px) saturate(1.2);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 1px 20px rgba(238, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
 /* ── Tabs ── */
+.pf-v6-c-tabs {
+  border-bottom: 1px solid var(--glass-border);
+}
 .pf-v6-c-tabs__link {
   border-radius: 8px 8px 0 0 !important;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
 }
 .pf-v6-c-tabs__link:hover {
   background: var(--glass-bg-hover) !important;
@@ -401,16 +461,29 @@ html, body, #root {
 .pf-v6-c-tabs__item.pf-m-current .pf-v6-c-tabs__link {
   background: var(--glass-bg) !important;
   border-bottom: 2px solid var(--rh-red) !important;
+  box-shadow: 0 2px 8px rgba(238, 0, 0, 0.12);
 }
 
 /* ── Modals ── */
 .pf-v6-c-modal-box {
-  background: var(--glass-bg) !important;
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  background: var(--glass-bg-strong) !important;
+  backdrop-filter: var(--glass-blur-lg);
+  -webkit-backdrop-filter: var(--glass-blur-lg);
   border: 1px solid var(--glass-border) !important;
-  box-shadow: 0 16px 64px rgba(0, 0, 0, 0.4) !important;
+  box-shadow: var(--glass-shadow-lg) !important;
   border-radius: var(--glass-radius) !important;
+}
+/* Modal backdrop — enhanced blur */
+.pf-v6-c-backdrop {
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+/* Modal header + footer dividers */
+.pf-v6-c-modal-box__header {
+  border-bottom: 1px solid var(--glass-border);
+}
+.pf-v6-c-modal-box__footer {
+  border-top: 1px solid var(--glass-border);
 }
 
 /* ── Alerts — glass but keep colored left border ── */
@@ -418,11 +491,19 @@ html, body, #root {
   background: var(--glass-bg) !important;
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
-  border-radius: 8px !important;
+  border-radius: var(--glass-radius-sm) !important;
+  box-shadow: var(--glass-shadow-sm);
 }
 
 /* ── Labels — subtle glass ── */
 .pf-v6-c-label {
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  border: 1px solid var(--glass-border);
+}
+
+/* ── Badges — glass treatment ── */
+.pf-v6-c-badge {
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
 }
@@ -440,6 +521,7 @@ html, body, #root {
   border: 1px solid var(--glass-border);
   border-radius: var(--glass-radius);
   padding: 32px;
+  box-shadow: var(--glass-shadow-sm);
 }
 
 /* ── Pagination — transparent ── */
@@ -449,9 +531,207 @@ html, body, #root {
 
 /* ── Sticky table header — glass instead of opaque ── */
 .table-sticky-wrapper .pf-v6-c-table thead {
-  background: var(--glass-bg) !important;
+  background: var(--glass-bg-strong) !important;
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
+}
+
+/* ── Dropdown menus / Select menus ── */
+.pf-v6-c-menu {
+  background: var(--glass-bg-strong) !important;
+  backdrop-filter: var(--glass-blur-lg);
+  -webkit-backdrop-filter: var(--glass-blur-lg);
+  border: 1px solid var(--glass-border) !important;
+  border-radius: var(--glass-radius-sm) !important;
+  box-shadow: var(--glass-shadow-lg) !important;
+}
+.pf-v6-c-menu__list-item:hover {
+  background: var(--glass-bg-hover) !important;
+}
+
+/* ── MenuToggle (Select triggers) ── */
+.pf-v6-c-menu-toggle {
+  background: var(--glass-bg-input) !important;
+  backdrop-filter: var(--glass-blur-sm);
+  -webkit-backdrop-filter: var(--glass-blur-sm);
+  border: 1px solid var(--glass-border) !important;
+  border-radius: 6px !important;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.pf-v6-c-menu-toggle:hover {
+  border-color: rgba(255, 255, 255, 0.25) !important;
+}
+:root:not(.pf-v6-theme-dark) .pf-v6-c-menu-toggle:hover {
+  border-color: rgba(0, 0, 0, 0.2) !important;
+}
+.pf-v6-c-menu-toggle:focus,
+.pf-v6-c-menu-toggle.pf-m-expanded {
+  border-color: var(--glass-border-focus) !important;
+  box-shadow: 0 0 0 2px rgba(238, 0, 0, 0.15);
+}
+
+/* ── FormSelect (native selects) ── */
+.pf-v6-c-form-control select,
+.pf-v6-c-form-control > select {
+  background: var(--glass-bg-input) !important;
+  backdrop-filter: var(--glass-blur-sm);
+  -webkit-backdrop-filter: var(--glass-blur-sm);
+  border: 1px solid var(--glass-border) !important;
+  border-radius: 6px !important;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.pf-v6-c-form-control select:focus {
+  border-color: var(--glass-border-focus) !important;
+  box-shadow: 0 0 0 2px rgba(238, 0, 0, 0.15);
+}
+
+/* ── Toggle Groups (status filters) ── */
+.pf-v6-c-toggle-group {
+  background: var(--glass-bg) !important;
+  backdrop-filter: var(--glass-blur-sm);
+  -webkit-backdrop-filter: var(--glass-blur-sm);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--glass-radius-sm) !important;
+  overflow: hidden;
+}
+.pf-v6-c-toggle-group__button {
+  transition: background 0.15s ease !important;
+}
+.pf-v6-c-toggle-group__button:hover {
+  background: var(--glass-bg-hover) !important;
+}
+.pf-v6-c-toggle-group__item.pf-m-selected .pf-v6-c-toggle-group__button {
+  background: var(--glass-bg-strong) !important;
+  box-shadow: inset 0 -2px 0 var(--rh-red);
+}
+
+/* ── Search Inputs ── */
+.pf-v6-c-search-input {
+  background: var(--glass-bg-input) !important;
+  backdrop-filter: var(--glass-blur-sm);
+  -webkit-backdrop-filter: var(--glass-blur-sm);
+  border: 1px solid var(--glass-border) !important;
+  border-radius: 6px !important;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  overflow: hidden;
+}
+.pf-v6-c-search-input:focus-within {
+  border-color: var(--glass-border-focus) !important;
+  box-shadow: 0 0 0 2px rgba(238, 0, 0, 0.15);
+}
+.pf-v6-c-search-input__bar {
+  background: transparent !important;
+  border: none !important;
+}
+.pf-v6-c-search-input__text-input {
+  background: transparent !important;
+}
+
+/* ── Text Inputs ── */
+.pf-v6-c-text-input-group,
+.pf-v6-c-form-control > input[type="text"] {
+  background: var(--glass-bg-input) !important;
+  border: 1px solid var(--glass-border) !important;
+  border-radius: 6px !important;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.pf-v6-c-text-input-group:focus-within,
+.pf-v6-c-form-control > input[type="text"]:focus {
+  border-color: var(--glass-border-focus) !important;
+  box-shadow: 0 0 0 2px rgba(238, 0, 0, 0.15);
+}
+
+/* ── File Upload ── */
+.pf-v6-c-file-upload {
+  background: var(--glass-bg) !important;
+  backdrop-filter: var(--glass-blur-sm);
+  -webkit-backdrop-filter: var(--glass-blur-sm);
+  border: 1px dashed var(--glass-border) !important;
+  border-radius: var(--glass-radius-sm) !important;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+.pf-v6-c-file-upload:hover {
+  border-color: rgba(238, 0, 0, 0.25) !important;
+  background: var(--glass-bg-hover) !important;
+}
+/* File upload inner input */
+.pf-v6-c-file-upload__file-select {
+  background: transparent !important;
+}
+
+/* ── Number Inputs ── */
+.pf-v6-c-number-input .pf-v6-c-form-control {
+  background: var(--glass-bg-input) !important;
+  border: 1px solid var(--glass-border) !important;
+  border-radius: 6px !important;
+}
+.pf-v6-c-number-input .pf-v6-c-button {
+  background: var(--glass-bg) !important;
+  border: 1px solid var(--glass-border) !important;
+  transition: background 0.15s ease;
+}
+.pf-v6-c-number-input .pf-v6-c-button:hover {
+  background: var(--glass-bg-hover) !important;
+}
+
+/* ── Progress bars ── */
+.pf-v6-c-progress__bar {
+  border-radius: 6px;
+  overflow: hidden;
+}
+.pf-v6-c-progress__indicator {
+  border-radius: 6px;
+  box-shadow: 0 0 8px rgba(238, 0, 0, 0.3);
+}
+
+/* ── Switches ── */
+.pf-v6-c-switch__toggle {
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+.pf-v6-c-switch__input:checked + .pf-v6-c-switch__toggle {
+  box-shadow: 0 0 8px rgba(238, 0, 0, 0.2);
+}
+
+/* ── Buttons — subtle glass on secondary ── */
+.pf-v6-c-button.pf-m-secondary {
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition: background 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.pf-v6-c-button.pf-m-secondary:hover {
+  box-shadow: var(--glass-shadow-sm);
+}
+
+/* ── Tooltips ── */
+.pf-v6-c-tooltip__content {
+  background: var(--glass-bg-strong) !important;
+  backdrop-filter: var(--glass-blur-lg);
+  -webkit-backdrop-filter: var(--glass-blur-lg);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--glass-radius-sm) !important;
+  box-shadow: var(--glass-shadow);
+}
+
+/* ── Dividers ── */
+.pf-v6-c-divider {
+  border-color: var(--glass-border) !important;
+}
+
+/* ── Expandable row content ── */
+.pf-v6-c-table__expandable-row-content {
+  background: var(--glass-bg);
+  border-radius: var(--glass-radius-sm);
+}
+
+/* ── Table scroll wrapper — glass inset ── */
+.table-sticky-wrapper {
+  border-radius: var(--glass-radius);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow-sm);
+}
+.table-sticky-wrapper .pf-v6-c-table {
+  border: none !important;
+  border-radius: 0 !important;
 }
 
 /* ── DiffView row classes ── */
@@ -507,4 +787,46 @@ html, body, #root {
 .overdue-badge {
   font-size: 0.75rem;
   margin-left: 6px;
+}
+
+/* ── Global transition smoothing for theme toggle ── */
+.pf-v6-c-card,
+.pf-v6-c-table,
+.pf-v6-c-alert,
+.pf-v6-c-empty-state,
+.pf-v6-c-modal-box,
+.pf-v6-c-menu,
+.pf-v6-c-toggle-group,
+.pf-v6-c-search-input,
+.pf-v6-c-file-upload,
+.log-box {
+  transition: background 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+/* ── Scrollbar styling for glass containers ── */
+.table-sticky-wrapper::-webkit-scrollbar,
+.log-box::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.table-sticky-wrapper::-webkit-scrollbar-track,
+.log-box::-webkit-scrollbar-track {
+  background: transparent;
+}
+.table-sticky-wrapper::-webkit-scrollbar-thumb,
+.log-box::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+:root:not(.pf-v6-theme-dark) .table-sticky-wrapper::-webkit-scrollbar-thumb,
+:root:not(.pf-v6-theme-dark) .log-box::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+}
+.table-sticky-wrapper::-webkit-scrollbar-thumb:hover,
+.log-box::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+:root:not(.pf-v6-theme-dark) .table-sticky-wrapper::-webkit-scrollbar-thumb:hover,
+:root:not(.pf-v6-theme-dark) .log-box::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
 }
