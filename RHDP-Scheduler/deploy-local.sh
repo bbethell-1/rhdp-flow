@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# deploy-local.sh - Build and run RHDP-Scheduler in Podman locally
+# deploy-local.sh - Build and run RHDP-Scheduler in Podman container locally
+#
+# Deployment options:
+#   1. ./dev.sh               — Vite dev servers (hot-reload, for development)
+#   2. ./deploy-local.sh      — Podman container (this script, for integration testing)
+#   3. ./deploy.sh [dev|prod] — Remote OpenShift cluster (for staging/production)
 #
 # Usage:
 #   ./deploy-local.sh              # build + run (default)
