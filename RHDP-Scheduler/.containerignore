@@ -1,0 +1,37 @@
+# Dependencies (rebuilt in container)
+node_modules/
+frontend/node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Git
+.git/
+.gitignore
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude / MCP
+.claude/
+.memory/
+.mcp.json
+.playwright-mcp/
+
+# Videos and screenshots
+videos/
+*.png
+*.webm
+*.mp4
+
+# Tests (not needed in production image)
+tests/
+frontend/src/test/
+
+# Dev config
+*.env
+.env.*

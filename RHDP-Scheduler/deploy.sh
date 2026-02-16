@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# deploy.sh - Deploy RHDP-Scheduler to OpenShift via Kustomize
+# deploy.sh - Deploy RHDP-Scheduler to remote OpenShift via Kustomize
+#
+# For local Podman testing, use: ./deploy-local.sh
 #
 # Usage:
 #   ./deploy.sh [dev|prod]         # full deploy (default: dev)
