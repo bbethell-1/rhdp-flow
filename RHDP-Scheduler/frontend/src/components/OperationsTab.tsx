@@ -1,6 +1,8 @@
 import { useState, useMemo, useEffect } from 'react';
 import {
   Button,
+  EmptyState,
+  EmptyStateBody,
   PageSection,
   SearchInput,
   Split,
@@ -452,7 +454,7 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
           </Thead>
           <Tbody>
             {filteredHistory.map((rec, i) => (
-              <Tr key={i}>
+              <Tr key={`${rec.timestamp}-${rec.operation}-${i}`}>
                 <Td dataLabel="Time (UTC)" className="date-cell">{rec.timestamp}</Td>
                 <Td dataLabel="Operation">{rec.operation}</Td>
                 <Td dataLabel="Target CI">{rec.target}</Td>
@@ -469,7 +471,9 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
         </Table>
         </div>
       ) : (
-        <div className="log-box">No operations yet.</div>
+        <EmptyState titleText="No operations yet" headingLevel="h4">
+          <EmptyStateBody>Run a lock, extend, or scale operation above to see history here.</EmptyStateBody>
+        </EmptyState>
       )}
 
       {/* Lock confirmation modal */}

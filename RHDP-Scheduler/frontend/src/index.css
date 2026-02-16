@@ -369,6 +369,31 @@ html, body, #root {
   .summary-card-value {
     font-size: 1.2rem;
   }
+  /* Stack split layouts vertically */
+  .pf-v6-l-split {
+    flex-wrap: wrap;
+  }
+  /* Reduce table padding for mobile */
+  .pf-v6-c-table td,
+  .pf-v6-c-table th {
+    padding: 6px 8px;
+    font-size: 0.8rem;
+  }
+  /* Hide less-critical columns on small screens */
+  .fixed-table .date-cell {
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Reduce card padding */
+  .pf-v6-c-card__body {
+    padding: 12px;
+  }
+  /* Stack pagination controls */
+  .pf-v6-c-pagination {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════════

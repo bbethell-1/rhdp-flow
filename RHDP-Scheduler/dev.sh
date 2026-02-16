@@ -22,15 +22,40 @@ BACKEND_PORT=5500
 FRONTEND_PORT=6500
 ACTION="${1:-start}"
 
+BACKEND_PID=""
+FRONTEND_PID=""
+
+cleanup() {
+  echo ""
+  echo "=== Shutting down dev servers ==="
+  # Send SIGTERM first for graceful shutdown
+  if [[ -n "$BACKEND_PID" ]] && kill -0 "$BACKEND_PID" 2>/dev/null; then
+    kill "$BACKEND_PID" 2>/dev/null
+    wait "$BACKEND_PID" 2>/dev/null || true
+  fi
+  if [[ -n "$FRONTEND_PID" ]] && kill -0 "$FRONTEND_PID" 2>/dev/null; then
+    kill "$FRONTEND_PID" 2>/dev/null
+    wait "$FRONTEND_PID" 2>/dev/null || true
+  fi
+  # Clean up any remaining processes on ports
+  lsof -ti:"$BACKEND_PORT" 2>/dev/null | xargs kill 2>/dev/null || true
+  lsof -ti:"$FRONTEND_PORT" 2>/dev/null | xargs kill 2>/dev/null || true
+  echo "  Stopped."
+}
+
 stop_servers() {
   echo "=== Stopping dev servers ==="
-  lsof -ti:"$BACKEND_PORT" 2>/dev/null | xargs kill -9 2>/dev/null || true
-  lsof -ti:"$FRONTEND_PORT" 2>/dev/null | xargs kill -9 2>/dev/null || true
+  lsof -ti:"$BACKEND_PORT" 2>/dev/null | xargs kill 2>/dev/null || true
+  lsof -ti:"$FRONTEND_PORT" 2>/dev/null | xargs kill 2>/dev/null || true
   echo "  Stopped."
 }
 
 start_servers() {
   stop_servers
+
+  # Register cleanup on exit signals
+  trap cleanup EXIT INT TERM
+
   echo ""
   echo "=== Starting Vite dev servers ==="
   echo "  Backend:  http://localhost:$BACKEND_PORT"
@@ -58,7 +83,7 @@ start_servers() {
       echo "  RHDP-Scheduler dev servers running"
       echo "  Open: http://localhost:$FRONTEND_PORT"
       echo "  API:  http://localhost:$BACKEND_PORT/api/health"
-      echo "  Stop: ./dev.sh stop"
+      echo "  Stop: Ctrl+C or ./dev.sh stop"
       echo "==========================================================="
       wait
       exit 0

@@ -227,6 +227,34 @@ class DestroyCheckResponse(BaseModel):
     results: List[DestroyCheckResult]
 
 
+class QAResultItem(BaseModel):
+    """Typed representation of a QA check result."""
+
+    ci_name: str
+    ci: str
+    namespace: str
+    scheduled: str = ""
+    deployed: str = ""
+    status: str = ""
+    matches_schedule: str = ""
+    issues: str = ""
+    expected_users: Optional[int] = None
+    actual_count: Optional[int] = None
+    workshop_users_assigned: Optional[int] = None
+    total_seats: Optional[int] = None
+    provisioning_date: str = ""
+    auto_stop: str = ""
+    auto_destroy: str = ""
+    resourceclaim_name: str = ""
+    resourceclaims: List[str] = Field(default_factory=list)
+    link_to_service: str = ""
+    landing_page_url: str = ""
+    healthy: Optional[bool] = None
+    ready: Optional[bool] = None
+
+    model_config = {"extra": "allow"}
+
+
 class SessionSummary(BaseModel):
     session_id: str
     filename: str

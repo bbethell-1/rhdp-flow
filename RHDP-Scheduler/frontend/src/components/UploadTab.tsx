@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, Fragment } from 'react';
 import {
   Alert,
   Button,
@@ -534,8 +534,8 @@ export const UploadTab: React.FC<Props> = ({
               </Thead>
               <Tbody>
                 {filteredSchedules.map(({ s, i }) => (
-                  <>
-                    <Tr key={`row-${i}`} className={warningRowIndices.has(i) ? 'warning-row' : undefined}>
+                  <Fragment key={`${s.ci}-${s.namespace}-${i}`}>
+                    <Tr className={warningRowIndices.has(i) ? 'warning-row' : undefined}>
                       <Td
                         expand={{
                           rowIndex: i,
@@ -587,7 +587,7 @@ export const UploadTab: React.FC<Props> = ({
                         </Td>
                       </Tr>
                     )}
-                  </>
+                  </Fragment>
                 ))}
               </Tbody>
             </Table>
@@ -703,8 +703,8 @@ export const UploadTab: React.FC<Props> = ({
           <div style={{ marginTop: 12, fontSize: '0.85rem', maxHeight: 200, overflowY: 'auto' }}>
             <strong>Schedules to deploy:</strong>
             <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
-              {schedules.map((s, i) => (
-                <li key={i}>
+              {schedules.map((s) => (
+                <li key={`${s.ci}-${s.namespace}`}>
                   <strong>{s.ci_name}</strong> — {s.ci} in {s.namespace}
                   {s.instances != null && ` (${s.instances} instances)`}
                   {s.users != null && ` (${s.users} users)`}

@@ -21,7 +21,7 @@ describe('OperationsTab', () => {
 
   it('shows operations history empty state', () => {
     render(<OperationsTab showToast={noop} schedules={[mockSchedule]} />);
-    expect(screen.getByText('No operations yet.')).toBeInTheDocument();
+    expect(screen.getByText('No operations yet')).toBeInTheDocument();
   });
 
   it('renders history search when history exists', () => {

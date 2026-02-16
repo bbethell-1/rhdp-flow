@@ -7,8 +7,9 @@
 #   3. ./deploy.sh [dev|prod] — Remote OpenShift cluster (this script, for staging/production)
 #
 # Usage:
-#   ./deploy.sh [dev|prod]         # full deploy (default: dev)
-#   ./deploy.sh [dev|prod] dry-run # render manifests only
+#   ./deploy.sh [dev|prod]           # full deploy (default: dev)
+#   ./deploy.sh [dev|prod] dry-run   # render manifests only
+#   ./deploy.sh [dev|prod] rollback  # rollback to previous deployment
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,6 +45,27 @@ if [[ "$DRY_RUN" == "dry-run" ]]; then
   echo ""
   echo "> Rendering Kustomize manifests (dry-run)..."
   oc kustomize "$OVERLAY"
+  exit 0
+fi
+
+# Rollback mode - undo last deployment
+if [[ "$DRY_RUN" == "rollback" ]]; then
+  echo ""
+  echo "> Rolling back deployment..."
+  if ! oc whoami &>/dev/null; then
+    echo "ERROR: Not logged in to OpenShift. Run 'oc login' first."
+    exit 1
+  fi
+  oc rollout undo deployment/rhdp-scheduler -n "$NAMESPACE"
+  oc rollout status deployment/rhdp-scheduler -n "$NAMESPACE" --timeout=120s
+  ROUTE_HOST=$(oc get route rhdp-scheduler -n "$NAMESPACE" -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
+  echo ""
+  echo "==========================================================="
+  echo "  Rollback complete!"
+  if [[ -n "$ROUTE_HOST" ]]; then
+    echo "  URL: https://$ROUTE_HOST"
+  fi
+  echo "==========================================================="
   exit 0
 fi
 
@@ -119,10 +141,17 @@ else
 fi
 echo ""
 
-# Step 6: Wait for rollout
+# Step 6: Wait for rollout (auto-rollback on failure)
 echo "--- Step 6/6: Wait for rollout ---"
 oc rollout restart deployment/rhdp-scheduler -n "$NAMESPACE"
-oc rollout status deployment/rhdp-scheduler -n "$NAMESPACE" --timeout=120s
+if ! oc rollout status deployment/rhdp-scheduler -n "$NAMESPACE" --timeout=120s; then
+  echo ""
+  echo "  WARNING: Rollout failed. Attempting automatic rollback..."
+  oc rollout undo deployment/rhdp-scheduler -n "$NAMESPACE"
+  oc rollout status deployment/rhdp-scheduler -n "$NAMESPACE" --timeout=120s || true
+  echo "  Rollback attempted. Run './deploy.sh $ENV rollback' to retry manually."
+  exit 1
+fi
 echo ""
 
 # Done

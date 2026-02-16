@@ -84,8 +84,8 @@ export const StudentsTab: React.FC<Props> = ({ qaResults, showToast }) => {
             </Tr>
           </Thead>
           <Tbody>
-            {sorted.map((r, i) => (
-              <Tr key={i}>
+            {sorted.map((r) => (
+              <Tr key={`${r.ci_name}-${r.landing_page_url}`}>
                 <Td dataLabel="CI Name">{r.ci_name}</Td>
                 <Td dataLabel="Landing Page URL">
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>

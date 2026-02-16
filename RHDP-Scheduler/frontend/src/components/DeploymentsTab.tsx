@@ -21,6 +21,9 @@ import {
 } from '@patternfly/react-core';
 import { Table, Thead, Tbody, Tr, Th, Td, ThProps } from '@patternfly/react-table';
 import CubesIcon from '@patternfly/react-icons/dist/esm/icons/cubes-icon';
+import CheckCircleIcon from '@patternfly/react-icons/dist/esm/icons/check-circle-icon';
+import ExclamationTriangleIcon from '@patternfly/react-icons/dist/esm/icons/exclamation-triangle-icon';
+import ExclamationCircleIcon from '@patternfly/react-icons/dist/esm/icons/exclamation-circle-icon';
 import CopyIcon from '@patternfly/react-icons/dist/esm/icons/copy-icon';
 import RedoIcon from '@patternfly/react-icons/dist/esm/icons/redo-icon';
 
@@ -234,7 +237,7 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
             <Tooltip content="Total number of deployment results across all statuses">
               <Card isCompact isPlain>
                 <CardBody>
-                  <div className="summary-card-value">{statusCounts.total}</div>
+                  <div className="summary-card-value"><CubesIcon style={{ marginRight: 4 }} />{statusCounts.total}</div>
                   <div className="summary-card-label">Total</div>
                 </CardBody>
               </Card>
@@ -244,7 +247,7 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
             <Tooltip content="Deployed and confirmed healthy via QA verification">
               <Card isCompact isPlain>
                 <CardBody>
-                  <div className="summary-card-value status-verified">{statusCounts.verified}</div>
+                  <div className="summary-card-value status-verified"><CheckCircleIcon style={{ marginRight: 4 }} />{statusCounts.verified}</div>
                   <div className="summary-card-label">Verified</div>
                 </CardBody>
               </Card>
@@ -254,7 +257,7 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
             <Tooltip content="Deployed successfully but not yet verified by QA checks">
               <Card isCompact isPlain>
                 <CardBody>
-                  <div className="summary-card-value status-deployed_unverified">{statusCounts.unverified}</div>
+                  <div className="summary-card-value status-deployed_unverified"><ExclamationTriangleIcon style={{ marginRight: 4 }} />{statusCounts.unverified}</div>
                   <div className="summary-card-label">Unverified</div>
                 </CardBody>
               </Card>
@@ -264,7 +267,7 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
             <Tooltip content="Deployment encountered an error — check the Error column for details">
               <Card isCompact isPlain>
                 <CardBody>
-                  <div className="summary-card-value status-failed">{statusCounts.failed}</div>
+                  <div className="summary-card-value status-failed"><ExclamationCircleIcon style={{ marginRight: 4 }} />{statusCounts.failed}</div>
                   <div className="summary-card-label">Failed</div>
                 </CardBody>
               </Card>
@@ -390,7 +393,7 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
             </Thead>
             <Tbody>
               {paginatedResults.map((r, i) => (
-                <Tr key={i}>
+                <Tr key={`${r.ci_name}-${r.guid}`}>
                   <Td
                     select={{
                       rowIndex: i,

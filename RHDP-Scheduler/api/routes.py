@@ -6,6 +6,7 @@ import asyncio
 import csv
 import io
 import logging
+import re
 import subprocess
 import threading
 from dataclasses import asdict
@@ -61,6 +62,7 @@ from api.models import (
     NumUsersViolation,
     OperationResponse,
     QARequest,
+    QAResultItem,
     RetryRequest,
     ScaleRequest,
     SessionSummary,
@@ -80,7 +82,7 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 _schedules: List[WorkshopSchedule] = []
 _deployment_results: List[DeploymentResult] = []
-_qa_results: List[dict] = []
+_qa_results: List[QAResultItem] = []
 _csv_filepath: Optional[str] = None  # stashed for QA functions that need a path
 _current_filename: str = ""
 _asset_passwords: Optional[Dict[str, str]] = None
@@ -106,6 +108,16 @@ def _rate_limit(limit_string: str):
     if _route_limiter:
         return _route_limiter.limit(limit_string)
     return lambda f: f
+
+
+_NAMESPACE_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
+
+
+def _validate_namespace(ns: str) -> str:
+    """Validate a Kubernetes namespace name. Raises HTTPException on invalid input."""
+    if not ns or len(ns) > 63 or not _NAMESPACE_RE.match(ns):
+        raise HTTPException(400, f"Invalid namespace: must match [a-z0-9-], 1-63 chars")
+    return ns
 
 
 def _detect_and_cache_base_domain() -> str:
@@ -395,7 +407,7 @@ async def upload_csv(request: Request, file: UploadFile = File(...)):
 
 
 @router.post("/schedules/upload-passwords")
-async def upload_passwords(request: Request, file: UploadFile = File(...)):
+async def upload_passwords(file: UploadFile = File(...)):
     """Upload a per-asset passwords CSV (columns: CI, Password)."""
     global _asset_passwords
     content = await file.read()
@@ -434,6 +446,8 @@ def validate_namespaces():
         env["KUBECONFIG"] = config.kubeconfig_path
 
     unique_ns = {s.namespace for s in _schedules}
+    for ns in unique_ns:
+        _validate_namespace(ns)
     results: Dict[str, bool] = {}
     for ns in unique_ns:
         try:
@@ -502,7 +516,7 @@ def validate_num_users():
 
 
 @router.post("/schedules/diff", response_model=DiffResponse)
-async def diff_schedules(request: Request, file: UploadFile = File(...)):
+async def diff_schedules(file: UploadFile = File(...)):
     """Compare a new CSV against the currently loaded schedules."""
     if not _schedules:
         raise HTTPException(400, "No schedules loaded to compare against.")
@@ -860,7 +874,8 @@ async def deploy_retry(request: Request, body: RetryRequest, _key=Depends(verify
 # ---------------------------------------------------------------------------
 
 @router.post("/operations/lock", response_model=OperationResponse)
-def op_lock(body: LockRequest = LockRequest(), _key=Depends(verify_api_key)):
+@_rate_limit("10/minute")
+def op_lock(request: Request, body: LockRequest = LockRequest(), _key=Depends(verify_api_key)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     schedules = _filter_schedules(body.ci_filter)
@@ -870,7 +885,8 @@ def op_lock(body: LockRequest = LockRequest(), _key=Depends(verify_api_key)):
 
 
 @router.post("/operations/unlock", response_model=OperationResponse)
-def op_unlock(body: LockRequest = LockRequest(), _key=Depends(verify_api_key)):
+@_rate_limit("10/minute")
+def op_unlock(request: Request, body: LockRequest = LockRequest(), _key=Depends(verify_api_key)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     schedules = _filter_schedules(body.ci_filter)
@@ -880,7 +896,8 @@ def op_unlock(body: LockRequest = LockRequest(), _key=Depends(verify_api_key)):
 
 
 @router.post("/operations/extend-stop", response_model=OperationResponse)
-def op_extend_stop(body: ExtendRequest, _key=Depends(verify_api_key)):
+@_rate_limit("10/minute")
+def op_extend_stop(request: Request, body: ExtendRequest, _key=Depends(verify_api_key)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     if body.days == 0 and body.hours == 0:
@@ -895,7 +912,8 @@ def op_extend_stop(body: ExtendRequest, _key=Depends(verify_api_key)):
 
 
 @router.post("/operations/extend-destroy", response_model=OperationResponse)
-def op_extend_destroy(body: ExtendRequest, _key=Depends(verify_api_key)):
+@_rate_limit("10/minute")
+def op_extend_destroy(request: Request, body: ExtendRequest, _key=Depends(verify_api_key)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     if body.days == 0 and body.hours == 0:
@@ -910,7 +928,8 @@ def op_extend_destroy(body: ExtendRequest, _key=Depends(verify_api_key)):
 
 
 @router.post("/operations/scale", response_model=OperationResponse)
-def op_scale(body: ScaleRequest, _key=Depends(verify_api_key)):
+@_rate_limit("10/minute")
+def op_scale(request: Request, body: ScaleRequest, _key=Depends(verify_api_key)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     schedules = _filter_schedules(body.ci_filter)
@@ -923,7 +942,8 @@ def op_scale(body: ScaleRequest, _key=Depends(verify_api_key)):
 
 
 @router.post("/operations/update-passwords", response_model=OperationResponse)
-def op_update_passwords(body: LockRequest = LockRequest(), _key=Depends(verify_api_key)):
+@_rate_limit("10/minute")
+def op_update_passwords(request: Request, body: LockRequest = LockRequest(), _key=Depends(verify_api_key)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     schedules = _filter_schedules(body.ci_filter)
@@ -936,7 +956,9 @@ def op_update_passwords(body: LockRequest = LockRequest(), _key=Depends(verify_a
 
 
 @router.post("/operations/import-namespace")
-def op_import_namespace(namespace: str, _key=Depends(verify_api_key)):
+@_rate_limit("10/minute")
+def op_import_namespace(request: Request, namespace: str, _key=Depends(verify_api_key)):
+    _validate_namespace(namespace)
     config = _get_config()
     import tempfile
     tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, encoding="utf-8")
@@ -973,17 +995,18 @@ def qa_run(request: Request, body: QARequest = QARequest()):
 
     config = _get_config()
     namespace = _schedules[0].namespace
-    all_results = []
+    all_raw: List[dict] = []
 
     handler, log_path = start_log_capture("qa")
     try:
         if body.type.value in ("1", "both"):
             r1 = qa1_verify_setup(_csv_filepath, namespace, config)
-            all_results.extend(r1)
+            all_raw.extend(r1)
         if body.type.value in ("2", "both"):
             r2 = qa2_verify_deployment_status(_csv_filepath, namespace, config)
-            all_results.extend(r2)
+            all_raw.extend(r2)
 
+        all_results = [QAResultItem(**r) for r in all_raw]
         with _state_lock:
             _qa_results = all_results
             _qa_log_path = log_path

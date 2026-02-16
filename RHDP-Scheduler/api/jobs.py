@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
@@ -28,14 +29,29 @@ class Job:
     results: Optional[List[Any]] = None
     error: Optional[str] = None
     log_path: Optional[str] = None
+    created_at: float = field(default_factory=time.time)
     _events: asyncio.Queue = field(default_factory=asyncio.Queue, repr=False)
 
 
+MAX_JOBS = 100
 _jobs: Dict[str, Job] = {}
+
+
+def _cleanup_old_jobs() -> None:
+    """Remove oldest completed/failed jobs when store exceeds MAX_JOBS."""
+    if len(_jobs) <= MAX_JOBS:
+        return
+    terminal = [(jid, j) for jid, j in _jobs.items()
+                 if j.status in (Status.completed, Status.failed)]
+    terminal.sort(key=lambda x: x[1].created_at)
+    to_remove = len(_jobs) - MAX_JOBS
+    for jid, _ in terminal[:to_remove]:
+        del _jobs[jid]
 
 
 def create_job() -> Job:
     """Create a new pending job and return it."""
+    _cleanup_old_jobs()
     job_id = uuid.uuid4().hex[:12]
     job = Job(job_id=job_id)
     _jobs[job_id] = job

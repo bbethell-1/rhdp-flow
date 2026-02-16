@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rhdp-scheduler
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: rhdp-scheduler
+  policyTypes:
+    - Ingress
+  ingress:
+    # Allow traffic from OpenShift router (for Route)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              network.openshift.io/policy-group: ingress
+      ports:
+        - protocol: TCP
+          port: 8000
+    # Allow traffic from same namespace
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8000

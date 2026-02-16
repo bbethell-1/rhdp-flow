@@ -31,10 +31,12 @@ FROM registry.access.redhat.com/ubi9/python-311:latest
 USER 0
 WORKDIR /app
 
-# Install oc CLI (required for cluster operations)
-RUN curl -sL https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz \
+# Install oc CLI (pinned version for reproducible builds)
+ARG OC_VERSION=4.14.40
+RUN curl -sL "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/${OC_VERSION}/openshift-client-linux.tar.gz" \
     | tar xzf - -C /usr/local/bin oc kubectl && \
-    chmod +x /usr/local/bin/oc /usr/local/bin/kubectl
+    chmod +x /usr/local/bin/oc /usr/local/bin/kubectl && \
+    oc version --client
 
 # Copy Python venv from builder
 COPY --from=python-builder /opt/venv /opt/venv

@@ -5,6 +5,7 @@ namespace: rhdp-scheduler
 
 resources:
   - ../../base
+  - pdb.yaml
 
 patches:
   # 2 replicas, higher resources, build from main branch
