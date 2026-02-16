@@ -23,7 +23,7 @@ React 18.2 + PatternFly 6 + Vite. Components in `frontend/src/components/`:
 
 | Component | Tab | Key features |
 |-----------|-----|--------------|
-| `UploadTab.tsx` | Upload & Deploy | CSV upload, schedule table, deploy settings, diff view |
+| `UploadTab.tsx` | Upload & Deploy | CSV upload, schedule table, per-row redirect toggle, deploy settings, diff view |
 | `DeploymentsTab.tsx` | Deployments | Results table, status cards, search/filter, auto-refresh, retry, CSV export |
 | `OperationsTab.tsx` | Operations | Lock, Extend Stop/Destroy, Scale — each with per-CI target filter |
 | `QATab.tsx` | QA | QA1/QA2 type selector, run/refresh, results table, status filter, CSV export |
@@ -41,7 +41,7 @@ These were discovered through extensive debugging. Follow them exactly:
 ### PF6 Switch (e.g., Lock UI, White Glove, Redirect)
 - The `<input>` is **hidden** with `role="switch"` — `boundingBox()` works but **click fails** because `<span class="pf-v6-c-switch__toggle">` intercepts pointer events.
 - **Solution**: Use `page.getByRole('switch', { name: 'Lock UI Admin Settings' })` with `.click({ force: true })`.
-- IDs: `resource-lock-switch`, `resource-pools-switch`, `white-glove-switch`, `redirect-switch`
+- IDs: `resource-lock-switch`, `resource-pools-switch`, `white-glove-switch`, `redirect-switch` (global), `redirect-row-{i}` (per-row)
 
 ### PF6 Checkbox (e.g., Dry-Run Mode)
 - Works with: `page.getByRole('checkbox', { name: 'Dry-Run Mode' })`
@@ -116,6 +116,35 @@ for f in videos/0*.webm; do
     -pix_fmt yuv420p -movflags +faststart "${f%.webm}.mp4"
 done
 ```
+
+## CSV Column Reference
+
+| Column | Required | Default | Notes |
+|--------|----------|---------|-------|
+| `CI Name` | Yes | — | Display name for the workshop |
+| `CI` | Yes | — | Catalog Item ID (vendor.item.env) |
+| `Namespace` | Yes | — | Kubernetes namespace |
+| `Users` | No | unset | Number of users; empty = no override |
+| `Enable_workshop_interface` | Yes | — | True/False — create Workshop resource with UI |
+| `Password` | Yes | — | Workshop access password |
+| `Activity` | Yes | Admin | Purpose activity |
+| `Purpose` | Yes | QA | Purpose label |
+| `Workshop Name` | No | CI Name | Display name override |
+| `Provisioning Date (UTC)` | Yes | — | DD/MM/YYYY HH:MM |
+| `Auto-stop (UTC)` | Yes | — | DD/MM/YYYY HH:MM (can be empty) |
+| `Auto-destroy (UTC)` | Yes | — | DD/MM/YYYY HH:MM |
+| `Multi_Asset` | No | False | True if multi-asset workshop |
+| `Asset_CIs` | No | — | Comma-separated CIs for multi-asset |
+| `Multi_Workshop_Name` | No | — | Custom name for grouped multi-asset |
+| `Concurrency` | No | 1 | WorkshopProvision concurrency |
+| `Instances` | No | — | Seat count for multi-asset |
+| `Salesforce IDs` | No | — | SF IDs (semicolon-separated, type-prefixed) |
+| `Salesforce_Type` | No | opportunity | Default type for unprefixed SF IDs |
+| `Count` | No | — | Deployment count (distinct from instances) |
+| `AWS_Region` | No | — | Comma-separated AWS regions for multi-region |
+| `Redirect` | No | True | Per-schedule labUserInterface.redirect; False/0/No/N disables |
+
+The `Redirect` column is per-schedule. The global "Redirect (all)" toggle in Deploy Settings sets the default for new uploads and flips all loaded rows. Per-row toggles in the schedule table override individual rows.
 
 ## Sample Data for Demos
 
