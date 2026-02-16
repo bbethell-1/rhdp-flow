@@ -8,7 +8,7 @@ COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --legacy-peer-deps
 
 COPY frontend/ ./
-RUN npm run build
+RUN npx tsc -p tsconfig.build.json && npx vite build
 
 
 # ── Stage 2: Install Python dependencies ──

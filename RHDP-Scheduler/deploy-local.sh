@@ -15,7 +15,7 @@ cd "$SCRIPT_DIR"
 
 IMAGE="localhost/rhdp-scheduler:dev"
 CONTAINER="rhdp-scheduler-dev"
-PORT="${PORT:-8000}"
+PORT="${PORT:-9090}"
 ACTION="${1:-all}"
 
 # Pass host kubeconfig into the container for cluster operations
@@ -23,10 +23,18 @@ KUBECONFIG_HOST="${KUBECONFIG:-$HOME/.kube/config}"
 
 build_image() {
   echo "=== Building image: $IMAGE ==="
+  # Detect host arch; OCP needs amd64 but local testing uses native
+  HOST_ARCH=$(uname -m)
+  if [[ "$HOST_ARCH" == "arm64" || "$HOST_ARCH" == "aarch64" ]]; then
+    PLATFORM="linux/arm64"
+  else
+    PLATFORM="linux/amd64"
+  fi
+
   podman build \
     -f dockerfiles/Dockerfile \
     -t "$IMAGE" \
-    --platform linux/amd64 \
+    --platform "$PLATFORM" \
     .
   echo "  Build complete."
   echo ""
