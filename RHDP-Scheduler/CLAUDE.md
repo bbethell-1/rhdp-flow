@@ -7,7 +7,7 @@ RHDP-Flow Workshop Automation tool. Automates OpenShift workshop deployment from
 - **Core CLI**: `rhdp_flow.py` (3,974 lines)
 - **Backend**: FastAPI in `api/` — run with `uvicorn api.server:app --port 8000`
 - **Frontend**: React + PatternFly 6 + TypeScript + Vite in `frontend/` — run with `cd frontend && npm run dev`
-- **Tests**: 80 backend + 47 frontend = 127 total. All passing.
+- **Tests**: 123 backend + 47 frontend = 170 total. All passing.
 - **Git remote**: `git@github.com:rhpds/rhpds-utils.git` (rhpds org), branch `main`
 - **Git user**: `rhjcd` / `jdisrael@redhat.com`
 
