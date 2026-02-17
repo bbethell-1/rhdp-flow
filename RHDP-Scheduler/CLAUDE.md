@@ -27,20 +27,32 @@ RHDP-Flow Workshop Automation tool. Automates OpenShift workshop deployment from
 
 ## Post-Update Protocol — MANDATORY
 
-After ANY app update (code change, deployment, version bump, feature add), you MUST do both:
+**Trigger**: After ANY app update (code change, deployment, version bump, feature add) that results in a git commit.
+**Timing**: Complete BOTH steps AFTER the commit is created but BEFORE reporting completion to the user.
+**Enforcement**: Skipping either step is a protocol violation. Both must succeed before the task is reported as complete.
 
-1. **Memory MCP** — Create or update entities via `mcp__memory__*` tools:
-   - New feature → `mcp__memory__create_entities` with feature name, observations
-   - Update to existing feature → `mcp__memory__add_observations` on existing entity
-   - Always include date, what changed, and any breaking changes
+### Step 1 — Memory MCP (`mcp__memory__*` tools)
 
-2. **Notion MCP** — Update the RHDP-Scheduler Development Log via `mcp__claude_ai_Notion__*` tools:
-   - Page ID: `30ab44c5-54f5-819b-91a4-f5e6457b52a4`
-   - Update the "Current Version" table if version changed
-   - Add entry under "Release History" with version, date, and summary
-   - Use `notion-update-page` with `insert_content_after` on the Release History section
+- New feature or component → `mcp__memory__create_entities` with entity name, type, and observations
+- Update to existing feature → `mcp__memory__add_observations` on the existing entity (search with `mcp__memory__search_nodes` first)
+- Every observation MUST include: date (YYYY-MM-DD), what changed, version if applicable, any breaking changes
+- Related entities: `RHDP-Scheduler` (project), `RHDP-Scheduler-API` (backend), `RHDP-Scheduler-Frontend` (frontend), `RHDP-Scheduler-Tests` (tests), `RHDP-Scheduler-Versioning` (CI/CD)
 
-This is not optional. Every code change that gets committed must be reflected in both Memory and Notion.
+### Step 2 — Notion MCP (`mcp__claude_ai_Notion__*` tools)
+
+- **Page ID**: `30ab44c5-54f5-819b-91a4-f5e6457b52a4` (RHDP-Scheduler Development Log)
+- **Procedure**:
+  1. `notion-fetch` the page to get current block structure
+  2. If version changed: update the "Current Version" table/property
+  3. Add a new entry under "Release History" with: version, date (YYYY-MM-DD), summary of changes
+  4. Use `notion-update-page` with `insert_content_after` targeting the Release History heading block ID
+
+### Checklist (mental gate before reporting to user)
+
+- [ ] Commit created successfully
+- [ ] Memory MCP entity created or updated with dated observation
+- [ ] Notion Development Log updated with release entry
+- [ ] All three confirmed — now report completion to user
 
 ## Frontend Architecture
 
