@@ -936,10 +936,10 @@ def op_disable_autostop(request: Request, body: DisableAutostopRequest = Disable
         raise HTTPException(400, "No schedules loaded.")
     schedules = _filter_schedules(body.ci_filter)
     config = _get_config()
-    disable_autostop(schedules, config)
+    patched = disable_autostop(schedules, config)
     return OperationResponse(
-        success=True,
-        message=f"Disabled auto-stop for {len(schedules)} schedule(s)",
+        success=patched > 0 or config.dry_run,
+        message=f"Disabled auto-stop: {patched} resource(s) patched across {len(schedules)} schedule(s)",
     )
 
 

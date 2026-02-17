@@ -203,6 +203,7 @@ def make_oc_dispatcher(overrides=None):
                             "metadata": {"name": "test-workshop"},
                             "spec": {
                                 "lifespan": {"end": "2026-02-17T11:00:00Z"},
+                                "actionSchedule": {"stop": "2026-02-15T19:00:00Z"},
                                 "count": 20,
                             },
                         }]

@@ -516,7 +516,7 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
         </div>
       ) : (
         <EmptyState titleText="No operations yet" headingLevel="h4">
-          <EmptyStateBody>Run a lock, extend, or scale operation above to see history here.</EmptyStateBody>
+          <EmptyStateBody>Run a lock, extend, disable auto-stop, or scale operation above to see history here.</EmptyStateBody>
         </EmptyState>
       )}
 
