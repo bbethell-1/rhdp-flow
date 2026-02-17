@@ -15,8 +15,8 @@ RHDP-Flow Workshop Automation tool. Automates OpenShift workshop deployment from
 
 - **Single source of truth**: `VERSION` file (plain semver, e.g. `1.0.0`)
 - **Bump script**: `scripts/bump-version.sh [major|minor|patch]` — updates VERSION, `frontend/package.json`, `api/server.py`
-- **Release workflow**: `.github/workflows/rhdp-scheduler-release.yml` — runs after CI passes, auto-bumps, tags `rhdp-scheduler/vX.Y.Z`, creates GitHub Release
-- **Bump type detection**: PR labels (`semver:major`, `semver:minor`, `semver:patch`) > commit keywords (`[major]`, `[minor]`, `[patch]`) > default `patch`
+- **Release workflow**: `.github/workflows/rhdp-scheduler-release.yml` — triggers via `workflow_run` after CI passes, auto-bumps, tags `rhdp-scheduler/vX.Y.Z`, creates GitHub Release
+- **Bump type detection** (priority order): PR labels (`semver:major/minor/patch`) > commit keywords (`[major]`, `[minor]`, `[patch]`) > default `patch`. Labels take precedence; keywords only checked if no label matched.
 - **Infinite loop prevention**: Version bump commits contain `[skip ci]`; VERSION excluded from path triggers
 
 ## CRITICAL RULES
