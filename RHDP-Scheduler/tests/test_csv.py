@@ -335,6 +335,19 @@ Default Redirect,some-ci,some-ns,20,True,pw,Admin,QA,Default,15/02/2026 11:00,15
         assert len(schedules) == 1
         assert schedules[0].redirect is True
 
+    def test_archive_column_ignored(self):
+        """Archive column is ignored: all rows are read regardless of Archive value or empty."""
+        csv_text = """\
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Archive,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC)
+First,ci-one,ns-a,20,True,pw,Admin,QA,Archive,First,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00
+Second,ci-two,ns-b,10,True,pw,Admin,QA,,Second,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00
+"""
+        path = self._write(csv_text)
+        schedules = read_csv_input(path)
+        assert len(schedules) == 2
+        assert schedules[0].ci_name == "First" and schedules[0].ci == "ci-one"
+        assert schedules[1].ci_name == "Second" and schedules[1].ci == "ci-two"
+
     def test_example_multi_asset_companion_parses(self):
         """Docs example multi_asset_companion.csv: grouped multi-asset with companion passwords."""
         examples_dir = os.path.join(os.path.dirname(__file__), "..", "docs", "examples")
