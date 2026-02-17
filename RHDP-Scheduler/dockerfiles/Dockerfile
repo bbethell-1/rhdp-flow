@@ -49,7 +49,8 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Copy application source
+# Copy version file and application source
+COPY VERSION ./
 COPY rhdp_flow.py rhdp_flow_wizard.py ./
 COPY api/ ./api/
 COPY docs/ ./docs/

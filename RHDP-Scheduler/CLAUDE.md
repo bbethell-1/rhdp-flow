@@ -25,6 +25,23 @@ RHDP-Flow Workshop Automation tool. Automates OpenShift workshop deployment from
 - Always run `git status` and `git diff` after any code change.
 - Never push without user confirmation.
 
+## Post-Update Protocol — MANDATORY
+
+After ANY app update (code change, deployment, version bump, feature add), you MUST do both:
+
+1. **Memory MCP** — Create or update entities via `mcp__memory__*` tools:
+   - New feature → `mcp__memory__create_entities` with feature name, observations
+   - Update to existing feature → `mcp__memory__add_observations` on existing entity
+   - Always include date, what changed, and any breaking changes
+
+2. **Notion MCP** — Update the RHDP-Scheduler Development Log via `mcp__claude_ai_Notion__*` tools:
+   - Page ID: `30ab44c5-54f5-819b-91a4-f5e6457b52a4`
+   - Update the "Current Version" table if version changed
+   - Add entry under "Release History" with version, date, and summary
+   - Use `notion-update-page` with `insert_content_after` on the Release History section
+
+This is not optional. Every code change that gets committed must be reflected in both Memory and Notion.
+
 ## Frontend Architecture
 
 React 18.2 + PatternFly 6 + Vite. Components in `frontend/src/components/`:
