@@ -93,6 +93,7 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
   const [extDestroyFilter, setExtDestroyFilter] = useState('');
   const [extDestroyDays, setExtDestroyDays] = useState(0);
   const [extDestroyHours, setExtDestroyHours] = useState(0);
+  const [noAutostopFilter, setNoAutostopFilter] = useState('');
   const [scaleFilter, setScaleFilter] = useState('');
   const [scaleCount, setScaleCount] = useState(20);
   const [history, setHistory] = useState<OpRecord[]>(() => {
@@ -112,6 +113,7 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
   const [unlockLoading, setUnlockLoading] = useState(false);
   const [extStopLoading, setExtStopLoading] = useState(false);
   const [extDestroyLoading, setExtDestroyLoading] = useState(false);
+  const [noAutostopLoading, setNoAutostopLoading] = useState(false);
   const [scaleLoading, setScaleLoading] = useState(false);
 
   // Lock / Unlock confirmation modals
@@ -124,6 +126,9 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
   // Extend confirmation modals
   const [showExtStopConfirm, setShowExtStopConfirm] = useState(false);
   const [showExtDestroyConfirm, setShowExtDestroyConfirm] = useState(false);
+
+  // Disable auto-stop confirmation modal
+  const [showNoAutostopConfirm, setShowNoAutostopConfirm] = useState(false);
 
   // History search
   const [historySearch, setHistorySearch] = useState('');
@@ -253,6 +258,22 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
       showToast(`Extend destroy failed: ${e}`, 'danger');
     } finally {
       setExtDestroyLoading(false);
+    }
+  };
+
+  const handleDisableAutostop = async () => {
+    if (!showNoAutostopConfirm) { setShowNoAutostopConfirm(true); return; }
+    setShowNoAutostopConfirm(false);
+    setNoAutostopLoading(true);
+    try {
+      const r = await api.disableAutostop({ ci_filter: noAutostopFilter || undefined });
+      addRecord('Disable Auto-Stop', noAutostopFilter, '--', r.success, r.message);
+      showToast(r.message, r.success ? 'success' : 'danger');
+    } catch (e) {
+      addRecord('Disable Auto-Stop', noAutostopFilter, '--', false, String(e));
+      showToast(`Disable auto-stop failed: ${e}`, 'danger');
+    } finally {
+      setNoAutostopLoading(false);
     }
   };
 
@@ -388,6 +409,29 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
               isDisabled={extDestroyLoading}
             >
               Extend Destroy
+            </Button>
+          </CardBody>
+        </Card>
+
+        {/* Disable Auto-Stop */}
+        <Card isFullHeight>
+          <CardTitle>
+            <Tooltip content="Remove the auto-stop schedule so workshops keep running until manually stopped or destroyed.">
+              <span>Disable Auto-Stop</span>
+            </Tooltip>
+          </CardTitle>
+          <CardBody>
+            <CIFilter options={ciOptions} value={noAutostopFilter} onChange={setNoAutostopFilter} id="no-autostop-ci-filter" />
+            <p style={{ marginBottom: 8, fontSize: '0.85rem' }}>
+              Clears <code>actionSchedule.stop</code> so workshops remain running until their destroy deadline or manual intervention.
+            </p>
+            <Button
+              variant="warning"
+              onClick={handleDisableAutostop}
+              isLoading={noAutostopLoading}
+              isDisabled={noAutostopLoading}
+            >
+              Disable Auto-Stop
             </Button>
           </CardBody>
         </Card>
@@ -578,6 +622,24 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
         <ModalFooter>
           <Button variant="primary" onClick={handleExtendDestroy}>Extend Destroy</Button>
           <Button variant="link" onClick={() => setShowExtDestroyConfirm(false)}>Cancel</Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Disable auto-stop confirmation modal */}
+      <Modal
+        variant="small"
+        isOpen={showNoAutostopConfirm}
+        onClose={() => setShowNoAutostopConfirm(false)}
+        aria-labelledby="no-autostop-confirm-title"
+      >
+        <ModalHeader title="Confirm Disable Auto-Stop" labelId="no-autostop-confirm-title" titleIconVariant="warning" />
+        <ModalBody>
+          <p>This will remove the auto-stop schedule from workshops{noAutostopFilter ? <> matching <strong>&quot;{noAutostopFilter}&quot;</strong></> : <> (<strong>all catalog items</strong>)</>}.</p>
+          <p style={{ marginTop: 8 }}>Workshops will remain running until their scheduled destroy time or until manually stopped.</p>
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="warning" onClick={handleDisableAutostop}>Disable Auto-Stop</Button>
+          <Button variant="link" onClick={() => setShowNoAutostopConfirm(false)}>Cancel</Button>
         </ModalFooter>
       </Modal>
     </PageSection>

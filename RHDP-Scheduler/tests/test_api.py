@@ -298,6 +298,31 @@ def test_scale(mock_run, uploaded_client):
     assert "Scaled" in resp.json()["message"]
 
 
+def test_disable_autostop_no_schedules(client):
+    resp = client.post("/api/operations/disable-autostop", json={})
+    assert resp.status_code == 400
+
+
+@patch("rhdp_flow.subprocess.run")
+def test_disable_autostop(mock_run, uploaded_client):
+    mock_run.side_effect = make_oc_dispatcher()
+    resp = uploaded_client.post("/api/operations/disable-autostop", json={})
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+    assert "Disabled auto-stop" in resp.json()["message"]
+
+
+@patch("rhdp_flow.subprocess.run")
+def test_disable_autostop_with_filter(mock_run, uploaded_client):
+    mock_run.side_effect = make_oc_dispatcher()
+    resp = uploaded_client.post(
+        "/api/operations/disable-autostop",
+        json={"ci_filter": "openshift-cnv.ocp-virt-roadshow-multi-user.prod"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+
+
 # ---------------------------------------------------------------------------
 # QA
 # ---------------------------------------------------------------------------

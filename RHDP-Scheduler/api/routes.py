@@ -40,6 +40,7 @@ from rhdp_flow import (
     unlock_workshops,
     extend_stop_time,
     extend_destroy_time,
+    disable_autostop,
     scale_workshops,
     update_passwords,
     import_namespace_to_csv,
@@ -54,6 +55,7 @@ from api.models import (
     DestroyCheckResponse,
     DiffEntry,
     DiffResponse,
+    DisableAutostopRequest,
     ExtendRequest,
     HealthResponse,
     JobResponse,
@@ -924,6 +926,20 @@ def op_extend_destroy(request: Request, body: ExtendRequest, _key=Depends(verify
     return OperationResponse(
         success=True,
         message=f"Extended destroy time by {body.days}d {body.hours}h for {len(schedules)} schedule(s)",
+    )
+
+
+@router.post("/operations/disable-autostop", response_model=OperationResponse)
+@_rate_limit("10/minute")
+def op_disable_autostop(request: Request, body: DisableAutostopRequest = DisableAutostopRequest(), _key=Depends(verify_api_key)):
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+    schedules = _filter_schedules(body.ci_filter)
+    config = _get_config()
+    disable_autostop(schedules, config)
+    return OperationResponse(
+        success=True,
+        message=f"Disabled auto-stop for {len(schedules)} schedule(s)",
     )
 
 

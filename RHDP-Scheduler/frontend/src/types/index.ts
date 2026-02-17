@@ -92,6 +92,10 @@ export interface LockRequest {
   ci_filter?: string | null;
 }
 
+export interface DisableAutostopRequest {
+  ci_filter?: string | null;
+}
+
 export interface QARequest {
   type: '1' | '2' | 'both';
 }

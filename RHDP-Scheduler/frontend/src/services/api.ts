@@ -9,6 +9,7 @@ import type {
   ExtendRequest,
   ScaleRequest,
   LockRequest,
+  DisableAutostopRequest,
   QARequest,
   QAResponse,
   RetryRequest,
@@ -115,6 +116,8 @@ export const api = {
     request<OperationResponse>('/operations/extend-stop', { method: 'POST', body: JSON.stringify(body) }),
   extendDestroy: (body: ExtendRequest) =>
     request<OperationResponse>('/operations/extend-destroy', { method: 'POST', body: JSON.stringify(body) }),
+  disableAutostop: (body: DisableAutostopRequest) =>
+    request<OperationResponse>('/operations/disable-autostop', { method: 'POST', body: JSON.stringify(body) }),
   scale: (body: ScaleRequest) =>
     request<OperationResponse>('/operations/scale', { method: 'POST', body: JSON.stringify(body) }),
 

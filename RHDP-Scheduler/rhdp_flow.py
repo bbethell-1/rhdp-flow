@@ -4062,6 +4062,114 @@ def extend_destroy_time(schedules, config, days, hours):
                 logger.error(f"Failed to patch workshopprovision {wp_name}: {pr.stderr}")
 
 
+def disable_autostop(schedules, config):
+    """Remove the auto-stop schedule from workshops so they run until stopped or destroyed.
+
+    Patches spec.actionSchedule.stop to empty string on each matching Workshop
+    and WorkshopProvision resource.
+    """
+    env = os.environ.copy()
+    if config.kubeconfig_path:
+        env['KUBECONFIG'] = config.kubeconfig_path
+
+    patched = 0
+    for schedule in schedules:
+        ns = schedule.namespace
+        ci = schedule.ci
+        logger.info(f"Disabling auto-stop for CI={ci} in namespace={ns}")
+
+        # --- Patch Workshop actionSchedule.stop ---
+        get_ws_cmd = [
+            config.oc_command, "get", "workshop",
+            "-n", ns,
+            "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}",
+            "-o", "json",
+        ]
+
+        if config.dry_run:
+            logger.info(f"[DRY-RUN] Would run: {' '.join(get_ws_cmd)}")
+            continue
+
+        result = subprocess.run(get_ws_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+        if result.returncode != 0:
+            logger.error(f"Failed to get workshops: {result.stderr}")
+            continue
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            logger.error(f"Invalid JSON from oc get workshop: {result.stdout[:200]}")
+            continue
+
+        items = data.get("items", [data] if "metadata" in data else [])
+        for item in items:
+            name = item.get("metadata", {}).get("name", "")
+            if not name:
+                continue
+            current_stop = (
+                item.get("spec", {}).get("actionSchedule", {}).get("stop", "")
+            )
+            if not current_stop:
+                logger.info(f"Workshop {name} already has no auto-stop, skipping")
+                continue
+            patch_cmd = [
+                config.oc_command, "patch", "workshop", name,
+                "-n", ns,
+                "--type", "merge",
+                "-p", json.dumps({"spec": {"actionSchedule": {"stop": ""}}}),
+            ]
+            logger.info(f"Clearing auto-stop for workshop {name} (was: {current_stop})")
+            pr = subprocess.run(patch_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+            if pr.returncode != 0:
+                logger.error(f"Failed to patch workshop {name}: {pr.stderr}")
+            else:
+                patched += 1
+                logger.info(f"Disabled auto-stop for workshop {name}")
+
+        # --- Patch WorkshopProvision actionSchedule.stop ---
+        get_wp_cmd = [
+            config.oc_command, "get", "workshopprovision",
+            "-n", ns,
+            "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}",
+            "-o", "json",
+        ]
+        result = subprocess.run(get_wp_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+        if result.returncode != 0:
+            logger.error(f"Failed to get workshopprovisions: {result.stderr}")
+            continue
+
+        try:
+            wp_data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            logger.error(f"Invalid JSON from oc get workshopprovision: {result.stdout[:200]}")
+            continue
+
+        wp_items = wp_data.get("items", [wp_data] if "metadata" in wp_data else [])
+        for wp in wp_items:
+            wp_name = wp.get("metadata", {}).get("name", "")
+            if not wp_name:
+                continue
+            wp_stop = wp.get("spec", {}).get("actionSchedule", {}).get("stop", "")
+            if not wp_stop:
+                logger.info(f"WorkshopProvision {wp_name} already has no auto-stop, skipping")
+                continue
+            patch_cmd = [
+                config.oc_command, "patch", "workshopprovision", wp_name,
+                "-n", ns,
+                "--type", "merge",
+                "-p", json.dumps({"spec": {"actionSchedule": {"stop": ""}}}),
+            ]
+            logger.info(f"Clearing auto-stop for provision {wp_name} (was: {wp_stop})")
+            pr = subprocess.run(patch_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+            if pr.returncode != 0:
+                logger.error(f"Failed to patch workshopprovision {wp_name}: {pr.stderr}")
+            else:
+                patched += 1
+                logger.info(f"Disabled auto-stop for provision {wp_name}")
+
+    return patched
+
+
 def scale_workshops(schedules, config, target_count):
     """Scale workshop provisions to the given target count.
 
@@ -4377,6 +4485,11 @@ Examples:
         help="Extend auto-destroy/lifespan time for workshops matching the CSV"
     )
     parser.add_argument(
+        "--disable-autostop",
+        action="store_true",
+        help="Remove auto-stop schedule from workshops (they run until stopped or destroyed)"
+    )
+    parser.add_argument(
         "--days",
         type=int,
         default=0,
@@ -4583,6 +4696,9 @@ def main():
             sys.exit(0)
         if args.extend_destroy:
             extend_destroy_time(schedules, config, days=args.days, hours=args.hours)
+            sys.exit(0)
+        if args.disable_autostop:
+            disable_autostop(schedules, config)
             sys.exit(0)
         if args.scale is not None:
             scale_workshops(schedules, config, target_count=args.scale)

@@ -83,6 +83,12 @@ class ExtendRequest(BaseModel):
     ci_filter: Optional[str] = None
 
 
+class DisableAutostopRequest(BaseModel):
+    """Body for POST /api/operations/disable-autostop."""
+
+    ci_filter: Optional[str] = None
+
+
 class ScaleRequest(BaseModel):
     """Body for POST /api/operations/scale."""
 
