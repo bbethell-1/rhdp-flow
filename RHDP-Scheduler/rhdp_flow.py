@@ -323,6 +323,9 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
     - Auto-stop (or Auto-stop (UTC))
     - Auto-destroy (or Auto-destroy (UTC))
     
+    An optional "Archive" column is ignored if present (any value or blank);
+    it is not used by the script and can be used for your own logic.
+    
     Args:
         filepath: Path to input CSV file
         
@@ -385,8 +388,8 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                     f"Found headers: {reader.fieldnames}"
                 )
             
-            # Create mapping (case-insensitive)
-            header_map = {h.lower(): h for h in reader.fieldnames}
+            # Create mapping (case-insensitive). Archive column if present is ignored (TRUE, blank, or any value).
+            header_map = {h.lower(): h for h in reader.fieldnames if h.strip().lower() != 'archive'}
             
             # Read rows
             for row_num, row in enumerate(reader, start=2):
@@ -401,7 +404,6 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                     activity = row[header_map.get('activity', 'Activity')].strip()
                     purpose = row[header_map.get('purpose', 'Purpose')].strip()
                     workshop_name = row.get(header_map.get('workshop name', 'Workshop Name'), '').strip()
-                    
                     # Multi-asset workshop fields (optional)
                     is_multi_asset_str = row.get(header_map.get('multi_asset', 'Multi_Asset'), '').strip()
                     asset_cis = row.get(header_map.get('asset_cis', 'Asset_CIs'), '').strip()
