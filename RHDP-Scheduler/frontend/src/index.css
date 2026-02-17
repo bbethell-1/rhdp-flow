@@ -416,8 +416,8 @@ html, body, #root {
     linear-gradient(135deg, #f0f2f5 0%, #e4e9f0 50%, #e8edf2 100%);
 }
 
-/* ── Cards ── */
-.pf-v6-c-card {
+/* ── Cards (skip isPlain variant which should be borderless) ── */
+.pf-v6-c-card:not(.pf-m-plain) {
   background: var(--glass-bg) !important;
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
@@ -426,7 +426,7 @@ html, body, #root {
   border-radius: var(--glass-radius) !important;
   transition: background 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
-.pf-v6-c-card:hover {
+.pf-v6-c-card:not(.pf-m-plain):hover {
   background: var(--glass-bg-hover) !important;
   box-shadow: var(--glass-shadow), 0 0 0 1px var(--glass-border) !important;
 }
@@ -435,11 +435,9 @@ html, body, #root {
   border-bottom: 1px solid var(--glass-border);
 }
 
-/* ── Tables ── */
+/* ── Tables (backdrop-filter on wrapper only for performance) ── */
 .pf-v6-c-table {
   background: var(--glass-bg) !important;
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   border: 1px solid var(--glass-border) !important;
   border-radius: var(--glass-radius) !important;
   overflow: hidden;
@@ -727,14 +725,43 @@ html, body, #root {
   box-shadow: var(--glass-shadow-sm);
 }
 
-/* ── Tooltips ── */
+/* ── Tooltips — must stay opaque for readability ── */
 .pf-v6-c-tooltip__content {
-  background: var(--glass-bg-strong) !important;
-  backdrop-filter: var(--glass-blur-lg);
-  -webkit-backdrop-filter: var(--glass-blur-lg);
-  border: 1px solid var(--glass-border);
+  background: rgba(20, 20, 24, 0.95) !important;
+  color: #f0f0f0 !important;
+  border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: var(--glass-radius-sm) !important;
   box-shadow: var(--glass-shadow);
+  backdrop-filter: var(--glass-blur-lg);
+  -webkit-backdrop-filter: var(--glass-blur-lg);
+}
+/* Tooltip arrow inherits the dark background */
+.pf-v6-c-tooltip__arrow {
+  --pf-v6-c-tooltip__arrow--BackgroundColor: rgba(20, 20, 24, 0.95);
+}
+
+/* ── Popovers — same opaque treatment ── */
+.pf-v6-c-popover__content {
+  background: rgba(20, 20, 24, 0.95) !important;
+  color: #f0f0f0 !important;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--glass-radius-sm) !important;
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: var(--glass-blur-lg);
+  -webkit-backdrop-filter: var(--glass-blur-lg);
+}
+.pf-v6-c-popover__arrow {
+  --pf-v6-c-popover__arrow--BackgroundColor: rgba(20, 20, 24, 0.95);
+}
+/* Popover header/footer text */
+.pf-v6-c-popover__title-text,
+.pf-v6-c-popover__body {
+  color: #f0f0f0 !important;
+}
+
+/* ── Table column info tooltips (Th info={{ tooltip }}) ── */
+.pf-v6-c-table__column-help .pf-v6-c-tooltip__content {
+  color: #f0f0f0 !important;
 }
 
 /* ── Dividers ── */

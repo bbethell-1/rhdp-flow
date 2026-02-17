@@ -785,7 +785,7 @@ def deploy_status(job_id: str):
 
 
 @router.get("/deploy/stream/{job_id}")
-async def deploy_stream(job_id: str):
+async def deploy_stream(job_id: str, _key=Depends(verify_api_key)):
     job = jobs.get_job(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
@@ -1075,12 +1075,14 @@ def list_logs():
     return {"files": files}
 
 
+_LOG_FILENAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_\-\.]*\.log$")
+
+
 @router.get("/logs/{filename}")
 def download_log(filename: str):
     """Download a specific log file."""
-    # Directory traversal protection
-    if "/" in filename or "\\" in filename or ".." in filename:
-        raise HTTPException(400, "Invalid filename")
+    if not _LOG_FILENAME_RE.match(filename):
+        raise HTTPException(400, "Invalid filename: must be alphanumeric with .log extension")
     log_dir = get_log_dir()
     filepath = os.path.join(log_dir, filename)
     if not os.path.isfile(filepath):

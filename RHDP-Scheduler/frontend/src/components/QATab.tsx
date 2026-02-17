@@ -204,9 +204,9 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
           </SplitItem>
           <SplitItem>
             <ToggleGroup aria-label="QA status filter">
-              <ToggleGroupItem text="All" isSelected={qaStatusFilter === 'all'} onChange={() => { setQaStatusFilter('all'); setPage(1); }} />
-              <ToggleGroupItem text="Verified" isSelected={qaStatusFilter === 'verified'} onChange={() => { setQaStatusFilter('verified'); setPage(1); }} />
-              <ToggleGroupItem text="Failed" isSelected={qaStatusFilter === 'failed'} onChange={() => { setQaStatusFilter('failed'); setPage(1); }} />
+              <ToggleGroupItem buttonId="qa-filter-all" text="All" isSelected={qaStatusFilter === 'all'} onChange={() => { setQaStatusFilter('all'); setPage(1); }} />
+              <ToggleGroupItem buttonId="qa-filter-verified" text="Verified" isSelected={qaStatusFilter === 'verified'} onChange={() => { setQaStatusFilter('verified'); setPage(1); }} />
+              <ToggleGroupItem buttonId="qa-filter-failed" text="Failed" isSelected={qaStatusFilter === 'failed'} onChange={() => { setQaStatusFilter('failed'); setPage(1); }} />
             </ToggleGroup>
           </SplitItem>
         </Split>

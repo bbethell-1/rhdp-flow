@@ -20,10 +20,6 @@ spec:
       terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true
-        runAsUser: 1001
-        fsGroup: 0
-        seccompProfile:
-          type: RuntimeDefault
       containers:
         - name: rhdp-scheduler
           image: rhdp-scheduler:latest

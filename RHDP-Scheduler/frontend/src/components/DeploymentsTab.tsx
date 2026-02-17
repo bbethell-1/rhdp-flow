@@ -293,10 +293,10 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
         </SplitItem>
         <SplitItem>
           <ToggleGroup aria-label="Status filter">
-            <ToggleGroupItem text="All" isSelected={statusFilter === 'all'} onChange={() => { setStatusFilter('all'); setPage(1); }} />
-            <ToggleGroupItem text="Verified" isSelected={statusFilter === 'verified'} onChange={() => { setStatusFilter('verified'); setPage(1); }} />
-            <ToggleGroupItem text="Unverified" isSelected={statusFilter === 'unverified'} onChange={() => { setStatusFilter('unverified'); setPage(1); }} />
-            <ToggleGroupItem text="Failed" isSelected={statusFilter === 'failed'} onChange={() => { setStatusFilter('failed'); setPage(1); }} />
+            <ToggleGroupItem buttonId="deploy-filter-all" text="All" isSelected={statusFilter === 'all'} onChange={() => { setStatusFilter('all'); setPage(1); }} />
+            <ToggleGroupItem buttonId="deploy-filter-verified" text="Verified" isSelected={statusFilter === 'verified'} onChange={() => { setStatusFilter('verified'); setPage(1); }} />
+            <ToggleGroupItem buttonId="deploy-filter-unverified" text="Unverified" isSelected={statusFilter === 'unverified'} onChange={() => { setStatusFilter('unverified'); setPage(1); }} />
+            <ToggleGroupItem buttonId="deploy-filter-failed" text="Failed" isSelected={statusFilter === 'failed'} onChange={() => { setStatusFilter('failed'); setPage(1); }} />
           </ToggleGroup>
         </SplitItem>
       </Split>

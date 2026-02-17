@@ -31,9 +31,14 @@ FROM registry.access.redhat.com/ubi9/python-311:latest
 USER 0
 WORKDIR /app
 
-# Install oc CLI (pinned version for reproducible builds)
+# Install oc CLI (pinned version for reproducible builds; auto-detect arch)
+# Update OC_VERSION when the target cluster is upgraded. Check client-server
+# version skew policy: https://kubernetes.io/releases/version-skew-policy/
 ARG OC_VERSION=4.14.40
-RUN curl -sL "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/${OC_VERSION}/openshift-client-linux.tar.gz" \
+RUN ARCH=$(uname -m) && \
+    OC_SUFFIX="" && \
+    if [ "$ARCH" = "aarch64" ]; then OC_SUFFIX="-arm64"; fi && \
+    curl -sL "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/${OC_VERSION}/openshift-client-linux${OC_SUFFIX}.tar.gz" \
     | tar xzf - -C /usr/local/bin oc kubectl && \
     chmod +x /usr/local/bin/oc /usr/local/bin/kubectl && \
     oc version --client

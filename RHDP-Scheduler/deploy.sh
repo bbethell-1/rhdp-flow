@@ -102,19 +102,28 @@ else
 fi
 echo ""
 
-# Step 3: Apply Kustomize manifests
+# Step 3: Validate and apply Kustomize manifests
 echo "--- Step 3/6: Apply Kustomize manifests ---"
+echo "  Validating manifests (server dry-run)..."
+if ! oc apply -k "$OVERLAY" --dry-run=server -o yaml >/dev/null 2>&1; then
+  echo "  WARNING: Server-side dry-run found issues. Applying anyway..."
+fi
 oc apply -k "$OVERLAY"
 echo "  Manifests applied."
 echo ""
 
-# Step 4: Grant cluster-reader to ServiceAccount
+# Step 4: Grant least-privilege RBAC to ServiceAccount
 echo "--- Step 4/6: Grant RBAC permissions ---"
-if ! oc get clusterrolebinding rhdp-scheduler-cluster-reader-"$ENV" &>/dev/null; then
-  oc create clusterrolebinding rhdp-scheduler-cluster-reader-"$ENV" \
-    --clusterrole=cluster-reader \
+# Migrate from legacy cluster-reader to custom rhdp-scheduler ClusterRole
+if oc get clusterrolebinding rhdp-scheduler-cluster-reader-"$ENV" &>/dev/null; then
+  echo "  Removing legacy cluster-reader binding..."
+  oc delete clusterrolebinding rhdp-scheduler-cluster-reader-"$ENV" || true
+fi
+if ! oc get clusterrolebinding rhdp-scheduler-"$ENV" &>/dev/null; then
+  oc create clusterrolebinding rhdp-scheduler-"$ENV" \
+    --clusterrole=rhdp-scheduler \
     --serviceaccount="$NAMESPACE:rhdp-scheduler"
-  echo "  Granted cluster-reader to SA."
+  echo "  Granted rhdp-scheduler ClusterRole to SA."
 else
   echo "  ClusterRoleBinding already exists."
 fi
@@ -122,9 +131,20 @@ echo ""
 
 # Step 5: Trigger binary build from local source and wait
 echo "--- Step 5/6: Build from local source ---"
-echo "  Uploading source from $SCRIPT_DIR ..."
-BUILD_NAME=$(oc start-build rhdp-scheduler --from-dir="$SCRIPT_DIR" -n "$NAMESPACE" -o name --follow 2>&1 | tee /dev/stderr | grep -oP 'build\.build\.openshift\.io/\S+' | head -1) || true
-# If --follow finished, check the build status
+echo "  Preparing clean build directory..."
+BUILD_DIR="/tmp/rhdp-scheduler-build-$$"
+rm -rf "$BUILD_DIR"
+mkdir -p "$BUILD_DIR"
+rsync -a --exclude='node_modules' --exclude='.git' --exclude='videos' \
+  --exclude='*.png' --exclude='*.webm' --exclude='*.mp4' \
+  --exclude='.claude' --exclude='.memory' --exclude='.playwright-mcp' \
+  --exclude='__pycache__' --exclude='.venv' --exclude='tests' \
+  --exclude='.mcp.json' --exclude='.pytest_cache' \
+  "$SCRIPT_DIR/" "$BUILD_DIR/"
+echo "  Uploading source from $BUILD_DIR ($(du -sh "$BUILD_DIR" | cut -f1))..."
+oc start-build rhdp-scheduler --from-dir="$BUILD_DIR" -n "$NAMESPACE" --follow 2>&1 || true
+rm -rf "$BUILD_DIR"
+# Check the build status
 LATEST_BUILD=$(oc get builds -n "$NAMESPACE" -l buildconfig=rhdp-scheduler --sort-by=.metadata.creationTimestamp -o name 2>/dev/null | tail -1)
 if [[ -n "$LATEST_BUILD" ]]; then
   BUILD_PHASE=$(oc get "$LATEST_BUILD" -n "$NAMESPACE" -o jsonpath='{.status.phase}')

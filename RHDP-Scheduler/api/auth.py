@@ -7,11 +7,15 @@ not protected. When the env var is unset, auth is bypassed entirely.
 
 from __future__ import annotations
 
+import hmac
+import logging
 import os
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Security
 from fastapi.security import APIKeyHeader
+
+logger = logging.getLogger("rhdp_flow.api")
 
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -29,6 +33,6 @@ async def verify_api_key(
     if required is None:
         # Auth not configured — allow all requests
         return None
-    if not api_key or api_key != required:
+    if not api_key or not hmac.compare_digest(api_key, required):
         raise HTTPException(status_code=403, detail="Invalid or missing API key")
     return api_key

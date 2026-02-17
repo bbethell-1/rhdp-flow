@@ -5,4 +5,4 @@ metadata:
 data:
   LOG_FORMAT: "json"
   LOG_LEVEL: "INFO"
-  UVICORN_WORKERS: "1"
+  RHDP_LOG_DIR: "/app/logs"

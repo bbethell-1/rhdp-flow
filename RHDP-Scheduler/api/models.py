@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -86,7 +86,7 @@ class ExtendRequest(BaseModel):
 class ScaleRequest(BaseModel):
     """Body for POST /api/operations/scale."""
 
-    target_count: int = Field(..., ge=0)
+    target_count: int = Field(..., ge=0, le=1000)
     ci_filter: Optional[str] = None
 
 
@@ -169,7 +169,7 @@ class DiffEntry(BaseModel):
     ci_name: str
     ci: str
     namespace: str
-    change: str  # 'added', 'removed', 'changed'
+    change: Literal["added", "removed", "changed"]
     details: str = ""
 
 

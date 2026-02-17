@@ -15,3 +15,4 @@ resources:
   - service.yaml
   - route.yaml
   - networkpolicy.yaml
+  - clusterrole.yaml

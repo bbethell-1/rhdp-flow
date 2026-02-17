@@ -5,7 +5,8 @@ import os
 from datetime import datetime, timezone
 
 _PROJECT_ROOT = os.path.join(os.path.dirname(__file__), "..")
-DEFAULT_LOG_DIR = os.path.join(_PROJECT_ROOT, "logs")
+# Default to /app/logs in containers (matches emptyDir mount), fallback to ./logs locally
+DEFAULT_LOG_DIR = "/app/logs" if os.path.isdir("/app") else os.path.join(_PROJECT_ROOT, "logs")
 
 
 def get_log_dir():

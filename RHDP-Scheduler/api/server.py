@@ -52,6 +52,10 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# Auth startup check
+if not os.environ.get("RHDP_API_KEY"):
+    logger.warning("RHDP_API_KEY not set -- all mutation endpoints are unprotected")
+
 # ---------------------------------------------------------------------------
 # Rate limiting via SlowAPI (shared limiter from api.limiter)
 # ---------------------------------------------------------------------------

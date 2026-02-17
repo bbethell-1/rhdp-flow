@@ -4,6 +4,8 @@ metadata:
   name: rhdp-scheduler
   annotations:
     haproxy.router.openshift.io/timeout: 300s
+    haproxy.router.openshift.io/balance: source
+    haproxy.router.openshift.io/disable_cookies: "false"
 spec:
   to:
     kind: Service
