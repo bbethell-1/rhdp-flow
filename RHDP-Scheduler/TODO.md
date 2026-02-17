@@ -1,5 +1,25 @@
 # RHDP-Flow TODO List
 
+1. CSV Generation: Slack vs. Dedicated ToolThe current Slack workflow is likely hitting friction because Slack isn't a spreadsheet editor. You have two paths:Option A: The "Smoother Slack" Flow (Short-term)The Problem: Manual entry in Slack forms is slow and error-prone.The Fix: Use a Slack "Link Trigger" that opens a Modal with Data Validation.Workflow: Instead of a thread, the user fills a structured form $\rightarrow$ Data is sent to a Make.com or Zapier hook $\rightarrow$ CSV is auto-generated and posted back as a file.Option B: The Dedicated "CSV Creator" (Long-term)The Recommendation: If you’re doing this 5+ times a week, build a 1-page Retool or Glide dashboard.Why: You can have dropdowns for "Client Name," "Service Type," and "Priority," ensuring the CSV is perfectly formatted every time without Slack’s character limits or formatting quirks.
+  
+
+ 2. Evaluate "Andrew’s Tool"Before merging, run it through this "Lightweight vs. Chunky" checklist:The "Addable" Test: Is it a single script or a Dockerized behemoth? If it requires more than 3 environment variables to run, it might be too chunky.The "Maintenance" Test: Does it use libraries we already have in our package.json or requirements.txt? Adding a whole new framework (like moving from Flask to Django just for one tool) is a red flag.Recommendation: If it's too chunky, extract the core logic into a utility function and discard the rest.
+  
+
+   3. Repo Cleanup & Docs ConsolidationYour repo currently has "knowledge leakage"—useful info hidden in deep folders.Proposed Folder StructurePlaintext/root
+├── /src              # Production code
+├── /examples         # THE NEW HOME: Consolidate everything here
+│   ├── basic-csv-gen
+│   ├── white-glove-workflow
+│   └── advanced-api-usage
+├── /docs             # High-level architecture & "The Why"
+│   ├── README.md     # The entry point
+│   └── architecture.md
+└── /tools            # Internal scripts (Andrew's tool goes here)
+
+Cleanup Tasks:Redundancy Audit: Delete any example_old.py or test_backup/ folders. If it’s not in the new /examples folder, it doesn't exist.Doc Migration: Move READMEs out of nested subfolders and into a single, searchable /docs directory or the root.4. UI Integration: Examples-as-CodeTo make the UI more intuitive, don't just link to docs—embed them.In-App Templates: Add a "Load Example" button in the UI that auto-fills the fields with a "White Glove" template.Tooltips: Add (?) icons next to complex fields that link directly to the specific line in your new /docs folder.
+
+
 ## Backlog
 - [x] ~~**Destroy QA (read-only lifecycle check)** — `POST /api/qa/destroy-check` queries Workshop, WorkshopProvision, and ResourceClaim resources to verify they've been properly destroyed/stopped after scheduled times. Reports per-resource status (not_found/active/overdue) and overall lifecycle status. Never deletes anything. Frontend "Destroy QA" section in QA tab with summary cards and results table. 5 new backend tests.~~
 - [x] ~~**agV num_users validation** — Before deploying, check if the catalog item has a hardcoded `num_users` limit in agnosticV; refuse to deploy more than the cap. `get_catalog_item_num_users_limit()` extracts `openAPIV3Schema.maximum` from the CI definition. Frontend shows danger alert after upload, deploy is blocked when violations exist. API endpoint `POST /api/schedules/validate-num-users` + deploy guard in both `process_schedule()` and the deploy endpoint.~~
