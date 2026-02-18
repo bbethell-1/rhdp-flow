@@ -80,6 +80,7 @@ export const StudentsTab: React.FC<Props> = ({ qaResults, showToast }) => {
             <Tr>
               <Th sort={getSortParams('ci_name')} info={{ tooltip: 'Catalog Item display name' }}>CI Name</Th>
               <Th info={{ tooltip: 'Student-facing URL for accessing the workshop' }}>Landing Page URL</Th>
+              <Th info={{ tooltip: 'Showroom lab environment URL (if configured)' }}>Showroom URL</Th>
               <Th sort={getSortParams('status')} info={{ tooltip: 'QA verification status for this workshop' }}>Status</Th>
             </Tr>
           </Thead>
@@ -102,6 +103,26 @@ export const StudentsTab: React.FC<Props> = ({ qaResults, showToast }) => {
                       </Button>
                     </Tooltip>
                   </span>
+                </Td>
+                <Td dataLabel="Showroom URL">
+                  {r.showroom_url ? (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <a href={r.showroom_url} target="_blank" rel="noopener noreferrer" className="cell-truncate" title={r.showroom_url}>{r.showroom_url}</a>
+                      <Tooltip content="Copy Showroom URL">
+                        <Button
+                          variant="plain"
+                          size="sm"
+                          style={{ padding: '2px 4px' }}
+                          onClick={() => navigator.clipboard.writeText(r.showroom_url).then(() => showToast('Showroom URL copied', 'success'))}
+                          aria-label="Copy Showroom URL"
+                        >
+                          <CopyIcon />
+                        </Button>
+                      </Tooltip>
+                    </span>
+                  ) : (
+                    <span style={{ color: 'var(--pf-t--global--color--status--disabled--default)' }}>—</span>
+                  )}
                 </Td>
                 <Td dataLabel="Status">{r.status}</Td>
               </Tr>

@@ -115,6 +115,8 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
   const [extDestroyLoading, setExtDestroyLoading] = useState(false);
   const [noAutostopLoading, setNoAutostopLoading] = useState(false);
   const [scaleLoading, setScaleLoading] = useState(false);
+  const [showroomCleanupLoading, setShowroomCleanupLoading] = useState(false);
+  const [showroomHealthLoading, setShowroomHealthLoading] = useState(false);
 
   // Lock / Unlock confirmation modals
   const [showLockConfirm, setShowLockConfirm] = useState(false);
@@ -129,6 +131,10 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
 
   // Disable auto-stop confirmation modal
   const [showNoAutostopConfirm, setShowNoAutostopConfirm] = useState(false);
+
+  // Showroom states
+  const [showroomFilter, setShowroomFilter] = useState('');
+  const [showShowroomCleanupConfirm, setShowShowroomCleanupConfirm] = useState(false);
 
   // History search
   const [historySearch, setHistorySearch] = useState('');
@@ -298,6 +304,36 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
     }
   };
 
+  const handleShowroomCleanup = async () => {
+    if (!showShowroomCleanupConfirm) { setShowShowroomCleanupConfirm(true); return; }
+    setShowShowroomCleanupConfirm(false);
+    setShowroomCleanupLoading(true);
+    try {
+      const r = await api.showroomCleanup({ ci_filter: showroomFilter || undefined });
+      addRecord('Showroom Cleanup', showroomFilter, '--', r.success, r.message);
+      showToast(r.message, r.success ? 'success' : 'danger');
+    } catch (e) {
+      addRecord('Showroom Cleanup', showroomFilter, '--', false, String(e));
+      showToast(`Showroom cleanup failed: ${e}`, 'danger');
+    } finally {
+      setShowroomCleanupLoading(false);
+    }
+  };
+
+  const handleShowroomHealth = async () => {
+    setShowroomHealthLoading(true);
+    try {
+      const r = await api.showroomHealth({ ci_filter: showroomFilter || undefined });
+      addRecord('Showroom Health', showroomFilter, '--', r.success, r.message);
+      showToast(r.message, r.success ? 'success' : 'danger');
+    } catch (e) {
+      addRecord('Showroom Health', showroomFilter, '--', false, String(e));
+      showToast(`Showroom health check failed: ${e}`, 'danger');
+    } finally {
+      setShowroomHealthLoading(false);
+    }
+  };
+
   return (
     <PageSection>
       <div className="ops-grid" style={{ marginBottom: 16 }}>
@@ -463,6 +499,39 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
             </Button>
           </CardBody>
         </Card>
+
+        {/* Showroom Lab Environment */}
+        <Card isFullHeight>
+          <CardTitle>
+            <Tooltip content="Manage Showroom lab environments — check health or clean up resources for workshops with Showroom repos configured.">
+              <span>Showroom Labs</span>
+            </Tooltip>
+          </CardTitle>
+          <CardBody>
+            <CIFilter options={ciOptions} value={showroomFilter} onChange={setShowroomFilter} id="showroom-ci-filter" />
+            <p style={{ marginBottom: 8, fontSize: '0.85rem' }}>
+              Check health of Showroom deployments or clean up resources (Helm releases, ConfigMaps, pods).
+            </p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button
+                variant="primary"
+                onClick={handleShowroomHealth}
+                isLoading={showroomHealthLoading}
+                isDisabled={showroomHealthLoading || showroomCleanupLoading}
+              >
+                Health Check
+              </Button>
+              <Button
+                variant="danger"
+                onClick={handleShowroomCleanup}
+                isLoading={showroomCleanupLoading}
+                isDisabled={showroomHealthLoading || showroomCleanupLoading}
+              >
+                Cleanup
+              </Button>
+            </div>
+          </CardBody>
+        </Card>
       </div>
 
       {/* Operations History Table */}
@@ -516,7 +585,7 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
         </div>
       ) : (
         <EmptyState titleText="No operations yet" headingLevel="h4">
-          <EmptyStateBody>Run a lock, extend, disable auto-stop, or scale operation above to see history here.</EmptyStateBody>
+          <EmptyStateBody>Run a lock, extend, disable auto-stop, scale, or Showroom operation above to see history here.</EmptyStateBody>
         </EmptyState>
       )}
 
@@ -640,6 +709,24 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
         <ModalFooter>
           <Button variant="warning" onClick={handleDisableAutostop}>Disable Auto-Stop</Button>
           <Button variant="link" onClick={() => setShowNoAutostopConfirm(false)}>Cancel</Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Showroom cleanup confirmation modal */}
+      <Modal
+        variant="small"
+        isOpen={showShowroomCleanupConfirm}
+        onClose={() => setShowShowroomCleanupConfirm(false)}
+        aria-labelledby="showroom-cleanup-confirm-title"
+      >
+        <ModalHeader title="Confirm Showroom Cleanup" labelId="showroom-cleanup-confirm-title" titleIconVariant="danger" />
+        <ModalBody>
+          <p>This will remove all Showroom resources (pods, services, routes, ConfigMaps){showroomFilter ? <> for <strong>&quot;{showroomFilter}&quot;</strong></> : <> in <strong>all namespaces</strong></>}.</p>
+          <p style={{ marginTop: 8 }}>Students will lose access to their lab environments. This cannot be undone.</p>
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="danger" onClick={handleShowroomCleanup}>Cleanup</Button>
+          <Button variant="link" onClick={() => setShowShowroomCleanupConfirm(false)}>Cancel</Button>
         </ModalFooter>
       </Modal>
     </PageSection>

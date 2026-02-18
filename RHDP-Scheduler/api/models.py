@@ -34,6 +34,10 @@ class WorkshopScheduleResponse(BaseModel):
     concurrency: Optional[int] = None
     salesforce_ids: str = ""
     redirect: bool = True
+    showroom_repo: str = ""
+    showroom_ref: str = ""
+    showroom_novnc: bool = False
+    showroom_zerotouch: bool = False
 
 
 class DeploymentResultResponse(BaseModel):
@@ -67,6 +71,9 @@ class DeployRequest(BaseModel):
     enable_resource_pools: bool = Field(False, description="Enable Poolboy resource pools")
     white_glove: bool = Field(True, description="White-glove mode")
     redirect: bool = Field(True, description="Enable workshop UI redirect (labUserInterface.redirect)")
+    showroom_terminal_type: str = Field("wetty", description="Showroom terminal type: wetty or ttyd")
+    showroom_novnc: bool = Field(False, description="Enable noVNC remote desktop in Showroom")
+    showroom_zerotouch: bool = Field(False, description="Use zerotouch Showroom chart with setup/runtime automation")
 
 
 class LockRequest(BaseModel):
@@ -87,6 +94,25 @@ class DisableAutostopRequest(BaseModel):
     """Body for POST /api/operations/disable-autostop."""
 
     ci_filter: Optional[str] = None
+
+
+class ShowroomCleanupRequest(BaseModel):
+    """Body for POST /api/operations/showroom-cleanup."""
+
+    ci_filter: Optional[str] = None
+
+
+class ShowroomHealthRequest(BaseModel):
+    """Body for POST /api/operations/showroom-health."""
+
+    ci_filter: Optional[str] = None
+
+
+class ShowroomAppSetRequest(BaseModel):
+    """Body for POST /api/operations/showroom-applicationset."""
+
+    ci_filter: Optional[str] = None
+    seat_count: Optional[int] = Field(None, ge=1, le=500)
 
 
 class ScaleRequest(BaseModel):
@@ -257,6 +283,8 @@ class QAResultItem(BaseModel):
     landing_page_url: str = ""
     healthy: Optional[bool] = None
     ready: Optional[bool] = None
+    showroom_status: str = ""
+    showroom_url: str = ""
 
     model_config = {"extra": "allow"}
 

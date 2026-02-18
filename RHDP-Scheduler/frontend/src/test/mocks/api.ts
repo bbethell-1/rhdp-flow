@@ -47,6 +47,10 @@ export const mockSchedule: WorkshopSchedule = {
   instances: null,
   salesforce_ids: '',
   redirect: true,
+  showroom_repo: '',
+  showroom_ref: '',
+  showroom_novnc: false,
+  showroom_zerotouch: false,
 };
 
 export const mockResult: DeploymentResult = {
@@ -81,4 +85,6 @@ export const mockQAResult: QAResult = {
   expected_seats: 20,
   actual_seats: 20,
   landing_page_url: 'https://example.com/landing/abc123',
+  showroom_status: '',
+  showroom_url: '',
 };

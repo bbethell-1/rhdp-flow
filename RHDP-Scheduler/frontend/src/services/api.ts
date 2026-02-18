@@ -10,6 +10,9 @@ import type {
   ScaleRequest,
   LockRequest,
   DisableAutostopRequest,
+  ShowroomCleanupRequest,
+  ShowroomHealthRequest,
+  ShowroomAppSetRequest,
   QARequest,
   QAResponse,
   RetryRequest,
@@ -120,6 +123,12 @@ export const api = {
     request<OperationResponse>('/operations/disable-autostop', { method: 'POST', body: JSON.stringify(body) }),
   scale: (body: ScaleRequest) =>
     request<OperationResponse>('/operations/scale', { method: 'POST', body: JSON.stringify(body) }),
+  showroomCleanup: (body: ShowroomCleanupRequest) =>
+    request<OperationResponse>('/operations/showroom-cleanup', { method: 'POST', body: JSON.stringify(body) }),
+  showroomHealth: (body: ShowroomHealthRequest) =>
+    request<OperationResponse>('/operations/showroom-health', { method: 'POST', body: JSON.stringify(body) }),
+  showroomAppSet: (body: ShowroomAppSetRequest) =>
+    request<OperationResponse>('/operations/showroom-applicationset', { method: 'POST', body: JSON.stringify(body) }),
 
   // QA
   runQA: (body: QARequest) =>

@@ -324,6 +324,62 @@ def test_disable_autostop_with_filter(mock_run, uploaded_client):
 
 
 # ---------------------------------------------------------------------------
+# Showroom
+# ---------------------------------------------------------------------------
+
+def test_showroom_cleanup_no_schedules(client):
+    resp = client.post("/api/operations/showroom-cleanup", json={})
+    assert resp.status_code == 400
+
+
+@patch("rhdp_flow.subprocess.run")
+def test_showroom_cleanup(mock_run, uploaded_client):
+    mock_run.side_effect = make_oc_dispatcher()
+    resp = uploaded_client.post("/api/operations/showroom-cleanup", json={})
+    assert resp.status_code == 200
+    assert "Showroom cleanup" in resp.json()["message"]
+
+
+@patch("rhdp_flow.subprocess.run")
+def test_showroom_cleanup_with_filter(mock_run, uploaded_client):
+    mock_run.side_effect = make_oc_dispatcher()
+    resp = uploaded_client.post(
+        "/api/operations/showroom-cleanup",
+        json={"ci_filter": "openshift-cnv.ocp-virt-roadshow-multi-user.prod"},
+    )
+    assert resp.status_code == 200
+    assert "Showroom cleanup" in resp.json()["message"]
+
+
+@patch("rhdp_flow.subprocess.run")
+def test_showroom_health(mock_run, uploaded_client):
+    mock_run.side_effect = make_oc_dispatcher()
+    resp = uploaded_client.post("/api/operations/showroom-health", json={})
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+    assert "Showroom health" in resp.json()["message"]
+
+
+def test_showroom_health_no_schedules(client):
+    resp = client.post("/api/operations/showroom-health", json={})
+    assert resp.status_code == 400
+
+
+@patch("rhdp_flow.subprocess.run")
+def test_showroom_applicationset(mock_run, uploaded_client):
+    mock_run.side_effect = make_oc_dispatcher()
+    resp = uploaded_client.post("/api/operations/showroom-applicationset", json={})
+    assert resp.status_code == 200
+    # No showroom_repo configured in basic CSV, so should return failure
+    assert resp.json()["success"] is False
+
+
+def test_showroom_applicationset_no_schedules(client):
+    resp = client.post("/api/operations/showroom-applicationset", json={})
+    assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
 # QA
 # ---------------------------------------------------------------------------
 

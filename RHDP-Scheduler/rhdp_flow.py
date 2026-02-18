@@ -147,6 +147,10 @@ class WorkshopSchedule:
     count: Optional[int] = None  # Optional deployment count (from Count CSV column); distinct from instances
     white_glove: bool = True  # Optional white-glove mode flag (default: enabled)
     redirect: bool = True  # labUserInterface.redirect (default: enabled)
+    showroom_repo: str = ""  # Optional Showroom Antora docs git repo URL
+    showroom_ref: str = ""  # Optional Showroom docs git branch/tag (default: main)
+    showroom_novnc: bool = False  # Enable noVNC remote desktop in Showroom
+    showroom_zerotouch: bool = False  # Use zerotouch chart variant with setup/runtime automation
 
 @dataclass
 class DeploymentResult:
@@ -415,6 +419,10 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                     count_str = row.get(header_map.get('count', 'Count'), '').strip()
                     aws_regions = row.get(header_map.get('aws_region', 'AWS_Region'), '').strip()
                     redirect_str = row.get(header_map.get('redirect', 'Redirect'), '').strip()
+                    showroom_repo = row.get(header_map.get('showroom_repo', 'Showroom_Repo'), '').strip()
+                    showroom_ref = row.get(header_map.get('showroom_ref', 'Showroom_Ref'), '').strip()
+                    showroom_novnc_str = row.get(header_map.get('showroom_novnc', 'Showroom_NoVNC'), '').strip()
+                    showroom_zerotouch_str = row.get(header_map.get('showroom_zerotouch', 'Showroom_Zerotouch'), '').strip()
                     is_multi_asset = is_multi_asset_str.lower() in ['true', '1', 'yes', 'y'] if is_multi_asset_str else False
                     
                     # Support both old and new header formats (with/without UTC suffix)
@@ -490,7 +498,9 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                     # Parse booleans
                     enable_workshop_interface = enable_interface.lower() in ['true', '1', 'yes', 'y']
                     redirect_val = redirect_str.lower() not in ['false', '0', 'no', 'n'] if redirect_str else True
-                    
+                    showroom_novnc_val = showroom_novnc_str.lower() in ['true', '1', 'yes', 'y'] if showroom_novnc_str else False
+                    showroom_zerotouch_val = showroom_zerotouch_str.lower() in ['true', '1', 'yes', 'y'] if showroom_zerotouch_str else False
+
                     schedule = WorkshopSchedule(
                         ci_name=ci_name,
                         ci=ci,
@@ -514,6 +524,10 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                         aws_regions=aws_regions,
                         count=count,
                         redirect=redirect_val,
+                        showroom_repo=showroom_repo,
+                        showroom_ref=showroom_ref or "main",
+                        showroom_novnc=showroom_novnc_val,
+                        showroom_zerotouch=showroom_zerotouch_val,
                     )
                     
                     schedules.append(schedule)
@@ -3791,7 +3805,15 @@ def process_schedule(
             # Construct URL anyway
             suffix = guid.split('-')[-1] if '-' in guid else ""
             url = construct_workshop_url(schedule.ci, schedule.namespace, suffix, base_domain=getattr(config, 'base_domain', 'integration.demo.redhat.com'))
-        
+
+        # Deploy Showroom lab environment if showroom_repo is set
+        if schedule.showroom_repo:
+            showroom_url, showroom_err = deploy_showroom(schedule, config, guid=guid)
+            if showroom_err:
+                logger.warning(f"Showroom deployment failed for {schedule.ci_name}: {showroom_err}")
+            elif showroom_url:
+                logger.info(f"Showroom available at: {showroom_url}")
+
         return DeploymentResult(
             ci_name=schedule.ci_name,
             ci=schedule.ci,
@@ -4168,6 +4190,370 @@ def disable_autostop(schedules, config):
                 logger.info(f"Disabled auto-stop for provision {wp_name}")
 
     return patched
+
+
+# ============================================================================
+# SHOWROOM INTEGRATION
+# ============================================================================
+
+def deploy_showroom(schedule, config, guid=""):
+    """Deploy a Showroom lab environment for a workshop using helm template | oc apply.
+
+    Supports showroom-single-pod (default) or zerotouch chart variant.
+    Generates user_data from the schedule context and injects it as a ConfigMap.
+
+    Args:
+        schedule: WorkshopSchedule with showroom_repo set
+        config: RHDPConfig
+        guid: Workshop GUID for namespace naming
+
+    Returns:
+        Tuple of (showroom_url, error_message)
+    """
+    if not schedule.showroom_repo:
+        return ("", None)
+
+    env = os.environ.copy()
+    if config.kubeconfig_path:
+        env['KUBECONFIG'] = config.kubeconfig_path
+
+    ns = schedule.namespace
+    base_domain = getattr(config, 'base_domain', 'integration.demo.redhat.com')
+    wildcard_domain = base_domain
+    # Try to get actual wildcard from cluster
+    try:
+        wc_cmd = [config.oc_command, "get", "ingresses.config/cluster", "-o", "jsonpath={.spec.domain}"]
+        wc_result = subprocess.run(wc_cmd, capture_output=True, text=True, timeout=15, env=env)
+        if wc_result.returncode == 0 and wc_result.stdout.strip():
+            wildcard_domain = wc_result.stdout.strip()
+    except Exception:
+        pass
+
+    showroom_name = f"showroom-{guid}" if guid else f"showroom-{schedule.ci.split('.')[-2] if '.' in schedule.ci else schedule.ci}"
+    chart_variant = "zerotouch" if schedule.showroom_zerotouch else "showroom-single-pod"
+
+    # Build user_data YAML from schedule context
+    user_data_yaml = (
+        f"---\n"
+        f'workshop_name: "{schedule.workshop_name}"\n'
+        f'workshop_password: "{schedule.password}"\n'
+        f'workshop_namespace: "{ns}"\n'
+        f'catalog_item: "{schedule.ci}"\n'
+        f'guid: "{guid}"\n'
+        f"num_users: {schedule.users if schedule.users else 0}\n"
+    )
+
+    if config.dry_run:
+        logger.info(f"[DRY-RUN] Would deploy Showroom '{showroom_name}' in {ns} using {chart_variant}")
+        logger.info(f"[DRY-RUN]   repo: {schedule.showroom_repo} ref: {schedule.showroom_ref}")
+        logger.info(f"[DRY-RUN]   noVNC: {schedule.showroom_novnc}, zerotouch: {schedule.showroom_zerotouch}")
+        showroom_url = f"https://{showroom_name}-{ns}.{wildcard_domain}"
+        return (showroom_url, None)
+
+    # Create user_data ConfigMap
+    ud_path = None
+    try:
+        import tempfile as _tf
+        with _tf.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as ud_file:
+            ud_file.write(user_data_yaml)
+            ud_path = ud_file.name
+
+        # Delete existing configmap if present
+        subprocess.run(
+            [config.oc_command, "delete", "configmap", f"{showroom_name}-userdata",
+             "-n", ns, "--ignore-not-found"],
+            capture_output=True, text=True, timeout=15, env=env
+        )
+
+        cm_cmd = [
+            config.oc_command, "create", "configmap", f"{showroom_name}-userdata",
+            f"--from-file=user-data.yaml={ud_path}", "-n", ns,
+        ]
+        cm_result = subprocess.run(cm_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+        if cm_result.returncode != 0:
+            logger.warning(f"Failed to create user_data ConfigMap: {cm_result.stderr}")
+    except Exception as e:
+        logger.warning(f"Error creating user_data ConfigMap: {e}")
+    finally:
+        if ud_path:
+            try:
+                os.unlink(ud_path)
+            except OSError:
+                pass
+
+    # Build helm template command
+    helm_sets = [
+        "--set", f"deployer.domain={wildcard_domain}",
+        "--set", f"general.guid={guid or showroom_name}",
+        "--set", f"content.repoUrl={schedule.showroom_repo}",
+        "--set", f"content.repoRef={schedule.showroom_ref or 'main'}",
+    ]
+    if schedule.showroom_novnc:
+        helm_sets += ["--set", "novnc.setup=true"]
+    if schedule.showroom_zerotouch:
+        helm_sets += ["--set", "setup_automation.setup=true", "--set", "runtime_automation.setup=true"]
+
+    helm_cmd = [
+        "helm", "template", showroom_name,
+        "oci://quay.io/rhpds/showroom",
+        "--namespace", ns,
+    ] + helm_sets
+
+    logger.info(f"Deploying Showroom: {showroom_name} in {ns} using {chart_variant}")
+    logger.debug(f"Helm command: {' '.join(helm_cmd)}")
+
+    try:
+        helm_result = subprocess.run(helm_cmd, capture_output=True, text=True, timeout=120, env=env)
+        if helm_result.returncode != 0:
+            logger.warning(f"Helm template failed: {helm_result.stderr}")
+            return ("", f"Helm template failed: {helm_result.stderr[:200]}")
+
+        # Apply the rendered manifests
+        apply_cmd = [config.oc_command, "apply", "-n", ns, "-f", "-"]
+        apply_result = subprocess.run(
+            apply_cmd, input=helm_result.stdout, capture_output=True, text=True,
+            timeout=config.timeout, env=env
+        )
+
+        if apply_result.returncode != 0:
+            logger.warning(f"oc apply failed for Showroom: {apply_result.stderr}")
+            return ("", f"oc apply failed: {apply_result.stderr[:200]}")
+
+        showroom_url = f"https://{showroom_name}-{ns}.{wildcard_domain}"
+        logger.info(f"Showroom deployed: {showroom_url}")
+        return (showroom_url, None)
+
+    except subprocess.TimeoutExpired:
+        return ("", "Showroom deployment timed out")
+    except FileNotFoundError:
+        logger.warning("helm command not found — Showroom deployment requires Helm CLI")
+        return ("", "helm not found")
+    except Exception as e:
+        return ("", f"Showroom deployment error: {e}")
+
+
+def teardown_showroom(schedules, config):
+    """Clean up Showroom resources (Helm releases and ConfigMaps) for workshops.
+
+    Deletes all resources labeled with the showroom release name in each namespace.
+    """
+    env = os.environ.copy()
+    if config.kubeconfig_path:
+        env['KUBECONFIG'] = config.kubeconfig_path
+
+    cleaned = 0
+    for schedule in schedules:
+        ns = schedule.namespace
+        ci = schedule.ci
+        logger.info(f"Cleaning up Showroom resources for CI={ci} in namespace={ns}")
+
+        if config.dry_run:
+            logger.info(f"[DRY-RUN] Would clean up Showroom resources in {ns}")
+            continue
+
+        try:
+            # Find and delete showroom-labeled resources
+            get_cmd = [
+                config.oc_command, "get", "all,configmap,serviceaccount,rolebinding,pvc",
+                "-n", ns, "-l", "app.kubernetes.io/name=showroom",
+                "-o", "name", "--no-headers",
+            ]
+            result = subprocess.run(get_cmd, capture_output=True, text=True, timeout=30, env=env)
+            if result.returncode == 0 and result.stdout.strip():
+                resources = [r.strip() for r in result.stdout.strip().split('\n') if r.strip()]
+                if resources:
+                    del_cmd = [config.oc_command, "delete", "-n", ns] + resources
+                    del_result = subprocess.run(del_cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+                    if del_result.returncode == 0:
+                        cleaned += len(resources)
+                        logger.info(f"Cleaned up {len(resources)} Showroom resource(s) in {ns}")
+                    else:
+                        logger.warning(f"Failed to delete Showroom resources: {del_result.stderr}")
+
+            # Also try helm uninstall if helm is available
+            try:
+                list_cmd = ["helm", "list", "-n", ns, "--filter", "showroom", "-q"]
+                list_result = subprocess.run(list_cmd, capture_output=True, text=True, timeout=15, env=env)
+                if list_result.returncode == 0 and list_result.stdout.strip():
+                    for release in list_result.stdout.strip().split('\n'):
+                        release = release.strip()
+                        if release:
+                            subprocess.run(
+                                ["helm", "uninstall", release, "-n", ns],
+                                capture_output=True, text=True, timeout=60, env=env
+                            )
+                            logger.info(f"Uninstalled Showroom Helm release: {release}")
+                            cleaned += 1
+            except FileNotFoundError:
+                pass  # helm not installed
+
+        except Exception as e:
+            logger.warning(f"Error cleaning up Showroom in {ns}: {e}")
+
+    return cleaned
+
+
+def check_showroom_health(schedule, config):
+    """Check health of Showroom deployment for a workshop.
+
+    Returns:
+        Dict with status, url, pod_ready, content_reachable fields
+    """
+    env = os.environ.copy()
+    if config.kubeconfig_path:
+        env['KUBECONFIG'] = config.kubeconfig_path
+
+    ns = schedule.namespace
+    result = {
+        "status": "not_deployed",
+        "url": "",
+        "pod_ready": False,
+        "content_reachable": False,
+    }
+
+    if config.dry_run:
+        return result
+
+    try:
+        # Find showroom pods in the namespace
+        get_cmd = [
+            config.oc_command, "get", "pods",
+            "-n", ns, "-l", "app.kubernetes.io/name=showroom",
+            "-o", "json",
+        ]
+        pod_result = subprocess.run(get_cmd, capture_output=True, text=True, timeout=15, env=env)
+        if pod_result.returncode != 0 or not pod_result.stdout.strip():
+            return result
+
+        data = json.loads(pod_result.stdout)
+        items = data.get("items", [])
+        if not items:
+            return result
+
+        result["status"] = "deployed"
+
+        # Check pod readiness
+        for pod in items:
+            conditions = pod.get("status", {}).get("conditions", [])
+            ready = any(c.get("type") == "Ready" and c.get("status") == "True" for c in conditions)
+            if ready:
+                result["pod_ready"] = True
+                break
+
+        # Find showroom route
+        route_cmd = [
+            config.oc_command, "get", "route",
+            "-n", ns, "-o", "json",
+        ]
+        route_result = subprocess.run(route_cmd, capture_output=True, text=True, timeout=15, env=env)
+        if route_result.returncode == 0 and route_result.stdout.strip():
+            route_data = json.loads(route_result.stdout)
+            route_items = route_data.get("items", [])
+            for route in route_items:
+                host = route.get("spec", {}).get("host", "")
+                name = route.get("metadata", {}).get("name", "")
+                if "showroom" in name or "showroom" in host:
+                    result["url"] = f"https://{host}"
+                    break
+
+        if result["pod_ready"]:
+            result["status"] = "healthy"
+        elif result["status"] == "deployed":
+            result["status"] = "unhealthy"
+
+    except Exception as e:
+        logger.warning(f"Error checking Showroom health in {ns}: {e}")
+        result["status"] = "error"
+
+    return result
+
+
+def generate_showroom_applicationset(schedule, config, seat_count=None):
+    """Generate an ArgoCD ApplicationSet YAML for multi-user Showroom deployment.
+
+    Each user gets their own Showroom instance deployed via ArgoCD.
+
+    Args:
+        schedule: WorkshopSchedule with showroom_repo set
+        config: RHDPConfig
+        seat_count: Number of user instances (defaults to schedule.users or schedule.instances)
+
+    Returns:
+        ApplicationSet YAML string, or empty string if showroom_repo not set
+    """
+    if not schedule.showroom_repo:
+        return ""
+
+    count = seat_count or schedule.users or schedule.instances or 20
+    ns = schedule.namespace
+    wildcard_domain = getattr(config, 'base_domain', 'integration.demo.redhat.com')
+
+    try:
+        env = os.environ.copy()
+        if config.kubeconfig_path:
+            env['KUBECONFIG'] = config.kubeconfig_path
+        wc_cmd = [config.oc_command, "get", "ingresses.config/cluster", "-o", "jsonpath={.spec.domain}"]
+        wc_result = subprocess.run(wc_cmd, capture_output=True, text=True, timeout=15, env=env)
+        if wc_result.returncode == 0 and wc_result.stdout.strip():
+            wildcard_domain = wc_result.stdout.strip()
+    except Exception:
+        pass
+
+    ci_short = schedule.ci.split('.')[1] if '.' in schedule.ci else schedule.ci
+    chart_variant = "zerotouch" if schedule.showroom_zerotouch else "showroom-single-pod"
+
+    novnc_line = '\n            novnc:\n              setup: "true"' if schedule.showroom_novnc else ''
+    zerotouch_lines = ""
+    if schedule.showroom_zerotouch:
+        zerotouch_lines = '\n            setup_automation:\n              setup: "true"\n            runtime_automation:\n              setup: "true"'
+
+    users_yaml = "\n".join(f"      - user: user{i+1}" for i in range(count))
+
+    appset_yaml = f"""---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: showroom-{ci_short}
+  namespace: openshift-gitops
+spec:
+  generators:
+  - list:
+      elements:
+{users_yaml}
+  template:
+    metadata:
+      name: showroom-{ci_short}-{{{{user}}}}
+      namespace: openshift-gitops
+      finalizers:
+      - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: default
+      syncPolicy:
+        syncOptions:
+        - CreateNamespace=true
+        automated:
+          prune: true
+          selfHeal: true
+      source:
+        repoURL: https://github.com/rhpds/showroom-deployer.git
+        targetRevision: main
+        path: charts/{chart_variant}
+        helm:
+          values: |
+            deployer:
+              domain: {wildcard_domain}
+            general:
+              guid: {{{{user}}}}
+            content:
+              repoUrl: {schedule.showroom_repo}
+              repoRef: {schedule.showroom_ref or 'main'}{novnc_line}{zerotouch_lines}
+            terminal:
+              setup: "true"
+      destination:
+        namespace: {ns}-{{{{user}}}}
+        server: https://kubernetes.default.svc
+"""
+    return appset_yaml
 
 
 def scale_workshops(schedules, config, target_count):

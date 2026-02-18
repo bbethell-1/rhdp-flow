@@ -29,6 +29,10 @@ export interface WorkshopSchedule {
   instances: number | null;
   salesforce_ids: string;
   redirect: boolean;
+  showroom_repo: string;
+  showroom_ref: string;
+  showroom_novnc: boolean;
+  showroom_zerotouch: boolean;
 }
 
 export interface UploadResponse {
@@ -69,6 +73,9 @@ export interface DeployRequest {
   enable_resource_pools?: boolean;
   white_glove?: boolean;
   redirect?: boolean;
+  showroom_terminal_type?: string;
+  showroom_novnc?: boolean;
+  showroom_zerotouch?: boolean;
 }
 
 export interface OperationResponse {
@@ -94,6 +101,19 @@ export interface LockRequest {
 
 export interface DisableAutostopRequest {
   ci_filter?: string | null;
+}
+
+export interface ShowroomCleanupRequest {
+  ci_filter?: string | null;
+}
+
+export interface ShowroomHealthRequest {
+  ci_filter?: string | null;
+}
+
+export interface ShowroomAppSetRequest {
+  ci_filter?: string | null;
+  seat_count?: number | null;
 }
 
 export interface QARequest {
@@ -123,6 +143,8 @@ export interface QAResult {
   expected_seats: number;
   actual_seats: number;
   landing_page_url: string;
+  showroom_status: string;
+  showroom_url: string;
   [key: string]: unknown;
 }
 

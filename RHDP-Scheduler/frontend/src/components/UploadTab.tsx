@@ -87,6 +87,8 @@ export const UploadTab: React.FC<Props> = ({
   const [enableResourcePools, setEnableResourcePools] = useState(false);
   const [whiteGlove, setWhiteGlove] = useState(true);
   const [redirect, setRedirect] = useState(true);
+  const [showroomNovnc, setShowroomNovnc] = useState(false);
+  const [showroomZerotouch, setShowroomZerotouch] = useState(false);
 
   // Namespace validation
   const [missingNamespaces, setMissingNamespaces] = useState<string[]>([]);
@@ -275,6 +277,8 @@ export const UploadTab: React.FC<Props> = ({
       setEnableResourcePools(false);
       setWhiteGlove(true);
       setRedirect(true);
+      setShowroomNovnc(false);
+      setShowroomZerotouch(false);
       setNumUsersViolations([]);
       setNumUsersLimits({});
       showToast('Session cleared', 'success');
@@ -286,7 +290,7 @@ export const UploadTab: React.FC<Props> = ({
   const handleDryRun = async () => {
     if (schedules.length === 0) { showToast('Upload a CSV first', 'danger'); return; }
     try {
-      const data = await api.dryRun({ dry_run: true, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect });
+      const data = await api.dryRun({ dry_run: true, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect, showroom_novnc: showroomNovnc, showroom_zerotouch: showroomZerotouch });
       setResults(data);
       showToast(`Dry-run: ${data.length} result(s)`, 'success');
     } catch (e) {
@@ -317,7 +321,7 @@ export const UploadTab: React.FC<Props> = ({
     setLogLines([]);
 
     try {
-      const job = await api.deploy({ dry_run: dryRun, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect });
+      const job = await api.deploy({ dry_run: dryRun, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect, showroom_novnc: showroomNovnc, showroom_zerotouch: showroomZerotouch });
       const es = api.deployStream(job.job_id);
       esRef.current = es;
 
@@ -644,6 +648,31 @@ export const UploadTab: React.FC<Props> = ({
                   </Tooltip>
                 </SplitItem>
               </Split>
+              {schedules.some(s => s.showroom_repo) && (
+                <Split hasGutter style={{ marginTop: 8 }}>
+                  <SplitItem style={{ fontWeight: 600, fontSize: '0.85rem', alignSelf: 'center' }}>Showroom:</SplitItem>
+                  <SplitItem>
+                    <Tooltip content="Enable noVNC remote desktop tab in Showroom for Windows-based or graphical workshops.">
+                      <Switch
+                        id="showroom-novnc-switch"
+                        label="noVNC Desktop"
+                        isChecked={showroomNovnc}
+                        onChange={(_e, checked) => setShowroomNovnc(checked)}
+                      />
+                    </Tooltip>
+                  </SplitItem>
+                  <SplitItem>
+                    <Tooltip content="Use the zerotouch chart variant with setup and runtime automation containers for fully hands-off provisioning.">
+                      <Switch
+                        id="showroom-zerotouch-switch"
+                        label="Zerotouch Automation"
+                        isChecked={showroomZerotouch}
+                        onChange={(_e, checked) => setShowroomZerotouch(checked)}
+                      />
+                    </Tooltip>
+                  </SplitItem>
+                </Split>
+              )}
             </CardBody>
           </Card>
 

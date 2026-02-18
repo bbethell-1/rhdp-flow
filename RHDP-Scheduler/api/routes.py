@@ -42,6 +42,10 @@ from rhdp_flow import (
     extend_destroy_time,
     disable_autostop,
     scale_workshops,
+    deploy_showroom,
+    teardown_showroom,
+    check_showroom_health,
+    generate_showroom_applicationset,
     update_passwords,
     import_namespace_to_csv,
     derive_base_domain,
@@ -68,6 +72,9 @@ from api.models import (
     RetryRequest,
     ScaleRequest,
     SessionSummary,
+    ShowroomAppSetRequest,
+    ShowroomCleanupRequest,
+    ShowroomHealthRequest,
     UploadResponse,
     WorkshopScheduleResponse,
 )
@@ -179,6 +186,10 @@ def _schedule_to_response(s: WorkshopSchedule) -> WorkshopScheduleResponse:
         concurrency=s.concurrency, instances=s.instances,
         salesforce_ids=s.salesforce_ids,
         redirect=s.redirect,
+        showroom_repo=s.showroom_repo,
+        showroom_ref=s.showroom_ref,
+        showroom_novnc=s.showroom_novnc,
+        showroom_zerotouch=s.showroom_zerotouch,
     )
 
 
@@ -954,6 +965,62 @@ def op_scale(request: Request, body: ScaleRequest, _key=Depends(verify_api_key))
     return OperationResponse(
         success=True,
         message=f"Scaled {len(schedules)} schedule(s) to count={body.target_count}",
+    )
+
+
+@router.post("/operations/showroom-cleanup", response_model=OperationResponse)
+@_rate_limit("10/minute")
+def op_showroom_cleanup(request: Request, body: ShowroomCleanupRequest = ShowroomCleanupRequest(), _key=Depends(verify_api_key)):
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+    schedules = _filter_schedules(body.ci_filter)
+    config = _get_config()
+    cleaned = teardown_showroom(schedules, config)
+    return OperationResponse(
+        success=cleaned > 0 or config.dry_run,
+        message=f"Showroom cleanup: {cleaned} resource(s) removed across {len(schedules)} schedule(s)",
+    )
+
+
+@router.post("/operations/showroom-health", response_model=OperationResponse)
+@_rate_limit("10/minute")
+def op_showroom_health(request: Request, body: ShowroomHealthRequest = ShowroomHealthRequest(), _key=Depends(verify_api_key)):
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+    schedules = _filter_schedules(body.ci_filter)
+    config = _get_config()
+    results = []
+    for s in schedules:
+        health = check_showroom_health(s, config)
+        results.append(f"{s.ci_name}: {health['status']} ({health['url'] or 'no route'})")
+    healthy_count = sum(1 for r in results if "healthy" in r)
+    return OperationResponse(
+        success=True,
+        message=f"Showroom health: {healthy_count}/{len(schedules)} healthy",
+        details=results,
+    )
+
+
+@router.post("/operations/showroom-applicationset")
+@_rate_limit("10/minute")
+def op_showroom_applicationset(request: Request, body: ShowroomAppSetRequest = ShowroomAppSetRequest(), _key=Depends(verify_api_key)):
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+    schedules = _filter_schedules(body.ci_filter)
+    config = _get_config()
+    yamls = []
+    for s in schedules:
+        if s.showroom_repo:
+            appset = generate_showroom_applicationset(s, config, seat_count=body.seat_count)
+            if appset:
+                yamls.append(appset)
+    if not yamls:
+        return OperationResponse(success=False, message="No schedules have Showroom repos configured.")
+    combined = "\n---\n".join(yamls)
+    return OperationResponse(
+        success=True,
+        message=f"Generated {len(yamls)} ApplicationSet(s)",
+        details=[combined],
     )
 
 
