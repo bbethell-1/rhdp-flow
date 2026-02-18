@@ -3,6 +3,7 @@ import {
   Button,
   EmptyState,
   EmptyStateBody,
+  Label,
   PageSection,
   SearchInput,
   Split,
@@ -154,6 +155,12 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
     const unique = new Set(schedules.map(s => s.ci));
     return Array.from(unique).sort();
   }, [schedules]);
+
+  /** U1: Count schedules with Showroom repos configured */
+  const showroomScheduleCount = useMemo(
+    () => schedules.filter(s => s.showroom_repo).length,
+    [schedules],
+  );
 
   /** Compute extend preview: earliest current date -> new date after adding days/hours */
   const extendPreview = (filter: string, field: 'auto_stop' | 'auto_destroy', days: number, hours: number) => {
@@ -310,7 +317,8 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
     setShowroomCleanupLoading(true);
     try {
       const r = await api.showroomCleanup({ ci_filter: showroomFilter || undefined });
-      addRecord('Showroom Cleanup', showroomFilter, '--', r.success, r.message);
+      const msg = r.details?.length ? `${r.message} | ${r.details.join('; ')}` : r.message;
+      addRecord('Showroom Cleanup', showroomFilter, '--', r.success, msg);
       showToast(r.message, r.success ? 'success' : 'danger');
     } catch (e) {
       addRecord('Showroom Cleanup', showroomFilter, '--', false, String(e));
@@ -324,7 +332,8 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
     setShowroomHealthLoading(true);
     try {
       const r = await api.showroomHealth({ ci_filter: showroomFilter || undefined });
-      addRecord('Showroom Health', showroomFilter, '--', r.success, r.message);
+      const msg = r.details?.length ? `${r.message} | ${r.details.join('; ')}` : r.message;
+      addRecord('Showroom Health', showroomFilter, '--', r.success, msg);
       showToast(r.message, r.success ? 'success' : 'danger');
     } catch (e) {
       addRecord('Showroom Health', showroomFilter, '--', false, String(e));
@@ -506,6 +515,9 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
             <Tooltip content="Manage Showroom lab environments — check health or clean up resources for workshops with Showroom repos configured.">
               <span>Showroom Labs</span>
             </Tooltip>
+            {showroomScheduleCount > 0 && (
+              <Label color="blue" isCompact style={{ marginLeft: 8 }}>{showroomScheduleCount} configured</Label>
+            )}
           </CardTitle>
           <CardBody>
             <CIFilter options={ciOptions} value={showroomFilter} onChange={setShowroomFilter} id="showroom-ci-filter" />

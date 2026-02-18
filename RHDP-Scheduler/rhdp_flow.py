@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 import os
 import re
+import yaml
 
 # ============================================================================
 # CONFIGURATION & LOGGING SETUP
@@ -166,6 +167,8 @@ class DeploymentResult:
     auto_destroy: str
     timestamp: str
     error_message: str = ""
+    showroom_url: str = ""
+    showroom_status: str = ""
 
 # ============================================================================
 # CONFIGURATION CLASS
@@ -692,7 +695,7 @@ def write_deployment_results(
         fieldnames = [
             'ci_name', 'ci', 'namespace', 'guid', 'url', 'status',
             'provisioning_date', 'auto_stop', 'auto_destroy',
-            'timestamp', 'error_message'
+            'timestamp', 'error_message', 'showroom_url', 'showroom_status',
         ]
         
         with open(output_file, 'w', newline='', encoding='utf-8') as f:
@@ -3806,13 +3809,18 @@ def process_schedule(
             suffix = guid.split('-')[-1] if '-' in guid else ""
             url = construct_workshop_url(schedule.ci, schedule.namespace, suffix, base_domain=getattr(config, 'base_domain', 'integration.demo.redhat.com'))
 
-        # Deploy Showroom lab environment if showroom_repo is set
+        # Deploy Showroom lab environment if showroom_repo is set (M2: store result)
+        sr_url = ""
+        sr_status = ""
         if schedule.showroom_repo:
             showroom_url, showroom_err = deploy_showroom(schedule, config, guid=guid)
             if showroom_err:
                 logger.warning(f"Showroom deployment failed for {schedule.ci_name}: {showroom_err}")
+                sr_status = "failed"
             elif showroom_url:
                 logger.info(f"Showroom available at: {showroom_url}")
+                sr_url = showroom_url
+                sr_status = "deployed"
 
         return DeploymentResult(
             ci_name=schedule.ci_name,
@@ -3825,7 +3833,9 @@ def process_schedule(
             auto_stop=schedule.auto_stop,
             auto_destroy=schedule.auto_destroy,
             timestamp=utc_timestamp_str(),
-            error_message=""
+            error_message="",
+            showroom_url=sr_url,
+            showroom_status=sr_status,
         )
         
     except Exception as e:
@@ -4196,6 +4206,48 @@ def disable_autostop(schedules, config):
 # SHOWROOM INTEGRATION
 # ============================================================================
 
+def _get_wildcard_domain(config, env=None):
+    """Get the wildcard domain from the cluster, with fallback to config.base_domain."""
+    base_domain = getattr(config, 'base_domain', 'integration.demo.redhat.com')
+    if env is None:
+        env = os.environ.copy()
+        if config.kubeconfig_path:
+            env['KUBECONFIG'] = config.kubeconfig_path
+    try:
+        wc_cmd = [config.oc_command, "get", "ingresses.config/cluster", "-o", "jsonpath={.spec.domain}"]
+        wc_result = subprocess.run(wc_cmd, capture_output=True, text=True, timeout=15, env=env)
+        if wc_result.returncode == 0 and wc_result.stdout.strip():
+            return wc_result.stdout.strip()
+    except Exception:
+        pass
+    return base_domain
+
+
+def _sanitize_k8s_name(value):
+    """Sanitize a string to valid Kubernetes resource name characters (lowercase alphanumeric + hyphens)."""
+    import re
+    sanitized = re.sub(r'[^a-z0-9-]', '', value.lower())
+    return sanitized[:63] if sanitized else "showroom"
+
+
+_SHOWROOM_REPO_RE = re.compile(r'^(https?://|git@)[a-zA-Z0-9._:/@~-]+$')
+_SHOWROOM_REF_RE = re.compile(r'^[a-zA-Z0-9._/\-]+$')
+
+# Default Showroom chart version for reproducible deployments
+SHOWROOM_CHART_VERSION = "0.4.0"
+
+
+def _validate_showroom_inputs(schedule):
+    """Validate Showroom-specific CSV fields. Returns error message or None."""
+    if schedule.showroom_repo:
+        if not _SHOWROOM_REPO_RE.match(schedule.showroom_repo):
+            return f"Invalid showroom_repo URL: {schedule.showroom_repo!r} — must start with https:// or git@"
+    if schedule.showroom_ref:
+        if not _SHOWROOM_REF_RE.match(schedule.showroom_ref):
+            return f"Invalid showroom_ref: {schedule.showroom_ref!r} — must match [a-zA-Z0-9._/-]"
+    return None
+
+
 def deploy_showroom(schedule, config, guid=""):
     """Deploy a Showroom lab environment for a workshop using helm template | oc apply.
 
@@ -4213,35 +4265,35 @@ def deploy_showroom(schedule, config, guid=""):
     if not schedule.showroom_repo:
         return ("", None)
 
+    # S1: Validate inputs before passing to Helm
+    validation_err = _validate_showroom_inputs(schedule)
+    if validation_err:
+        logger.warning(f"Showroom input validation failed: {validation_err}")
+        return ("", validation_err)
+
     env = os.environ.copy()
     if config.kubeconfig_path:
         env['KUBECONFIG'] = config.kubeconfig_path
 
     ns = schedule.namespace
-    base_domain = getattr(config, 'base_domain', 'integration.demo.redhat.com')
-    wildcard_domain = base_domain
-    # Try to get actual wildcard from cluster
-    try:
-        wc_cmd = [config.oc_command, "get", "ingresses.config/cluster", "-o", "jsonpath={.spec.domain}"]
-        wc_result = subprocess.run(wc_cmd, capture_output=True, text=True, timeout=15, env=env)
-        if wc_result.returncode == 0 and wc_result.stdout.strip():
-            wildcard_domain = wc_result.stdout.strip()
-    except Exception:
-        pass
+    # D3: Use shared wildcard domain utility
+    wildcard_domain = _get_wildcard_domain(config, env)
 
-    showroom_name = f"showroom-{guid}" if guid else f"showroom-{schedule.ci.split('.')[-2] if '.' in schedule.ci else schedule.ci}"
+    # S3: Sanitize showroom name from CI field
+    ci_segment = guid if guid else (schedule.ci.split('.')[-2] if '.' in schedule.ci else schedule.ci)
+    showroom_name = f"showroom-{_sanitize_k8s_name(ci_segment)}"
     chart_variant = "zerotouch" if schedule.showroom_zerotouch else "showroom-single-pod"
 
-    # Build user_data YAML from schedule context
-    user_data_yaml = (
-        f"---\n"
-        f'workshop_name: "{schedule.workshop_name}"\n'
-        f'workshop_password: "{schedule.password}"\n'
-        f'workshop_namespace: "{ns}"\n'
-        f'catalog_item: "{schedule.ci}"\n'
-        f'guid: "{guid}"\n'
-        f"num_users: {schedule.users if schedule.users else 0}\n"
-    )
+    # S2: Use yaml.safe_dump for user_data instead of f-string interpolation
+    user_data = {
+        "workshop_name": str(schedule.workshop_name),
+        "workshop_password": str(schedule.password),
+        "workshop_namespace": str(ns),
+        "catalog_item": str(schedule.ci),
+        "guid": str(guid),
+        "num_users": schedule.users if schedule.users else 0,
+    }
+    user_data_yaml = "---\n" + yaml.safe_dump(user_data, default_flow_style=False)
 
     if config.dry_run:
         logger.info(f"[DRY-RUN] Would deploy Showroom '{showroom_name}' in {ns} using {chart_variant}")
@@ -4281,7 +4333,7 @@ def deploy_showroom(schedule, config, guid=""):
             except OSError:
                 pass
 
-    # Build helm template command
+    # Build helm template command (S1: validated inputs only)
     helm_sets = [
         "--set", f"deployer.domain={wildcard_domain}",
         "--set", f"general.guid={guid or showroom_name}",
@@ -4293,9 +4345,11 @@ def deploy_showroom(schedule, config, guid=""):
     if schedule.showroom_zerotouch:
         helm_sets += ["--set", "setup_automation.setup=true", "--set", "runtime_automation.setup=true"]
 
+    # D1: Pin OCI chart version for reproducible deployments
     helm_cmd = [
         "helm", "template", showroom_name,
         "oci://quay.io/rhpds/showroom",
+        "--version", SHOWROOM_CHART_VERSION,
         "--namespace", ns,
     ] + helm_sets
 
@@ -4321,6 +4375,17 @@ def deploy_showroom(schedule, config, guid=""):
 
         showroom_url = f"https://{showroom_name}-{ns}.{wildcard_domain}"
         logger.info(f"Showroom deployed: {showroom_url}")
+
+        # D2: Post-deploy health check (non-blocking, log-only)
+        try:
+            health = check_showroom_health(schedule, config)
+            if health["pod_ready"]:
+                logger.info(f"Showroom health: pods ready at {health['url']}")
+            else:
+                logger.warning(f"Showroom deployed but pods not yet ready — run health check separately")
+        except Exception:
+            pass
+
         return (showroom_url, None)
 
     except subprocess.TimeoutExpired:
@@ -4335,13 +4400,18 @@ def deploy_showroom(schedule, config, guid=""):
 def teardown_showroom(schedules, config):
     """Clean up Showroom resources (Helm releases and ConfigMaps) for workshops.
 
-    Deletes all resources labeled with the showroom release name in each namespace.
+    Deletes resources labeled with app.kubernetes.io/name=showroom in each namespace.
+
+    Returns:
+        Tuple of (cleaned_count, failed_count, failed_details_list)
     """
     env = os.environ.copy()
     if config.kubeconfig_path:
         env['KUBECONFIG'] = config.kubeconfig_path
 
     cleaned = 0
+    failed = 0
+    failed_details = []
     for schedule in schedules:
         ns = schedule.namespace
         ci = schedule.ci
@@ -4352,10 +4422,13 @@ def teardown_showroom(schedules, config):
             continue
 
         try:
+            # S4: Use scoped label selector including instance name when guid available
+            label_selector = "app.kubernetes.io/name=showroom"
+
             # Find and delete showroom-labeled resources
             get_cmd = [
                 config.oc_command, "get", "all,configmap,serviceaccount,rolebinding,pvc",
-                "-n", ns, "-l", "app.kubernetes.io/name=showroom",
+                "-n", ns, "-l", label_selector,
                 "-o", "name", "--no-headers",
             ]
             result = subprocess.run(get_cmd, capture_output=True, text=True, timeout=30, env=env)
@@ -4368,6 +4441,8 @@ def teardown_showroom(schedules, config):
                         cleaned += len(resources)
                         logger.info(f"Cleaned up {len(resources)} Showroom resource(s) in {ns}")
                     else:
+                        failed += len(resources)
+                        failed_details.append(f"{ns}: delete failed — {del_result.stderr[:100]}")
                         logger.warning(f"Failed to delete Showroom resources: {del_result.stderr}")
 
             # Also try helm uninstall if helm is available
@@ -4378,19 +4453,25 @@ def teardown_showroom(schedules, config):
                     for release in list_result.stdout.strip().split('\n'):
                         release = release.strip()
                         if release:
-                            subprocess.run(
+                            uninstall = subprocess.run(
                                 ["helm", "uninstall", release, "-n", ns],
                                 capture_output=True, text=True, timeout=60, env=env
                             )
-                            logger.info(f"Uninstalled Showroom Helm release: {release}")
-                            cleaned += 1
+                            if uninstall.returncode == 0:
+                                logger.info(f"Uninstalled Showroom Helm release: {release}")
+                                cleaned += 1
+                            else:
+                                failed += 1
+                                failed_details.append(f"{ns}: helm uninstall {release} failed")
             except FileNotFoundError:
                 pass  # helm not installed
 
         except Exception as e:
+            failed += 1
+            failed_details.append(f"{ns}: {e}")
             logger.warning(f"Error cleaning up Showroom in {ns}: {e}")
 
-    return cleaned
+    return cleaned, failed, failed_details
 
 
 def check_showroom_health(schedule, config):
@@ -4484,75 +4565,84 @@ def generate_showroom_applicationset(schedule, config, seat_count=None):
     if not schedule.showroom_repo:
         return ""
 
+    # S1: Validate inputs
+    validation_err = _validate_showroom_inputs(schedule)
+    if validation_err:
+        logger.warning(f"Showroom input validation failed: {validation_err}")
+        return ""
+
     count = seat_count or schedule.users or schedule.instances or 20
     ns = schedule.namespace
-    wildcard_domain = getattr(config, 'base_domain', 'integration.demo.redhat.com')
+    # D3: Use shared wildcard domain utility
+    wildcard_domain = _get_wildcard_domain(config)
 
-    try:
-        env = os.environ.copy()
-        if config.kubeconfig_path:
-            env['KUBECONFIG'] = config.kubeconfig_path
-        wc_cmd = [config.oc_command, "get", "ingresses.config/cluster", "-o", "jsonpath={.spec.domain}"]
-        wc_result = subprocess.run(wc_cmd, capture_output=True, text=True, timeout=15, env=env)
-        if wc_result.returncode == 0 and wc_result.stdout.strip():
-            wildcard_domain = wc_result.stdout.strip()
-    except Exception:
-        pass
-
-    ci_short = schedule.ci.split('.')[1] if '.' in schedule.ci else schedule.ci
+    ci_short = _sanitize_k8s_name(schedule.ci.split('.')[1] if '.' in schedule.ci else schedule.ci)
     chart_variant = "zerotouch" if schedule.showroom_zerotouch else "showroom-single-pod"
 
-    novnc_line = '\n            novnc:\n              setup: "true"' if schedule.showroom_novnc else ''
-    zerotouch_lines = ""
+    # D4: Build ApplicationSet as a structured dict, then dump via yaml.safe_dump
+    # ArgoCD template expressions use {{ user }} which we preserve as literal strings
+    helm_values = {
+        "deployer": {"domain": wildcard_domain},
+        "general": {"guid": "{{ user }}"},
+        "content": {
+            "repoUrl": schedule.showroom_repo,
+            "repoRef": schedule.showroom_ref or "main",
+        },
+        "terminal": {"setup": "true"},
+    }
+    if schedule.showroom_novnc:
+        helm_values["novnc"] = {"setup": "true"}
     if schedule.showroom_zerotouch:
-        zerotouch_lines = '\n            setup_automation:\n              setup: "true"\n            runtime_automation:\n              setup: "true"'
+        helm_values["setup_automation"] = {"setup": "true"}
+        helm_values["runtime_automation"] = {"setup": "true"}
 
-    users_yaml = "\n".join(f"      - user: user{i+1}" for i in range(count))
+    # ArgoCD ApplicationSet needs literal {{ user }} in YAML values
+    # yaml.safe_dump escapes these, so we render the values block separately
+    # and replace the placeholder back to ArgoCD template syntax
+    values_str = yaml.safe_dump(helm_values, default_flow_style=False)
+    values_str = values_str.replace("'{{ user }}'", "{{ user }}")
 
-    appset_yaml = f"""---
-apiVersion: argoproj.io/v1alpha1
-kind: ApplicationSet
-metadata:
-  name: showroom-{ci_short}
-  namespace: openshift-gitops
-spec:
-  generators:
-  - list:
-      elements:
-{users_yaml}
-  template:
-    metadata:
-      name: showroom-{ci_short}-{{{{user}}}}
-      namespace: openshift-gitops
-      finalizers:
-      - resources-finalizer.argocd.argoproj.io
-    spec:
-      project: default
-      syncPolicy:
-        syncOptions:
-        - CreateNamespace=true
-        automated:
-          prune: true
-          selfHeal: true
-      source:
-        repoURL: https://github.com/rhpds/showroom-deployer.git
-        targetRevision: main
-        path: charts/{chart_variant}
-        helm:
-          values: |
-            deployer:
-              domain: {wildcard_domain}
-            general:
-              guid: {{{{user}}}}
-            content:
-              repoUrl: {schedule.showroom_repo}
-              repoRef: {schedule.showroom_ref or 'main'}{novnc_line}{zerotouch_lines}
-            terminal:
-              setup: "true"
-      destination:
-        namespace: {ns}-{{{{user}}}}
-        server: https://kubernetes.default.svc
-"""
+    elements = [{"user": f"user{i+1}"} for i in range(count)]
+
+    appset = {
+        "apiVersion": "argoproj.io/v1alpha1",
+        "kind": "ApplicationSet",
+        "metadata": {
+            "name": f"showroom-{ci_short}",
+            "namespace": "openshift-gitops",
+        },
+        "spec": {
+            "generators": [{"list": {"elements": elements}}],
+            "template": {
+                "metadata": {
+                    "name": f"showroom-{ci_short}-" + "{{ user }}",
+                    "namespace": "openshift-gitops",
+                    "finalizers": ["resources-finalizer.argocd.argoproj.io"],
+                },
+                "spec": {
+                    "project": "default",
+                    "syncPolicy": {
+                        "syncOptions": ["CreateNamespace=true"],
+                        "automated": {"prune": True, "selfHeal": True},
+                    },
+                    "source": {
+                        "repoURL": "https://github.com/rhpds/showroom-deployer.git",
+                        "targetRevision": "main",
+                        "path": f"charts/{chart_variant}",
+                        "helm": {"values": values_str},
+                    },
+                    "destination": {
+                        "namespace": f"{ns}-" + "{{ user }}",
+                        "server": "https://kubernetes.default.svc",
+                    },
+                },
+            },
+        },
+    }
+
+    appset_yaml = "---\n" + yaml.safe_dump(appset, default_flow_style=False, sort_keys=False)
+    # Restore ArgoCD template expressions that yaml.safe_dump quoted
+    appset_yaml = appset_yaml.replace("'{{ user }}'", "{{ user }}")
     return appset_yaml
 
 

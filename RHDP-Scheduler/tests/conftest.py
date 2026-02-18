@@ -53,6 +53,11 @@ CI Name,CI,Namespace
 Basic Workshop,some-ci,some-ns
 """
 
+SHOWROOM_CSV = """\
+CI Name,CI,Namespace,Users,Workshop_instance_count,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Instances,Salesforce IDs,Showroom_Repo,Showroom_Ref,Showroom_NoVNC,Showroom_Zerotouch
+Showroom Workshop,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,20,2,True,Workshop1,Admin,QA,Virt Showroom,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,,,,,,,https://github.com/rhpds/showroom-virt.git,main,False,False
+"""
+
 
 # ============================================================================
 # Factory functions
@@ -103,6 +108,23 @@ def make_oc_dispatcher(overrides=None):
     def dispatcher(*args, **kwargs):
         cmd = args[0] if args else kwargs.get("args", [])
         if not cmd or len(cmd) < 2:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        # Handle helm commands (Showroom deploy/teardown)
+        if cmd[0] == "helm" or (isinstance(cmd[0], str) and cmd[0].endswith("helm")):
+            subcmd = cmd[1] if len(cmd) > 1 else ""
+            if subcmd in ("upgrade", "install"):
+                return subprocess.CompletedProcess(
+                    cmd, 0, stdout="Release \"showroom\" has been upgraded.\n", stderr=""
+                )
+            if subcmd == "uninstall":
+                return subprocess.CompletedProcess(
+                    cmd, 0, stdout="release \"showroom\" uninstalled\n", stderr=""
+                )
+            if subcmd == "list":
+                return subprocess.CompletedProcess(
+                    cmd, 0, stdout="showroom\tdefault\t1\tdeployed\n", stderr=""
+                )
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
         subcmd = cmd[1]
@@ -240,6 +262,43 @@ def make_oc_dispatcher(overrides=None):
 
         if subcmd == "delete":
             return subprocess.CompletedProcess(cmd, 0, stdout="deleted\n", stderr="")
+
+        # Showroom: handle ingresses.config/cluster for wildcard domain
+        if subcmd == "get" and len(cmd) > 2 and "ingresses.config" in cmd[2]:
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout="apps.cluster.example.com", stderr=""
+            )
+
+        # Showroom: handle pod queries for health checks
+        if subcmd == "get" and len(cmd) > 2 and cmd[2] == "pod":
+            pod_json = {
+                "items": [{
+                    "metadata": {"name": "showroom-pod-abc"},
+                    "status": {
+                        "phase": "Running",
+                        "conditions": [{"type": "Ready", "status": "True"}],
+                    },
+                }]
+            }
+            if any(a == "json" for a in cmd):
+                return subprocess.CompletedProcess(
+                    cmd, 0, stdout=json.dumps(pod_json), stderr=""
+                )
+            return subprocess.CompletedProcess(cmd, 0, stdout="showroom-pod-abc", stderr="")
+
+        # Showroom: handle route queries
+        if subcmd == "get" and len(cmd) > 2 and cmd[2] == "route":
+            route_json = {
+                "items": [{
+                    "metadata": {"name": "showroom-route"},
+                    "spec": {"host": "showroom.apps.cluster.example.com"},
+                }]
+            }
+            if any(a == "json" for a in cmd):
+                return subprocess.CompletedProcess(
+                    cmd, 0, stdout=json.dumps(route_json), stderr=""
+                )
+            return subprocess.CompletedProcess(cmd, 0, stdout="showroom-route", stderr="")
 
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 

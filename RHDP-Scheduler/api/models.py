@@ -54,6 +54,8 @@ class DeploymentResultResponse(BaseModel):
     auto_destroy: str
     timestamp: str
     error_message: str = ""
+    showroom_url: str = ""
+    showroom_status: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +73,6 @@ class DeployRequest(BaseModel):
     enable_resource_pools: bool = Field(False, description="Enable Poolboy resource pools")
     white_glove: bool = Field(True, description="White-glove mode")
     redirect: bool = Field(True, description="Enable workshop UI redirect (labUserInterface.redirect)")
-    showroom_terminal_type: str = Field("wetty", description="Showroom terminal type: wetty or ttyd")
     showroom_novnc: bool = Field(False, description="Enable noVNC remote desktop in Showroom")
     showroom_zerotouch: bool = Field(False, description="Use zerotouch Showroom chart with setup/runtime automation")
 

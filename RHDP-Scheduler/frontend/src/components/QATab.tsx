@@ -116,8 +116,8 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
     const headers = ['CI Name', 'CI', 'Status', 'Deployed', 'Healthy', 'Expected Seats', 'Actual Seats', 'Landing Page URL'];
     const rows = filteredQAResults.map(r => [
       r.ci_name, r.ci, r.status, r.deployed,
-      String(r.healthy ?? ''), String(r.expected_seats ?? ''),
-      String(r.actual_seats ?? ''), r.landing_page_url || '',
+      String(r.healthy ?? ''), String(r.expected_users ?? ''),
+      String(r.actual_count ?? ''), r.landing_page_url || '',
     ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
     const csv = [headers.join(','), ...rows].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });

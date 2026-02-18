@@ -636,6 +636,11 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                 white_glove=body.white_glove,
                 redirect=body.redirect,
             )
+            # U3: Propagate showroom deploy settings to schedules
+            for s in schedules:
+                if s.showroom_repo:
+                    s.showroom_novnc = body.showroom_novnc
+                    s.showroom_zerotouch = body.showroom_zerotouch
             jobs.update_job(job.job_id, status=jobs.Status.running, message="Starting deployment")
 
             # Replicate main() deploy loop logic
@@ -733,6 +738,11 @@ def deploy_dry_run(request: Request, body: DeployRequest = DeployRequest(), _key
         white_glove=body.white_glove,
         redirect=body.redirect,
     )
+    # U3: Propagate showroom deploy settings to schedules
+    for s in schedules:
+        if s.showroom_repo:
+            s.showroom_novnc = body.showroom_novnc
+            s.showroom_zerotouch = body.showroom_zerotouch
 
     handler, log_path = start_log_capture("deploy-dryrun")
     try:
@@ -975,10 +985,13 @@ def op_showroom_cleanup(request: Request, body: ShowroomCleanupRequest = Showroo
         raise HTTPException(400, "No schedules loaded.")
     schedules = _filter_schedules(body.ci_filter)
     config = _get_config()
-    cleaned = teardown_showroom(schedules, config)
+    cleaned, failed, failed_details = teardown_showroom(schedules, config)
+    success = failed == 0 or config.dry_run
+    details = failed_details if failed_details else []
     return OperationResponse(
-        success=cleaned > 0 or config.dry_run,
-        message=f"Showroom cleanup: {cleaned} resource(s) removed across {len(schedules)} schedule(s)",
+        success=success,
+        message=f"Showroom cleanup: {cleaned} removed, {failed} failed across {len(schedules)} schedule(s)",
+        details=details,
     )
 
 
@@ -1190,7 +1203,7 @@ def export_results():
     fieldnames = [
         "ci_name", "ci", "namespace", "guid", "url", "status",
         "provisioning_date", "auto_stop", "auto_destroy",
-        "timestamp", "error_message", "log_url",
+        "timestamp", "error_message", "showroom_url", "showroom_status", "log_url",
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()

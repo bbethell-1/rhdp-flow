@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from api.server import app
 from api import routes
 from api.limiter import limiter as _test_limiter
-from tests.conftest import BASIC_WORKSHOP_CSV, make_oc_dispatcher
+from tests.conftest import BASIC_WORKSHOP_CSV, SHOWROOM_CSV, make_oc_dispatcher
 
 
 @pytest.fixture(autouse=True)
@@ -377,6 +377,74 @@ def test_showroom_applicationset(mock_run, uploaded_client):
 def test_showroom_applicationset_no_schedules(client):
     resp = client.post("/api/operations/showroom-applicationset", json={})
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Showroom positive-path tests (T1: CSV with showroom_repo configured)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def uploaded_showroom_client(client):
+    """Client with a Showroom-configured CSV already uploaded."""
+    resp = client.post(
+        "/api/schedules/upload",
+        files={"file": ("showroom.csv", SHOWROOM_CSV.encode(), "text/csv")},
+    )
+    assert resp.status_code == 200
+    return client
+
+
+@patch("rhdp_flow.subprocess.run")
+def test_showroom_health_with_repo(mock_run, uploaded_showroom_client):
+    """Showroom health check succeeds when schedules have showroom_repo set."""
+    mock_run.side_effect = make_oc_dispatcher()
+    resp = uploaded_showroom_client.post("/api/operations/showroom-health", json={})
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+
+
+@patch("rhdp_flow.subprocess.run")
+def test_showroom_cleanup_with_repo(mock_run, uploaded_showroom_client):
+    """Showroom cleanup succeeds when schedules have showroom_repo set."""
+    mock_run.side_effect = make_oc_dispatcher()
+    resp = uploaded_showroom_client.post("/api/operations/showroom-cleanup", json={})
+    assert resp.status_code == 200
+    assert "Showroom cleanup" in resp.json()["message"]
+
+
+@patch("rhdp_flow.subprocess.run")
+def test_showroom_applicationset_with_repo(mock_run, uploaded_showroom_client):
+    """ApplicationSet generation succeeds when schedules have showroom_repo set."""
+    mock_run.side_effect = make_oc_dispatcher()
+    resp = uploaded_showroom_client.post(
+        "/api/operations/showroom-applicationset", json={}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+
+
+@patch("rhdp_flow.subprocess.run")
+def test_showroom_health_with_filter(mock_run, uploaded_showroom_client):
+    """Showroom health with ci_filter matching the Showroom-configured CI."""
+    mock_run.side_effect = make_oc_dispatcher()
+    resp = uploaded_showroom_client.post(
+        "/api/operations/showroom-health",
+        json={"ci_filter": "openshift-cnv.ocp-virt-roadshow-multi-user.prod"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+
+
+@patch("rhdp_flow.subprocess.run")
+def test_showroom_applicationset_with_seat_count(mock_run, uploaded_showroom_client):
+    """ApplicationSet generation with explicit seat_count."""
+    mock_run.side_effect = make_oc_dispatcher()
+    resp = uploaded_showroom_client.post(
+        "/api/operations/showroom-applicationset",
+        json={"seat_count": 10},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
 
 
 # ---------------------------------------------------------------------------

@@ -65,6 +65,8 @@ export const mockResult: DeploymentResult = {
   auto_destroy: '16/03/2025 09:00',
   timestamp: '2025-03-15 09:05:00',
   error_message: '',
+  showroom_url: '',
+  showroom_status: '',
 };
 
 export const mockFailedResult: DeploymentResult = {
@@ -82,8 +84,8 @@ export const mockQAResult: QAResult = {
   status: 'verified',
   deployed: 'Yes',
   healthy: true,
-  expected_seats: 20,
-  actual_seats: 20,
+  expected_users: 20,
+  actual_count: 20,
   landing_page_url: 'https://example.com/landing/abc123',
   showroom_status: '',
   showroom_url: '',

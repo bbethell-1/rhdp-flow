@@ -54,6 +54,8 @@ export interface DeploymentResult {
   auto_destroy: string;
   timestamp: string;
   error_message: string;
+  showroom_url: string;
+  showroom_status: string;
 }
 
 export interface JobResponse {
@@ -73,7 +75,6 @@ export interface DeployRequest {
   enable_resource_pools?: boolean;
   white_glove?: boolean;
   redirect?: boolean;
-  showroom_terminal_type?: string;
   showroom_novnc?: boolean;
   showroom_zerotouch?: boolean;
 }
@@ -140,8 +141,8 @@ export interface QAResult {
   status: string;
   deployed: string;
   healthy: boolean | string;
-  expected_seats: number;
-  actual_seats: number;
+  expected_users: number;
+  actual_count: number;
   landing_page_url: string;
   showroom_status: string;
   showroom_url: string;

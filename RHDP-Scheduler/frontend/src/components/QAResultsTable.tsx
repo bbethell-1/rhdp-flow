@@ -88,7 +88,7 @@ export const QAResultsTable: React.FC<{
               <Td dataLabel="Status"><span className={statusColorClass(r.status)}>{(() => { const Icon = statusIcon(r.status); return Icon ? <Icon style={{ marginRight: 4 }} /> : null; })()}{r.status}</span></Td>
               <Td dataLabel="Deployed">{r.deployed || '-'}</Td>
               <Td dataLabel="Healthy"><span className={healthyColorClass(r.healthy)}>{healthyDisplay(r.healthy)}</span></Td>
-              <Td dataLabel="Seats">{r.expected_seats ?? '-'} / {r.actual_seats ?? '-'}</Td>
+              <Td dataLabel="Seats">{r.expected_users ?? '-'} / {r.actual_count ?? '-'}</Td>
               <Td dataLabel="Landing Page URL">
                 {r.landing_page_url ? (
                   <a href={r.landing_page_url} target="_blank" rel="noopener noreferrer" className="cell-truncate" title={r.landing_page_url}>
