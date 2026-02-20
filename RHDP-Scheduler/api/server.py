@@ -49,7 +49,7 @@ logger = logging.getLogger("rhdp_flow.api")
 app = FastAPI(
     title="RHDP-Flow API",
     description="Web API for Red Hat Demo Platform Workshop Automation. Authors: Josh Disraeli, Billy Bethell.",
-    version="1.3.2",
+    version="1.3.3",
 )
 
 # Auth startup check
