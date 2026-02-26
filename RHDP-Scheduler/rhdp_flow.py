@@ -4234,7 +4234,7 @@ _SHOWROOM_REPO_RE = re.compile(r'^(https?://|git@)[a-zA-Z0-9._:/@~-]+$')
 _SHOWROOM_REF_RE = re.compile(r'^[a-zA-Z0-9._/\-]+$')
 
 # Default Showroom chart version for reproducible deployments
-SHOWROOM_CHART_VERSION = "0.4.0"
+SHOWROOM_CHART_VERSION = "0.1.9"
 
 
 def _validate_showroom_inputs(schedule):
