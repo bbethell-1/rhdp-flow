@@ -1,5 +1,47 @@
 # RHDP-Flow TODO List
 
+
+Still giving these links - incorrect and needs to be demo.reaht or depending on cluster youa re on
+
+https://integration.demo.redhat.com/workshops/user-prmedila-redhat-com/openshift-cnv.mig-factory-demo.prod-5g269/details
+[bbethell@billys-fedora RHDP-Scheduler]$ python3 rhdp_flow.py --input /home/bbethell/Downloads/White\ Glove\ Deployments\ -\ Deployments\ \(10\).csv 
+2026-03-04 14:40:14 - rhdp_flow - INFO - ======================================================================
+2026-03-04 14:40:14 - rhdp_flow - INFO - RHDP-Flow: Red Hat Demo Platform Workshop Automation
+2026-03-04 14:40:14 - rhdp_flow - INFO - ======================================================================
+2026-03-04 14:40:14 - rhdp_flow - INFO - Dry-Run Mode: False
+2026-03-04 14:40:14 - rhdp_flow - INFO - Input CSV: /home/bbethell/Downloads/White Glove Deployments - Deployments (10).csv
+2026-03-04 14:40:14 - rhdp_flow - INFO - Output CSV: deployment_results.csv
+2026-03-04 14:40:14 - rhdp_flow - INFO - ======================================================================
+2026-03-04 14:40:14 - rhdp_flow - INFO - Successfully read 5 schedules from /home/bbethell/Downloads/White Glove Deployments - Deployments (10).csv
+2026-03-04 14:40:14 - rhdp_flow - INFO - Processing 5 schedule(s)
+2026-03-04 14:40:14 - rhdp_flow - INFO - Processing schedule: OpenShift Virtualization Migration Factory Demo (openshift-cnv.mig-factory-demo.prod)
+2026-03-04 14:40:15 - rhdp_flow - INFO - Successfully created ResourceClaim: openshift-cnv.mig-factory-demo.prod-5459w in namespace user-prmedila-redhat-com
+2026-03-04 14:40:17 - rhdp_flow - INFO - Deployment is healthy but not ready yet for openshift-cnv.mig-factory-demo.prod-5459w: https://integration.demo.redhat.com/workshops/user-prmedila-redhat-com/openshift-cnv.mig-factory-demo.prod-5459w/details
+2026-03-04 14:40:17 - rhdp_flow - INFO - Schedule processed: OpenShift Virtualization Migration Factory Demo - Status: verified - GUID: openshift-cnv.mig-factory-demo.prod-5459w
+2026-03-04 14:40:18 - rhdp_flow - INFO - Processing schedule: OpenShift Virtualization Migration Factory Demo (openshift-cnv.mig-factory-demo.prod)
+2026-03-04 14:40:19 - rhdp_flow - INFO - Successfully created ResourceClaim: openshift-cnv.mig-factory-demo.prod-lkqj8 in namespace user-prmedila-redhat-com
+2026-03-04 14:40:21 - rhdp_flow - INFO - Deployment is healthy but not ready yet for openshift-cnv.mig-factory-demo.prod-lkqj8: https://integration.demo.redhat.com/workshops/user-prmedila-redhat-com/openshift-cnv.mig-factory-demo.prod-lkqj8/details
+2026-03-04 14:40:21 - rhdp_flow - INFO - Schedule processed: OpenShift Virtualization Migration Factory Demo - Status: verified - GUID: openshift-cnv.mig-factory-demo.prod-lkqj8
+2026-03-04 14:40:22 - rhdp_flow - INFO - Processing schedule: OpenShift Virtualization Migration Factory Demo (openshift-cnv.mig-factory-demo.prod)
+2026-03-04 14:40:23 - rhdp_flow - INFO - Successfully created ResourceClaim: openshift-cnv.mig-factory-demo.prod-5g269 in namespace user-prmedila-redhat-com
+2026-03-04 14:40:25 - rhdp_flow - INFO - Deployment is healthy but not ready yet for openshift-cnv.mig-factory-demo.prod-5g269: https://integration.demo.redhat.com/workshops/user-prmedila-redhat-com/openshift-cnv.mig-factory-demo.prod-5g269/details
+2026-03-04 14:40:25 - rhdp_flow - INFO - Schedule processed: OpenShift Virtualization Migration Factory Demo - Status: verified - GUID: openshift-cnv.mig-factory-demo.prod-5g269
+2026-03-04 14:40:26 - rhdp_flow - INFO - Processing schedule: OpenShift Virtualization Migration Factory Demo (openshift-cnv.mig-factory-demo.prod)
+2026-03-04 14:40:26 - rhdp_flow - INFO - Successfully created ResourceClaim: openshift-cnv.mig-factory-demo.prod-td4hl in namespace user-prmedila-redhat-com
+2026-03-04 14:40:29 - rhdp_flow - INFO - Deployment is healthy but not ready yet for openshift-cnv.mig-factory-demo.prod-td4hl: https://integration.demo.redhat.com/workshops/user-prmedila-redhat-com/openshift-cnv.mig-factory-demo.prod-td4hl/details
+2026-03-04 14:40:29 - rhdp_flow - INFO - Schedule processed: OpenShift Virtualization Migration Factory Demo - Status: verified - GUID: openshift-cnv.mig-factory-demo.prod-td4hl
+2026-03-04 14:40:30 - rhdp_flow - INFO - Processing schedule: OpenShift Virtualization Migration Factory Demo (openshift-cnv.mig-factory-demo.prod)
+2026-03-04 14:40:30 - rhdp_flow - INFO - Successfully created ResourceClaim: openshift-cnv.mig-factory-demo.prod-4z7xk in namespace user-prmedila-redhat-com
+2026-03-04 14:40:33 - rhdp_flow - INFO - Deployment is healthy but not ready yet for openshift-cnv.mig-factory-demo.prod-4z7xk: https://integration.demo.redhat.com/workshops/user-prmedila-redhat-com/openshift-cnv.mig-factory-demo.prod-4z7xk/details
+2026-03-04 14:40:33 - rhdp_flow - INFO - Schedule processed: OpenShift Virtualization Migration Factory Demo - Status: verified - GUID: openshift-cnv.mig-factory-demo.prod-4z7xk
+2026-03-04 14:40:34 - rhdp_flow - INFO - Deployment results written to /home/bbethell/Downloads/deployment_results.csv (5 records)
+2026-03-04 14:40:34 - rhdp_flow - INFO - ======================================================================
+2026-03-04 14:40:34 - rhdp_flow - INFO - Deployment Summary:
+2026-03-04 14:40:34 - rhdp_flow - INFO -   Total: 5
+2026-03-04 14:40:34 - rhdp_flow - INFO -   verified: 5
+
+
+
 1. CSV Generation: Slack vs. Dedicated ToolThe current Slack workflow is likely hitting friction because Slack isn't a spreadsheet editor. You have two paths:Option A: The "Smoother Slack" Flow (Short-term)The Problem: Manual entry in Slack forms is slow and error-prone.The Fix: Use a Slack "Link Trigger" that opens a Modal with Data Validation.Workflow: Instead of a thread, the user fills a structured form $\rightarrow$ Data is sent to a Make.com or Zapier hook $\rightarrow$ CSV is auto-generated and posted back as a file.Option B: The Dedicated "CSV Creator" (Long-term)The Recommendation: If you’re doing this 5+ times a week, build a 1-page Retool or Glide dashboard.Why: You can have dropdowns for "Client Name," "Service Type," and "Priority," ensuring the CSV is perfectly formatted every time without Slack’s character limits or formatting quirks.
   
 
