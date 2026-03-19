@@ -154,4 +154,10 @@ export const api = {
   getSession: (id: string) => request<SessionDetail>(`/sessions/${id}`),
   clearSession: () =>
     request<{ message: string; session_count: number }>('/sessions/clear', { method: 'POST', body: '{}' }),
+
+  // Schedule Management
+  updateSchedules: (schedules: WorkshopSchedule[]) =>
+    request<{ message: string }>('/schedules', { method: 'PUT', body: JSON.stringify(schedules) }),
+  deleteSchedule: (index: number) =>
+    request<{ message: string }>(`/schedules/${index}`, { method: 'DELETE' }),
 };

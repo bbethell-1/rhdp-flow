@@ -20,9 +20,11 @@ import {
   ModalFooter,
   SearchInput,
   Tooltip,
+  TextInput,
 } from '@patternfly/react-core';
 import { Table, Thead, Tbody, Tr, Th, Td, ExpandableRowContent } from '@patternfly/react-table';
 import UploadIcon from '@patternfly/react-icons/dist/esm/icons/upload-icon';
+import TrashIcon from '@patternfly/react-icons/dist/esm/icons/trash-icon';
 
 import { api } from '../services/api';
 import { DiffView } from './DiffView';
@@ -389,7 +391,7 @@ export const UploadTab: React.FC<Props> = ({
     }
   };
 
-  const columnCount = 11;
+  const columnCount = 12;
 
   return (
     <PageSection>
@@ -534,6 +536,7 @@ export const UploadTab: React.FC<Props> = ({
                   <Th>Prov. Date (UTC)</Th>
                   <Th>Auto-Stop (UTC)</Th>
                   <Th>Auto-Destroy (UTC)</Th>
+                  <Th>Actions</Th>
                 </Tr>
               </Thead>
               <Tbody>
@@ -565,9 +568,68 @@ export const UploadTab: React.FC<Props> = ({
                           isReversed
                         />
                       </Td>
-                      <Td dataLabel="Prov. Date (UTC)" className="date-cell">{s.provisioning_date}</Td>
-                      <Td dataLabel="Auto-Stop (UTC)" className="date-cell">{s.auto_stop}</Td>
-                      <Td dataLabel="Auto-Destroy (UTC)" className="date-cell">{s.auto_destroy}</Td>
+                      <Td dataLabel="Prov. Date (UTC)" className="date-cell">
+                        <TextInput
+                          id={`prov-date-${i}`}
+                          value={s.provisioning_date || ''}
+                          onChange={(_e, value) => {
+                            const updated = schedules.map((sc, idx) => idx === i ? { ...sc, provisioning_date: value } : sc);
+                            setSchedules(updated);
+                            // Update backend
+                            api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
+                          }}
+                          placeholder="DD/MM/YYYY HH:MM"
+                          style={{ minWidth: '140px' }}
+                        />
+                      </Td>
+                      <Td dataLabel="Auto-Stop (UTC)" className="date-cell">
+                        <TextInput
+                          id={`auto-stop-${i}`}
+                          value={s.auto_stop || ''}
+                          onChange={(_e, value) => {
+                            const updated = schedules.map((sc, idx) => idx === i ? { ...sc, auto_stop: value } : sc);
+                            setSchedules(updated);
+                            // Update backend
+                            api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
+                          }}
+                          placeholder="DD/MM/YYYY HH:MM"
+                          style={{ minWidth: '140px' }}
+                        />
+                      </Td>
+                      <Td dataLabel="Auto-Destroy (UTC)" className="date-cell">
+                        <TextInput
+                          id={`auto-destroy-${i}`}
+                          value={s.auto_destroy || ''}
+                          onChange={(_e, value) => {
+                            const updated = schedules.map((sc, idx) => idx === i ? { ...sc, auto_destroy: value } : sc);
+                            setSchedules(updated);
+                            // Update backend
+                            api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
+                          }}
+                          placeholder="DD/MM/YYYY HH:MM"
+                          style={{ minWidth: '140px' }}
+                        />
+                      </Td>
+                      <Td dataLabel="Actions">
+                        <Tooltip content="Delete this schedule">
+                          <Button
+                            variant="plain"
+                            aria-label={`Delete ${s.ci_name}`}
+                            onClick={async () => {
+                              try {
+                                await api.deleteSchedule(i);
+                                const newSchedules = schedules.filter((_, idx) => idx !== i);
+                                setSchedules(newSchedules);
+                                showToast(`Deleted ${s.ci_name}`, 'info');
+                              } catch (err) {
+                                showToast(`Failed to delete schedule: ${err}`, 'danger');
+                              }
+                            }}
+                          >
+                            <TrashIcon />
+                          </Button>
+                        </Tooltip>
+                      </Td>
                     </Tr>
                     {expandedRows.has(i) && (
                       <Tr key={`detail-${i}`} isExpanded>

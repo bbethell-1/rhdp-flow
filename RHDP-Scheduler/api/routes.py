@@ -289,6 +289,55 @@ def get_session(session_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Schedule Management
+# ---------------------------------------------------------------------------
+
+@router.put("/schedules")
+def update_schedules(schedules_data: List[dict], _key=Depends(verify_api_key)):
+    """Update the entire schedules list."""
+    global _schedules
+    try:
+        new_schedules = [WorkshopSchedule(**data) for data in schedules_data]
+        with _state_lock:
+            _schedules = new_schedules
+        return {"message": f"Updated {len(new_schedules)} schedules"}
+    except Exception as e:
+        raise HTTPException(400, f"Failed to update schedules: {e}")
+
+
+@router.delete("/schedules/{index}")
+def delete_schedule(index: int, _key=Depends(verify_api_key)):
+    """Delete a schedule by its index."""
+    global _schedules
+    with _state_lock:
+        if index < 0 or index >= len(_schedules):
+            raise HTTPException(404, f"Schedule index {index} not found")
+        deleted_schedule = _schedules.pop(index)
+        return {"message": f"Deleted schedule: {deleted_schedule.ci_name}"}
+
+
+# ---------------------------------------------------------------------------
+# Debug
+# ---------------------------------------------------------------------------
+
+@router.get("/debug/config")
+def debug_config(_key=Depends(verify_api_key)):
+    """Show current deployment configuration for debugging."""
+    config = _get_config()
+    return {
+        "dry_run": config.dry_run,
+        "resource_lock": config.resource_lock,
+        "enable_resource_pools": config.enable_resource_pools,
+        "white_glove": config.white_glove,
+        "redirect": config.redirect,
+        "base_domain": config.base_domain,
+        "kubeconfig_path": config.kubeconfig_path,
+        "schedules_count": len(_schedules),
+        "results_count": len(_deployment_results),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
 
@@ -334,7 +383,7 @@ async def health():
                 r_cat = await loop.run_in_executor(
                     None, _run_oc,
                     "get", "catalogitem", "-n", "babylon-catalog-prod",
-                    "--no-headers", "-o", "name", "--limit=1",
+                    "--no-headers", "-o", "name",
                 )
                 rhdp_ok = r_cat.returncode == 0
             except Exception as exc:
