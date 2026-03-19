@@ -1,2 +1,2 @@
 CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC)
-No Users Column Set,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,,True,pass1,Admin,QA,No Users Workshop,20/03/2026 09:00,20/03/2026 17:00,22/03/2026 09:00
+No Users Column Set,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,,True,pass1,Admin,QA,No Users Workshop,20/03/2026 10:00,20/03/2026 18:00,22/03/2026 10:00
