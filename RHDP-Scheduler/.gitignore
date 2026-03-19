@@ -1,1 +1,8 @@
 logs/
+node_modules/
+.memory/
+.playwright-mcp/
+*.log
+.DS_Store
+.coverage
+*.db
