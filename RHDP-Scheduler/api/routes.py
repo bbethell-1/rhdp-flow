@@ -348,16 +348,15 @@ def get_session(session_id: str):
 # ---------------------------------------------------------------------------
 
 @router.put("/schedules")
-def update_schedules(schedules_data: List[dict], _key=Depends(verify_api_key)):
-    """Update the entire schedules list."""
+def update_schedules(schedules_data: List[WorkshopScheduleResponse], _key=Depends(verify_api_key)):
+    """Update the entire schedules list (Pydantic-validated)."""
     global _schedules
-    try:
-        new_schedules = [WorkshopSchedule(**data) for data in schedules_data]
-        with _state_lock:
-            _schedules = new_schedules
-        return {"message": f"Updated {len(new_schedules)} schedules"}
-    except Exception as e:
-        raise HTTPException(400, f"Failed to update schedules: {e}")
+    new_schedules = [
+        WorkshopSchedule(**s.model_dump()) for s in schedules_data
+    ]
+    with _state_lock:
+        _schedules = new_schedules
+    return {"message": f"Updated {len(new_schedules)} schedules"}
 
 
 @router.delete("/schedules/{index}")
@@ -699,7 +698,7 @@ async def diff_schedules(file: UploadFile = File(...)):
         else:
             os_item = old_map[key]
             diffs = []
-            for field in ("users", "provisioning_date", "auto_stop", "auto_destroy", "password", "workshop_name"):
+            for field in ("users", "provisioning_date", "auto_stop", "auto_destroy", "password", "workshop_name", "instances", "concurrency", "count", "redirect", "white_glove", "salesforce_ids", "aws_regions"):
                 old_val = getattr(os_item, field)
                 new_val = getattr(ns, field)
                 if old_val != new_val:

@@ -177,7 +177,7 @@ const App: React.FC = () => {
                   </span>
                 </Tooltip>
                 <Tooltip content="Toggle between light and dark theme">
-                  <button className="theme-toggle" onClick={toggleTheme}>
+                  <button className="theme-toggle" onClick={toggleTheme} aria-label="Toggle theme" aria-pressed={theme === 'dark'}>
                     {theme === 'dark' ? 'Light mode' : 'Dark mode'}
                   </button>
                 </Tooltip>

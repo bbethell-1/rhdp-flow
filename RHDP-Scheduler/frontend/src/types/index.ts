@@ -144,11 +144,6 @@ export interface ShowroomHealthRequest {
   ci_filter?: string | null;
 }
 
-export interface ShowroomAppSetRequest {
-  ci_filter?: string | null;
-  seat_count?: number | null;
-}
-
 export interface QARequest {
   type: '1' | '2' | 'both';
 }

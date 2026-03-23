@@ -1,181 +1,28 @@
-# RHDP-Flow TODO List
+# RHDP-Flow — Open Issues & Ideas
 
+## Open Issues
 
-Still giving these links - incorrect and needs to be demo.reaht or depending on cluster youa re on
-
-https://integration.demo.redhat.com/workshops/user-prmedila-redhat-com/openshift-cnv.mig-factory-demo.prod-5g269/details
-[bbethell@billys-fedora RHDP-Scheduler]$ python3 rhdp_flow.py --input /home/bbethell/Downloads/White\ Glove\ Deployments\ -\ Deployments\ \(10\).csv 
-2026-03-04 14:40:14 - rhdp_flow - INFO - ======================================================================
-2026-03-04 14:40:14 - rhdp_flow - INFO - RHDP-Flow: Red Hat Demo Platform Workshop Automation
-2026-03-04 14:40:14 - rhdp_flow - INFO - ======================================================================
-2026-03-04 14:40:14 - rhdp_flow - INFO - Dry-Run Mode: False
-2026-03-04 14:40:14 - rhdp_flow - INFO - Input CSV: /home/bbethell/Downloads/White Glove Deployments - Deployments (10).csv
-2026-03-04 14:40:14 - rhdp_flow - INFO - Output CSV: deployment_results.csv
-2026-03-04 14:40:14 - rhdp_flow - INFO - ======================================================================
-2026-03-04 14:40:14 - rhdp_flow - INFO - Successfully read 5 schedules from /home/bbethell/Downloads/White Glove Deployments - Deployments (10).csv
-2026-03-04 14:40:14 - rhdp_flow - INFO - Processing 5 schedule(s)
-2026-03-04 14:40:14 - rhdp_flow - INFO - Processing schedule: OpenShift Virtualization Migration Factory Demo (openshift-cnv.mig-factory-demo.prod)
-2026-03-04 14:40:15 - rhdp_flow - INFO - Successfully created ResourceClaim: openshift-cnv.mig-factory-demo.prod-5459w in namespace user-prmedila-redhat-com
-2026-03-04 14:40:17 - rhdp_flow - INFO - Deployment is healthy but not ready yet for openshift-cnv.mig-factory-demo.prod-5459w: https://integration.demo.redhat.com/workshops/user-prmedila-redhat-com/openshift-cnv.mig-factory-demo.prod-5459w/details
-2026-03-04 14:40:17 - rhdp_flow - INFO - Schedule processed: OpenShift Virtualization Migration Factory Demo - Status: verified - GUID: openshift-cnv.mig-factory-demo.prod-5459w
-2026-03-04 14:40:18 - rhdp_flow - INFO - Processing schedule: OpenShift Virtualization Migration Factory Demo (openshift-cnv.mig-factory-demo.prod)
-2026-03-04 14:40:19 - rhdp_flow - INFO - Successfully created ResourceClaim: openshift-cnv.mig-factory-demo.prod-lkqj8 in namespace user-prmedila-redhat-com
-2026-03-04 14:40:21 - rhdp_flow - INFO - Deployment is healthy but not ready yet for openshift-cnv.mig-factory-demo.prod-lkqj8: https://integration.demo.redhat.com/workshops/user-prmedila-redhat-com/openshift-cnv.mig-factory-demo.prod-lkqj8/details
-2026-03-04 14:40:21 - rhdp_flow - INFO - Schedule processed: OpenShift Virtualization Migration Factory Demo - Status: verified - GUID: openshift-cnv.mig-factory-demo.prod-lkqj8
-2026-03-04 14:40:22 - rhdp_flow - INFO - Processing schedule: OpenShift Virtualization Migration Factory Demo (openshift-cnv.mig-factory-demo.prod)
-2026-03-04 14:40:23 - rhdp_flow - INFO - Successfully created ResourceClaim: openshift-cnv.mig-factory-demo.prod-5g269 in namespace user-prmedila-redhat-com
-2026-03-04 14:40:25 - rhdp_flow - INFO - Deployment is healthy but not ready yet for openshift-cnv.mig-factory-demo.prod-5g269: https://integration.demo.redhat.com/workshops/user-prmedila-redhat-com/openshift-cnv.mig-factory-demo.prod-5g269/details
-2026-03-04 14:40:25 - rhdp_flow - INFO - Schedule processed: OpenShift Virtualization Migration Factory Demo - Status: verified - GUID: openshift-cnv.mig-factory-demo.prod-5g269
-2026-03-04 14:40:26 - rhdp_flow - INFO - Processing schedule: OpenShift Virtualization Migration Factory Demo (openshift-cnv.mig-factory-demo.prod)
-2026-03-04 14:40:26 - rhdp_flow - INFO - Successfully created ResourceClaim: openshift-cnv.mig-factory-demo.prod-td4hl in namespace user-prmedila-redhat-com
-2026-03-04 14:40:29 - rhdp_flow - INFO - Deployment is healthy but not ready yet for openshift-cnv.mig-factory-demo.prod-td4hl: https://integration.demo.redhat.com/workshops/user-prmedila-redhat-com/openshift-cnv.mig-factory-demo.prod-td4hl/details
-2026-03-04 14:40:29 - rhdp_flow - INFO - Schedule processed: OpenShift Virtualization Migration Factory Demo - Status: verified - GUID: openshift-cnv.mig-factory-demo.prod-td4hl
-2026-03-04 14:40:30 - rhdp_flow - INFO - Processing schedule: OpenShift Virtualization Migration Factory Demo (openshift-cnv.mig-factory-demo.prod)
-2026-03-04 14:40:30 - rhdp_flow - INFO - Successfully created ResourceClaim: openshift-cnv.mig-factory-demo.prod-4z7xk in namespace user-prmedila-redhat-com
-2026-03-04 14:40:33 - rhdp_flow - INFO - Deployment is healthy but not ready yet for openshift-cnv.mig-factory-demo.prod-4z7xk: https://integration.demo.redhat.com/workshops/user-prmedila-redhat-com/openshift-cnv.mig-factory-demo.prod-4z7xk/details
-2026-03-04 14:40:33 - rhdp_flow - INFO - Schedule processed: OpenShift Virtualization Migration Factory Demo - Status: verified - GUID: openshift-cnv.mig-factory-demo.prod-4z7xk
-2026-03-04 14:40:34 - rhdp_flow - INFO - Deployment results written to /home/bbethell/Downloads/deployment_results.csv (5 records)
-2026-03-04 14:40:34 - rhdp_flow - INFO - ======================================================================
-2026-03-04 14:40:34 - rhdp_flow - INFO - Deployment Summary:
-2026-03-04 14:40:34 - rhdp_flow - INFO -   Total: 5
-2026-03-04 14:40:34 - rhdp_flow - INFO -   verified: 5
-
-
-
-1. CSV Generation: Slack vs. Dedicated ToolThe current Slack workflow is likely hitting friction because Slack isn't a spreadsheet editor. You have two paths:Option A: The "Smoother Slack" Flow (Short-term)The Problem: Manual entry in Slack forms is slow and error-prone.The Fix: Use a Slack "Link Trigger" that opens a Modal with Data Validation.Workflow: Instead of a thread, the user fills a structured form $\rightarrow$ Data is sent to a Make.com or Zapier hook $\rightarrow$ CSV is auto-generated and posted back as a file.Option B: The Dedicated "CSV Creator" (Long-term)The Recommendation: If you’re doing this 5+ times a week, build a 1-page Retool or Glide dashboard.Why: You can have dropdowns for "Client Name," "Service Type," and "Priority," ensuring the CSV is perfectly formatted every time without Slack’s character limits or formatting quirks.
-  
-
- 2. Evaluate "Andrew’s Tool"Before merging, run it through this "Lightweight vs. Chunky" checklist:The "Addable" Test: Is it a single script or a Dockerized behemoth? If it requires more than 3 environment variables to run, it might be too chunky.The "Maintenance" Test: Does it use libraries we already have in our package.json or requirements.txt? Adding a whole new framework (like moving from Flask to Django just for one tool) is a red flag.Recommendation: If it's too chunky, extract the core logic into a utility function and discard the rest.
-  
-
-   3. Repo Cleanup & Docs ConsolidationYour repo currently has "knowledge leakage"—useful info hidden in deep folders.Proposed Folder StructurePlaintext/root
-├── /src              # Production code
-├── /examples         # THE NEW HOME: Consolidate everything here
-│   ├── basic-csv-gen
-│   ├── white-glove-workflow
-│   └── advanced-api-usage
-├── /docs             # High-level architecture & "The Why"
-│   ├── README.md     # The entry point
-│   └── architecture.md
-└── /tools            # Internal scripts (Andrew's tool goes here)
-
-Cleanup Tasks:Redundancy Audit: Delete any example_old.py or test_backup/ folders. If it’s not in the new /examples folder, it doesn't exist.Doc Migration: Move READMEs out of nested subfolders and into a single, searchable /docs directory or the root.4. UI Integration: Examples-as-CodeTo make the UI more intuitive, don't just link to docs—embed them.In-App Templates: Add a "Load Example" button in the UI that auto-fills the fields with a "White Glove" template.Tooltips: Add (?) icons next to complex fields that link directly to the specific line in your new /docs folder.
-
+- **Landing page URLs on non-prod clusters** — URLs generated for integration/dev clusters should map to the correct domain (e.g. `integration.demo.redhat.com`) rather than the production domain. The `_map_infra_domain()` helper may need additional hostname patterns.
+- **Job history cap** — `api/jobs.py` silently drops jobs once the in-memory list exceeds 100. Consider exposing this limit as a config variable or adding a "truncated" indicator in the UI.
+- **Auth coverage** — `verify_api_key` protects most mutation endpoints but not all (e.g. `PUT /schedules`, `DELETE /schedules/{index}`). Audit and ensure consistent coverage when `RHDP_API_KEY` is set.
 
 ## Backlog
-- [x] ~~**Destroy QA (read-only lifecycle check)** — `POST /api/qa/destroy-check` queries Workshop, WorkshopProvision, and ResourceClaim resources to verify they've been properly destroyed/stopped after scheduled times. Reports per-resource status (not_found/active/overdue) and overall lifecycle status. Never deletes anything. Frontend "Destroy QA" section in QA tab with summary cards and results table. 5 new backend tests.~~
-- [x] ~~**agV num_users validation** — Before deploying, check if the catalog item has a hardcoded `num_users` limit in agnosticV; refuse to deploy more than the cap. `get_catalog_item_num_users_limit()` extracts `openAPIV3Schema.maximum` from the CI definition. Frontend shows danger alert after upload, deploy is blocked when violations exist. API endpoint `POST /api/schedules/validate-num-users` + deploy guard in both `process_schedule()` and the deploy endpoint.~~
-- [x] ~~**Test multi-region split for AWS items**~~ — Covered by 8 unit tests (even/remainder user distribution, region suffixes, underscore replacement, extra_parameters, single workshop + N provisions, concurrency inheritance, 3-region distribution) plus `multi_region.csv` and `one_workshop_two_regions.csv` examples.
-- [x] ~~**Redirect toggle behavior**~~ — Implemented: toggle explicitly sets `labUserInterface.redirect = False` when off (default True). agV defaults do NOT take precedence; the toggle always overrides.
-- [x] ~~**CLI demo videos**~~ — 2 chapter videos in `videos/`: `07-cli-deploy-and-qa`, `08-cli-ops-and-wizard`.
-- [x] ~~**Deployment log file** — Automatically save a timestamped log (txt) for each deployment and QA run. `api/log_capture.py` attaches a FileHandler per deploy/QA run; `GET /api/logs` lists files, `GET /api/logs/{file}` serves them; frontend "Download Log" button on Deployments tab. 7 new tests.~~
 
-## Testing
+- **Persistent storage** — Backend state is entirely in-memory. A lightweight SQLite or file-backed store would survive restarts.
+- **WebSocket for deploy progress** — SSE works but is unidirectional. WebSockets would allow cancel/pause from the client side.
+- **Multi-region deploy preview** — Show the region-split plan (users per region) before deploying.
 
-- [x] Test multi-asset with `Multi_Asset=True` + `Asset_CIs` (old format) vs grouped rows with `Multi_Workshop_Name` (new format) — verify both paths produce correct results and that per-item passwords work in both cases (5 tests: shared password, asset parsing, per-item password propagation, mixed concurrency, graceful degradation)
-- [x] Test Virt Roadshow with 20 users and `Count=2` (2 clusters/instances) (5 tests: 2 named instances, count reset, no expansion for count=1, users not divided, fields preserved)
-- [x] Test multi-region provisioning with an AWS catalog item (8 tests: even/remainder user distribution, region suffixes, underscore replacement, extra_parameters, single workshop + N provisions, concurrency inheritance, 3-region distribution)
-- [x] Test on integration cluster (end-to-end with real `oc` commands) — deployed Workshop + WorkshopProvision, verified lock-enabled, white-glove, URL, lock/unlock operations
-- [x] Verify landing page URLs work correctly and export to CSV automatically (7 tests: URL construction, empty input, tuple return, suffix extraction, CSV format, regular vs multi-workshop URL selection)
+## Completed Milestones
 
-## Documentation
+A comprehensive list of shipped features lives in the [CHANGELOG](CHANGELOG.md). Key highlights:
 
-- [x] Create clear example CSV sheets covering each deployment type — see `docs/examples/`
-- [x] Write clear example commands for deploying and for QA verification — see `docs/USAGE.md`
-- [x] Write examples for operational commands: lock all, extend stop, extend destroy, scale — see `docs/USAGE.md`
-- [x] Add CSV wizard usage examples — see `docs/USAGE.md`
-- [x] Record demo videos — 6 web UI chapters (`videos/01`–`06`) + 2 CLI chapters (`videos/07`–`08`)
-
-## Feature Ideas
-
-- [x] **Update Passwords** — `--update-passwords` detects changed passwords in the CSV and patches existing workshops (`POST /api/operations/update-passwords`)
-- [x] **White Glove CSV Import** — `--import-namespace` generates a schedule CSV from a deployed namespace (`POST /api/operations/import-namespace`)
-- [x] **Master Sheet Sync** — `--sync` compares master vs local CSV by (CI, Namespace) key; reports added/changed/unchanged rows
-- [x] **Business Requirements Document** — High-level BRD for presenting to John and team as a white glove solution (see `RHDP-Flow_BRD.md`)
-
-## Completed Features
-
-- [x] Basic workshop scheduling via ResourceClaim
-- [x] Workshop UI support (direct Workshop creation)
-- [x] Multi-asset workshop support
-- [x] Custom multi-workshop name from CSV
-- [x] QA functions (QA1: setup verification, QA2: deployment status)
-- [x] URL generation (link_to_service and landing_page_url)
-- [x] Student landing page CSV export
-- [x] WorkshopProvision creation for asset workshops
-- [x] Proper catalog namespace detection for event items
-- [x] **Display Name** — Use actual catalog display name in ResourceClaim annotations (PR #25)
-- [x] **Deployment Concurrency** — Add `Concurrency` column to CSV, configurable per workshop
-- [x] **Multiple Instance Support (Count)** — Add `Count` column to CSV, automatically expands into N instances
-- [x] **Multi-Asset Per-Item Passwords** — Rows sharing the same `Multi_Workshop_Name` are auto-grouped; each row has its own CI and password
-- [x] **Lock All** — `--lock` flag sets `demo.redhat.com/lock-enabled` label on workshops
-- [x] **Extend Stop** — `--extend-stop --days N --hours N` extends auto-stop time for workshops
-- [x] **Extend Destroy** — `--extend-destroy --days N --hours N` extends auto-destroy/lifespan time for workshops and provisions
-- [x] **Scale** — `--scale N` sets WorkshopProvision count to target value
-- [x] **Regions (Multi-Region Provisioning)** — `AWS_Region` column supports comma-separated regions; creates one Workshop with multiple regional WorkshopProvisions, users distributed evenly
-- [x] **Interactive CSV Wizard** — `--wizard` launches a rich CLI wizard to generate workshop schedule CSVs interactively
-- [x] **Test Suite** — 130 backend + 47 frontend = 177 tests (see `tests/` and `frontend/src/`)
-- [x] **Fix Workshop URLs** — Map infra domain (`ocp-{env}.infra.open.redhat.com`) to RHDP UI domain (`{env}.demo.redhat.com`) and append `/details` suffix
-- [x] **Fix Lock Label** — Use correct `demo.redhat.com/lock-enabled` label matching RHDP UI (was `resource-lock`)
-- [x] **Remove False-Positive Warning** — Auto-destroy before auto-stop is valid (destroy nullifies stop)
-- [x] **Redirect Toggle** — `labUserInterface.redirect` configurable per-schedule via `Redirect` CSV column (default: True) and per-row toggles in the schedule table. Global "Redirect (all)" switch in Deploy Settings flips all rows; per-row overrides individual schedules
-- [x] **Enhanced CSV Validation** — Duplicate row detection, CI format check, namespace format check, user count reasonableness, auto-stop before provisioning warning
-- [x] **Namespace Existence Validation** — API endpoint checks namespaces exist on cluster after upload; frontend shows danger alert for missing namespaces
-- [x] **Salesforce Campaign vs Opportunity** — New `Salesforce_Type` CSV column (default: `opportunity`) allows specifying `campaign` or `opportunity` type for chargeback
-- [x] **Standardized Logging** — Replaced print() with structured logger in rhdp_flow.py
-- [x] **Deep Health Check** — `/api/health` probes RHDP API reachability
-- [x] **Rate Limiting** — SlowAPI rate limiting on POST/GET endpoints
-- [x] **API Versioning** — `/api/v1/` prefix with backward-compatible `/api/` alias
-- [x] **CORS Configuration** — Configurable origins via `CORS_ORIGINS` env var
-- [x] **Optional API Key Auth** — `RHDP_API_KEY` env var protects mutation endpoints
-- [x] **CSP Headers** — Content Security Policy on all responses
-- [x] **Frontend Test Suite** — Vitest + React Testing Library with 36 component tests
-- [x] **Row Hover / Monospace Dates / Favicon / Tab Titles** — CSS polish and cosmetics
-- [x] **Extend Operation Confirmations** — Confirmation modals for extend-stop and extend-destroy
-- [x] **SSE Auto-Reconnect** — Exponential backoff reconnect (max 5 retries)
-- [x] **Auto-Refresh Hook** — Reusable useAutoRefresh hook for Operations and QA tabs
-- [x] **Graceful Shutdown** — Backend shutdown flag, SSE generators yield closing event
-- [x] **Sortable Columns** — Click column headers to sort on all data tables
-- [x] **Pagination** — Default 20 rows/page on Deployments and QA tabs
-- [x] **Sticky Headers** — Table headers stay visible when scrolling
-- [x] **CSV Template Download** — `GET /api/templates/schedule` with example row
-- [x] **Search on Upload/Operations** — SearchInput on schedule preview and operations history
-- [x] **Retry Failed Deployments** — Per-row and bulk retry via checkbox selection
-- [x] **Keyboard Shortcuts** — 1-5 for tabs, ? for help overlay
-- [x] **URL Hash Routing** — Tab state synced to URL hash for bookmarking
-- [x] **Schedule Diff** — Compare new CSV against loaded schedules (added/removed/changed)
-- [x] **Architecture Diagram** — Mermaid diagram in README
-- [x] **API Documentation Links** — Swagger UI (`/docs`) and ReDoc (`/redoc`) links in README
-- [x] **CHANGELOG** — Keep a Changelog format documenting all batches
-
-## Usage Examples
-
-```bash
-# Normal deployment
-python3 rhdp_flow.py --input-csv workshop_schedule.csv
-
-# Dry-run preview
-python3 rhdp_flow.py --input-csv workshop_schedule.csv --dry-run
-
-# Lock all workshops from CSV
-python3 rhdp_flow.py --input-csv workshop_schedule.csv --lock
-
-# Extend stop time by 2 hours
-python3 rhdp_flow.py --input-csv workshop_schedule.csv --extend-stop --hours 2
-
-# Extend destroy time by 1 day
-python3 rhdp_flow.py --input-csv workshop_schedule.csv --extend-destroy --days 1
-
-# Scale workshops to 40 seats
-python3 rhdp_flow.py --input-csv workshop_schedule.csv --scale 40
-
-# Filter to specific CI
-python3 rhdp_flow.py --input-csv workshop_schedule.csv --ci openshift-cnv.ocp-virt-roadshow-multi-user.prod --scale 30
-
-# Interactive wizard
-python3 rhdp_flow.py --wizard
-```
-
-## CSV Column Reference
-
-Authoritative table (required vs optional, every parser column, Users vs Instances vs Count, Showroom, Archive): **[README.md — CSV Format](README.md#csv-format)**.
+- 169 backend + 47 frontend tests
+- Schedule Builder (advanced editor) with catalog item picker, move/duplicate/add rows, CSV download, inline validation, date format helpers
+- Deployment log capture, retry, SSE streaming
+- QA (QA1/QA2 + destroy check), student landing pages
+- Multi-asset, multi-region, count, concurrency
+- Lock/unlock, extend stop/destroy, scale, disable auto-stop
+- Salesforce campaign/opportunity/CDH, redirect toggle, white glove
+- Interactive CLI wizard, namespace validation, num_users validation
+- Session history, diff view, keyboard shortcuts, dark mode
+- Rate limiting, API key auth, CSP headers, CORS
