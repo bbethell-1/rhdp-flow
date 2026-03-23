@@ -54,6 +54,7 @@ from rhdp_flow import (
     derive_base_domain,
     utc_timestamp_str,
     get_catalog_item_num_users_limit,
+    users_column_ignored_by_catalog_advisory,
 )
 
 from api.models import (
@@ -69,6 +70,7 @@ from api.models import (
     LockRequest,
     NumUsersValidationResponse,
     NumUsersViolation,
+    UsersNotInCatalogAdvisory,
     OperationResponse,
     QARequest,
     QAResultItem,
@@ -200,6 +202,10 @@ def _schedule_to_response(s: WorkshopSchedule) -> WorkshopScheduleResponse:
         multi_workshop_name=s.multi_workshop_name,
         concurrency=s.concurrency, instances=s.instances,
         salesforce_ids=s.salesforce_ids,
+        salesforce_type=s.salesforce_type,
+        aws_regions=s.aws_regions,
+        count=s.count,
+        white_glove=s.white_glove,
         redirect=s.redirect,
         showroom_repo=s.showroom_repo,
         showroom_ref=s.showroom_ref,
@@ -566,13 +572,16 @@ def validate_num_users():
         raise HTTPException(400, "No schedules loaded.")
     config = _get_config()
     violations: List[NumUsersViolation] = []
+    users_not_in_catalog: List[UsersNotInCatalogAdvisory] = []
     limits: Dict[str, int] = {}
     checked = 0
     skipped = 0
     ci_cache: Dict[str, Optional[Dict]] = {}
+    advisory_seen: set = set()
 
-    def _check_ci(ci: str, requested_users: Optional[int], ci_name: str, namespace: str):
+    def _check_ci(ci: str, schedule: WorkshopSchedule):
         nonlocal checked, skipped
+        requested_users = schedule.users
         if requested_users is None or requested_users <= 0:
             skipped += 1
             return
@@ -583,13 +592,19 @@ def validate_num_users():
             skipped += 1
             return
         checked += 1
-        if info.get("maximum") is not None:
+        adv = users_column_ignored_by_catalog_advisory(schedule, ci, info)
+        if adv:
+            key = (schedule.ci_name, schedule.namespace, ci, adv["severity"], adv["message"])
+            if key not in advisory_seen:
+                advisory_seen.add(key)
+                users_not_in_catalog.append(UsersNotInCatalogAdvisory(**adv))
+        if info.get("has_num_users") and info.get("maximum") is not None:
             limits[ci] = info["maximum"]
             if requested_users > info["maximum"]:
                 violations.append(NumUsersViolation(
-                    ci_name=ci_name,
+                    ci_name=schedule.ci_name,
                     ci=ci,
-                    namespace=namespace,
+                    namespace=schedule.namespace,
                     requested_users=requested_users,
                     maximum=info["maximum"],
                     minimum=info.get("minimum"),
@@ -597,14 +612,15 @@ def validate_num_users():
                 ))
 
     for s in _schedules:
-        _check_ci(s.ci, s.users, s.ci_name, s.namespace)
+        _check_ci(s.ci, s)
         # Also check individual asset CIs for multi-asset workshops
         if s.is_multi_asset and s.asset_cis:
             for asset_ci in (c.strip() for c in s.asset_cis.split(",") if c.strip()):
-                _check_ci(asset_ci, s.users, s.ci_name, s.namespace)
+                _check_ci(asset_ci, s)
 
     return NumUsersValidationResponse(
         violations=violations,
+        users_not_in_catalog=users_not_in_catalog,
         checked=checked,
         skipped=skipped,
         limits=limits,
