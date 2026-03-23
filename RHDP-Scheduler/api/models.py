@@ -180,6 +180,19 @@ class QAType(str, Enum):
 
 class QARequest(BaseModel):
     type: QAType = QAType.both
+    namespace: Optional[str] = Field(
+        None,
+        min_length=1,
+        description="Optional namespace override for QA runs; defaults to the loaded schedule namespace",
+    )
+
+    @field_validator("namespace")
+    @classmethod
+    def _strip_namespace(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
 
 
 # ---------------------------------------------------------------------------

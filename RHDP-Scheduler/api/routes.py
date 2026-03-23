@@ -127,6 +127,78 @@ def _schedule_examples_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "docs" / "examples"
 
 
+def _write_qa_csv_for_namespace(namespace: str) -> str:
+    """Write a temporary CSV containing only schedules for one namespace."""
+    filtered = [s for s in _schedules if s.namespace == namespace]
+    if not filtered:
+        raise HTTPException(400, f'No loaded schedules match namespace "{namespace}".')
+
+    fieldnames = [
+        "CI Name",
+        "CI",
+        "Namespace",
+        "Users",
+        "Enable_workshop_interface",
+        "Password",
+        "Activity",
+        "Purpose",
+        "Workshop Name",
+        "Provisioning Date (UTC)",
+        "Auto-stop (UTC)",
+        "Auto-destroy (UTC)",
+        "Multi_Asset",
+        "Asset_CIs",
+        "Multi_Workshop_Name",
+        "Concurrency",
+        "Instances",
+        "Salesforce IDs",
+        "Salesforce_Type",
+        "Count",
+        "AWS_Region",
+        "Redirect",
+        "Showroom_Repo",
+        "Showroom_Ref",
+        "Showroom_NoVNC",
+        "Showroom_Zerotouch",
+        "White_Glove",
+    ]
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".csv", mode="w", newline="", encoding="utf-8")
+    with tmp:
+        writer = csv.DictWriter(tmp, fieldnames=fieldnames)
+        writer.writeheader()
+        for s in filtered:
+            writer.writerow({
+                "CI Name": s.ci_name,
+                "CI": s.ci,
+                "Namespace": s.namespace,
+                "Users": "" if s.users is None else s.users,
+                "Enable_workshop_interface": s.enable_workshop_interface,
+                "Password": s.password,
+                "Activity": s.activity,
+                "Purpose": s.purpose,
+                "Workshop Name": s.workshop_name,
+                "Provisioning Date (UTC)": s.provisioning_date,
+                "Auto-stop (UTC)": s.auto_stop,
+                "Auto-destroy (UTC)": s.auto_destroy,
+                "Multi_Asset": s.is_multi_asset,
+                "Asset_CIs": s.asset_cis,
+                "Multi_Workshop_Name": s.multi_workshop_name,
+                "Concurrency": "" if s.concurrency is None else s.concurrency,
+                "Instances": "" if s.instances is None else s.instances,
+                "Salesforce IDs": s.salesforce_ids,
+                "Salesforce_Type": s.salesforce_type,
+                "Count": "" if s.count is None else s.count,
+                "AWS_Region": s.aws_regions,
+                "Redirect": s.redirect,
+                "Showroom_Repo": s.showroom_repo,
+                "Showroom_Ref": s.showroom_ref,
+                "Showroom_NoVNC": s.showroom_novnc,
+                "Showroom_Zerotouch": s.showroom_zerotouch,
+                "White_Glove": s.white_glove,
+            })
+    return tmp.name
+
+
 # Cached base domain derived from the connected cluster
 _cached_base_domain: Optional[str] = None
 
@@ -1473,16 +1545,21 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
         raise HTTPException(400, "No CSV file available. Upload a CSV first.")
 
     config = _get_config()
-    namespace = _schedules[0].namespace
+    namespace = body.namespace or _schedules[0].namespace
+    qa_csv_path = _csv_filepath
+    temp_csv_path: Optional[str] = None
+    if body.namespace:
+        temp_csv_path = _write_qa_csv_for_namespace(namespace)
+        qa_csv_path = temp_csv_path
     all_raw: List[dict] = []
 
     handler, log_path = start_log_capture("qa")
     try:
         if body.type.value in ("1", "both"):
-            r1 = qa1_verify_setup(_csv_filepath, namespace, config)
+            r1 = qa1_verify_setup(qa_csv_path, namespace, config)
             all_raw.extend(r1)
         if body.type.value in ("2", "both"):
-            r2 = qa2_verify_deployment_status(_csv_filepath, namespace, config)
+            r2 = qa2_verify_deployment_status(qa_csv_path, namespace, config)
             all_raw.extend(r2)
 
         all_results = [QAResultItem(**r) for r in all_raw]
@@ -1496,6 +1573,8 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
         }
     finally:
         stop_log_capture(handler)
+        if temp_csv_path:
+            Path(temp_csv_path).unlink(missing_ok=True)
 
 
 @router.get("/qa/results")

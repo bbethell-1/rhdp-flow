@@ -146,6 +146,7 @@ export interface ShowroomHealthRequest {
 
 export interface QARequest {
   type: '1' | '2' | 'both';
+  namespace?: string | null;
 }
 
 export interface RetryRequest {
@@ -165,6 +166,7 @@ export interface QAResponse {
 export interface QAResult {
   ci_name: string;
   ci: string;
+  namespace?: string;
   status: string;
   deployed: string;
   healthy: boolean | string;

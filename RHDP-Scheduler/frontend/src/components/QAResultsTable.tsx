@@ -72,7 +72,7 @@ export const QAResultsTable: React.FC<{
         <Thead>
           <Tr>
             <Th sort={getSortParams('ci_name')} info={{ tooltip: 'Catalog Item display name' }}>CI Name</Th>
-            <Th sort={getSortParams('ci')} info={{ tooltip: 'Catalog Item identifier (vendor.item.env)' }}>CI</Th>
+            <Th info={{ tooltip: 'Namespace checked during QA' }}>Namespace</Th>
             <Th sort={getSortParams('status')} info={{ tooltip: 'QA verification result: verified or failed' }}>Status</Th>
             <Th info={{ tooltip: 'Whether the workshop was successfully deployed and running' }}>Deployed</Th>
             <Th info={{ tooltip: 'Whether the deployed workshop passed health checks' }}>Healthy</Th>
@@ -83,8 +83,11 @@ export const QAResultsTable: React.FC<{
         <Tbody>
           {paginated.map((r) => (
             <Tr key={`${r.ci_name}-${r.ci}`}>
-              <Td dataLabel="CI Name">{r.ci_name}</Td>
-              <Td dataLabel="CI">{r.ci}</Td>
+              <Td dataLabel="CI Name">
+                <div>{r.ci_name}</div>
+                <div className="qa-ci-meta" title={r.ci}>{r.ci}</div>
+              </Td>
+              <Td dataLabel="Namespace">{r.namespace || '-'}</Td>
               <Td dataLabel="Status"><span className={statusColorClass(r.status)}>{(() => { const Icon = statusIcon(r.status); return Icon ? <Icon style={{ marginRight: 4 }} /> : null; })()}{r.status}</span></Td>
               <Td dataLabel="Deployed">{r.deployed || '-'}</Td>
               <Td dataLabel="Healthy"><span className={healthyColorClass(r.healthy)}>{healthyDisplay(r.healthy)}</span></Td>
