@@ -75,6 +75,10 @@ class DeployRequest(BaseModel):
     redirect: bool = Field(True, description="Enable workshop UI redirect (labUserInterface.redirect)")
     showroom_novnc: bool = Field(False, description="Enable noVNC remote desktop in Showroom")
     showroom_zerotouch: bool = Field(False, description="Use zerotouch Showroom chart with setup/runtime automation")
+    export_yaml_dir: Optional[str] = Field(
+        None,
+        description="If set on dry-run deploy, write ResourceClaim / Workshop / WorkshopProvision YAMLs to this directory on the API host",
+    )
 
 
 class LockRequest(BaseModel):

@@ -282,6 +282,27 @@ def make_oc_dispatcher(overrides=None):
                 return subprocess.CompletedProcess(cmd, 0, stdout="test-rc-abc12", stderr="")
 
             if resource == "catalogitem":
+                if any(a == "json" for a in cmd):
+                    catalog_json = {
+                        "spec": {
+                            "parameters": [
+                                {
+                                    "name": "aws_region",
+                                    "openAPIV3Schema": {
+                                        "type": "string",
+                                        "default": "us-east-2",
+                                    },
+                                },
+                                {
+                                    "name": "ocp4_fips_enable",
+                                    "openAPIV3Schema": {"type": "boolean", "default": False},
+                                },
+                            ]
+                        }
+                    }
+                    return subprocess.CompletedProcess(
+                        cmd, 0, stdout=json.dumps(catalog_json), stderr=""
+                    )
                 return subprocess.CompletedProcess(
                     cmd, 0,
                     stdout="babylon-catalog-prod:Experience OpenShift Virtualization Roadshow",
@@ -580,6 +601,57 @@ class TestBuildResourceClaimPayload(unittest.TestCase):
         payload = build_resource_claim_payload(schedule, config)
         self.assertEqual(payload["spec"]["lifespan"]["end"], "2026-02-17T11:00:00Z")
 
+    @patch("rhdp_flow.subprocess.run")
+    def test_parameter_values_merge_catalog_defaults(self, mock_run):
+        """When not dry-run, ResourceClaim parameterValues include CatalogItem openAPI defaults."""
+        ci_json = {
+            "spec": {
+                "parameters": [
+                    {
+                        "name": "aws_region",
+                        "openAPIV3Schema": {"type": "string", "default": "eu-central-1"},
+                    },
+                    {
+                        "name": "ocp4_fips_enable",
+                        "openAPIV3Schema": {"type": "boolean", "default": True},
+                    },
+                ]
+            }
+        }
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=json.dumps(ci_json), stderr=""
+        )
+        config = make_config(dry_run=False)
+        schedule = make_schedule()
+        payload = build_resource_claim_payload(schedule, config)
+        pv = payload["spec"]["provider"]["parameterValues"]
+        self.assertEqual(pv["aws_region"], "eu-central-1")
+        self.assertEqual(pv["ocp4_fips_enable"], True)
+        self.assertEqual(pv["num_users"], 20)
+
+    @patch("rhdp_flow.subprocess.run")
+    def test_csv_single_aws_region_overrides_catalog_default(self, mock_run):
+        """AWS_Region column (single value) wins over CatalogItem default."""
+        ci_json = {
+            "spec": {
+                "parameters": [
+                    {
+                        "name": "aws_region",
+                        "openAPIV3Schema": {"type": "string", "default": "eu-central-1"},
+                    },
+                ]
+            }
+        }
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=json.dumps(ci_json), stderr=""
+        )
+        config = make_config(dry_run=False)
+        schedule = make_schedule(aws_regions="us-west-2")
+        payload = build_resource_claim_payload(schedule, config)
+        self.assertEqual(
+            payload["spec"]["provider"]["parameterValues"]["aws_region"], "us-west-2"
+        )
+
 
 # ============================================================================
 # GROUP 4: Create ResourceClaim via oc
@@ -718,7 +790,22 @@ class TestCreateWorkshopProvision(unittest.TestCase):
 
     @patch("rhdp_flow.subprocess.run")
     def test_count_and_concurrency(self, mock_run):
-        mock_run.side_effect = make_oc_dispatcher()
+        base = make_oc_dispatcher()
+        captured = []
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if (
+                len(cmd) >= 4
+                and cmd[1] == "create"
+                and cmd[2] == "-f"
+                and os.path.isfile(cmd[3])
+            ):
+                with open(cmd[3]) as f:
+                    captured.append(json.load(f))
+            return base(*args, **kwargs)
+
+        mock_run.side_effect = side_effect
         config = make_config(dry_run=False)
         payload = self._make_rc_payload()
         name = create_workshop_provision(
@@ -726,10 +813,38 @@ class TestCreateWorkshopProvision(unittest.TestCase):
             concurrency=3, count=40
         )
         self.assertEqual(name, "ws-name")
-        # Verify the temp file payload had correct count/concurrency
-        create_call = mock_run.call_args_list[0]
-        cmd = create_call[0][0]
-        self.assertIn("create", cmd)
+        self.assertTrue(captured)
+        wp_payload = captured[-1]
+        self.assertEqual(wp_payload["spec"]["count"], 40)
+        self.assertEqual(wp_payload["spec"]["concurrency"], 3)
+        # Catalog defaults merged from mock catalogitem JSON response
+        self.assertEqual(wp_payload["spec"]["parameters"]["aws_region"], "us-east-2")
+
+    @patch("rhdp_flow.subprocess.run")
+    def test_extra_parameters_override_catalog_region(self, mock_run):
+        base = make_oc_dispatcher()
+        captured = []
+
+        def side_effect(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", [])
+            if (
+                len(cmd) >= 4
+                and cmd[1] == "create"
+                and cmd[2] == "-f"
+                and os.path.isfile(cmd[3])
+            ):
+                with open(cmd[3]) as f:
+                    captured.append(json.load(f))
+            return base(*args, **kwargs)
+
+        mock_run.side_effect = side_effect
+        config = make_config(dry_run=False)
+        payload = self._make_rc_payload()
+        create_workshop_provision(
+            "ws-name", "user-ns", payload, config,
+            extra_parameters={"aws_region": "ap-south-1"},
+        )
+        self.assertEqual(captured[-1]["spec"]["parameters"]["aws_region"], "ap-south-1")
 
     @patch("rhdp_flow.subprocess.run")
     def test_name_suffix(self, mock_run):
@@ -1553,6 +1668,19 @@ class TestCreateParser(unittest.TestCase):
         self.assertTrue(args.extend_stop)
         self.assertEqual(args.days, 1)
         self.assertEqual(args.hours, 2)
+
+    def test_dry_run_export_yaml_arg(self):
+        parser = create_parser()
+        args = parser.parse_args(
+            [
+                "--input-csv", "test.csv",
+                "--dry-run",
+                "--dry-run-export-yaml",
+                "/tmp/yaml-out",
+            ]
+        )
+        self.assertTrue(args.dry_run)
+        self.assertEqual(args.dry_run_export_yaml, "/tmp/yaml-out")
 
 
 # ============================================================================

@@ -20,7 +20,7 @@ from argparse import ArgumentParser
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import Any, List, Dict, Optional, Tuple
 import os
 import re
 import yaml
@@ -72,6 +72,9 @@ def _provider_parameter_values(
     }
     if _should_include_users(schedule) and schedule.users is not None:
         pv["num_users"] = schedule.users
+    regions = [r.strip().replace("_", "-") for r in schedule.aws_regions.split(",") if r.strip()]
+    if len(regions) == 1:
+        pv["aws_region"] = regions[0]
     return pv
 
 
@@ -119,6 +122,8 @@ def _workshop_provision_parameters(param_values: Dict, resourceclaim_payload: Di
     }
     if "num_users" in param_values:
         params["num_users"] = param_values["num_users"]
+    if "aws_region" in param_values:
+        params["aws_region"] = param_values["aws_region"]
     return params
 
 
@@ -189,7 +194,10 @@ class RHDPConfig:
         self.white_glove = True
         self.redirect = True
         self.base_domain = "integration.demo.redhat.com"
-        
+        # When set with dry_run, write ResourceClaim / Workshop / WorkshopProvision YAMLs here
+        self.dry_run_export_yaml_dir: Optional[str] = None
+        self.dry_run_yaml_export_seq: int = 0
+
     def validate(self) -> bool:
         """Validate configuration"""
         # Check if oc command is available
@@ -767,7 +775,13 @@ def build_resource_claim_payload(
     start_timestamp = format_iso8601(provisioning_dt)
     stop_timestamp = format_iso8601(auto_stop_dt)
     destroy_timestamp = format_iso8601(auto_destroy_dt)
-    
+
+    parameter_values = _provider_parameter_values(schedule, start_timestamp, stop_timestamp)
+    if config and not config.dry_run:
+        catalog_defaults = get_catalog_item_parameter_defaults(schedule.ci, config)
+        if catalog_defaults:
+            parameter_values = {**catalog_defaults, **parameter_values}
+
     # Build payload matching actual cluster structure
     payload = {
         "apiVersion": "poolboy.gpte.redhat.com/v1",
@@ -803,7 +817,7 @@ def build_resource_claim_payload(
             },
             "provider": {
                 "name": schedule.ci,
-                "parameterValues": _provider_parameter_values(schedule, start_timestamp, stop_timestamp)
+                "parameterValues": parameter_values,
             }
         }
     }
@@ -832,6 +846,179 @@ def build_resource_claim_payload(
 
     return payload
 
+
+def _strip_internal_manifest_keys(manifest: Dict) -> Dict:
+    """Remove rhdp-flow-only top-level keys (e.g. _white_glove) before writing YAML."""
+    return {k: v for k, v in manifest.items() if not (isinstance(k, str) and k.startswith("_"))}
+
+
+def export_dry_run_manifest_yaml(config: RHDPConfig, filename_stem: str, manifest: Dict) -> Optional[str]:
+    """
+    Write a Kubernetes manifest as YAML when dry-run export directory is configured.
+
+    Returns the output path, or None if nothing was written.
+    """
+    export_dir = getattr(config, "dry_run_export_yaml_dir", None) or ""
+    if not config.dry_run or not export_dir.strip():
+        return None
+    out_dir = Path(export_dir).expanduser().resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    config.dry_run_yaml_export_seq = getattr(config, "dry_run_yaml_export_seq", 0) + 1
+    seq = config.dry_run_yaml_export_seq
+    safe = re.sub(r"[^a-zA-Z0-9._-]+", "_", filename_stem).strip("._-")[:100] or "manifest"
+    path = out_dir / f"{seq:04d}-{safe}.yaml"
+    clean = _strip_internal_manifest_keys(manifest) if isinstance(manifest, dict) else manifest
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(
+            clean,
+            f,
+            default_flow_style=False,
+            sort_keys=False,
+            allow_unicode=True,
+        )
+    logger.info(f"[DRY-RUN] Wrote manifest YAML: {path}")
+    return str(path)
+
+
+def build_workshop_resource_dict(
+    workshop_name_or_prefix: str,
+    namespace: str,
+    resourceclaim_payload: Dict,
+    config: RHDPConfig,
+    redirect: bool,
+) -> Dict:
+    """Build the Workshop object as applied to the cluster (shared by create + dry-run YAML export)."""
+    ci = resourceclaim_payload["spec"]["provider"]["name"]
+    ci_name = resourceclaim_payload["metadata"]["annotations"].get(
+        "babylon.gpte.redhat.com/catalogItemDisplayName", ""
+    )
+    param_values = resourceclaim_payload["spec"]["provider"].get("parameterValues", {})
+    requester_email = resourceclaim_payload["metadata"]["annotations"].get("demo.redhat.com/requester", "")
+    workshop_display_name = resourceclaim_payload["metadata"]["annotations"].get(
+        "rhdp-flow.gpte.redhat.com/workshop-name", ci_name
+    )
+
+    use_generate_name = workshop_name_or_prefix.endswith("-")
+    if use_generate_name:
+        workshop_metadata: Dict = {
+            "generateName": workshop_name_or_prefix,
+            "namespace": namespace,
+        }
+    else:
+        workshop_metadata = {
+            "name": workshop_name_or_prefix,
+            "namespace": namespace,
+        }
+
+    workshop_metadata["annotations"] = {
+        "babylon.gpte.redhat.com/category": "Workshops",
+        "demo.redhat.com/orderedBy": requester_email,
+        "demo.redhat.com/purpose": resourceclaim_payload["metadata"]["annotations"].get(
+            "demo.redhat.com/purpose", "QA"
+        ),
+        "demo.redhat.com/purpose-activity": resourceclaim_payload["metadata"]["annotations"].get(
+            "demo.redhat.com/purpose-activity", "Admin"
+        ),
+        "demo.redhat.com/requester": requester_email,
+    }
+    workshop_metadata["labels"] = {
+        "babylon.gpte.redhat.com/catalogItemName": ci,
+        "babylon.gpte.redhat.com/catalogItemNamespace": "babylon-catalog-prod",
+        "demo.redhat.com/lock-enabled": "true" if config.resource_lock else "false",
+        "demo.redhat.com/white-glove": "true" if config.white_glove else "false",
+    }
+
+    return {
+        "apiVersion": "babylon.gpte.redhat.com/v1",
+        "kind": "Workshop",
+        "metadata": workshop_metadata,
+        "spec": {
+            "displayName": workshop_display_name,
+            "accessPassword": resourceclaim_payload["spec"].get("accessPassword", ""),
+            "actionSchedule": {
+                "start": param_values.get("start_timestamp", ""),
+                "stop": param_values.get("stop_timestamp", ""),
+            },
+            "lifespan": {
+                "start": param_values.get("start_timestamp", ""),
+                "end": resourceclaim_payload["spec"]["lifespan"]["end"],
+                "maximum": "180d",
+                "relativeMaximum": "30d",
+            },
+            "labUserInterface": {
+                "redirect": redirect,
+            },
+            "multiuserServices": "num_users" in param_values,
+            "openRegistration": True,
+        },
+    }
+
+
+def build_workshop_provision_dict(
+    workshop_name: str,
+    namespace: str,
+    resourceclaim_payload: Dict,
+    config: RHDPConfig,
+    concurrency: Optional[int],
+    count: Optional[int],
+    extra_parameters: Optional[Dict],
+    *,
+    fetch_catalog_defaults: bool,
+) -> Dict:
+    """Build the WorkshopProvision object (shared by create + dry-run YAML export)."""
+    count_val = count if count is not None and count > 0 else 1
+    concurrency_val = concurrency if concurrency is not None else 1
+    ci = resourceclaim_payload["spec"]["provider"]["name"]
+    param_values = resourceclaim_payload["spec"]["provider"].get("parameterValues", {})
+    catalog_namespace = resourceclaim_payload["spec"]["provider"].get("namespace", "babylon-catalog-prod")
+
+    explicit_params = _workshop_provision_parameters(param_values, resourceclaim_payload)
+    catalog_defaults: Dict = {}
+    if fetch_catalog_defaults:
+        catalog_defaults = get_catalog_item_parameter_defaults(ci, config, catalog_namespace)
+    merged_parameters = {**catalog_defaults, **explicit_params}
+    if extra_parameters:
+        merged_parameters.update(extra_parameters)
+
+    return {
+        "apiVersion": "babylon.gpte.redhat.com/v1",
+        "kind": "WorkshopProvision",
+        "metadata": {
+            "name": workshop_name,
+            "namespace": namespace,
+            "labels": {
+                "babylon.gpte.redhat.com/catalogItemName": ci,
+                "babylon.gpte.redhat.com/catalogItemNamespace": catalog_namespace,
+                "babylon.gpte.redhat.com/workshop": workshop_name,
+            },
+            "annotations": {
+                "babylon.gpte.redhat.com/category": "Workshops",
+            },
+        },
+        "spec": {
+            "catalogItem": {
+                "name": ci,
+                "namespace": catalog_namespace,
+            },
+            "workshopName": workshop_name,
+            "count": count_val,
+            "concurrency": concurrency_val,
+            "enableResourcePools": config.enable_resource_pools,
+            "actionSchedule": {
+                "start": param_values.get("start_timestamp", ""),
+                "stop": param_values.get("stop_timestamp", ""),
+            },
+            "lifespan": {
+                "start": param_values.get("start_timestamp", ""),
+                "end": resourceclaim_payload["spec"]["lifespan"]["end"],
+            },
+            "autoDetach": resourceclaim_payload["spec"].get("autoDetach", {}),
+            "parameters": merged_parameters,
+            "startDelay": 30,
+        },
+    }
+
+
 def create_resource_claim_via_oc(
     payload: Dict,
     config: RHDPConfig
@@ -852,7 +1039,9 @@ def create_resource_claim_via_oc(
     if config.dry_run:
         logger.info(f"[DRY-RUN] Would create ResourceClaim in namespace {namespace}:")
         logger.debug("ResourceClaim Payload:\n%s", json.dumps(payload, indent=2))
-        
+        ci = payload.get("spec", {}).get("provider", {}).get("name", "resourceclaim")
+        export_dry_run_manifest_yaml(config, f"resourceclaim-{ci}", payload)
+
         # Return a mock GUID for dry-run
         mock_guid = f"{generate_name}dryrun-{int(time.time())}"
         return (mock_guid, namespace, None)
@@ -1121,80 +1310,36 @@ def create_workshop_with_ui(
     if redirect is None:
         redirect = config.redirect
     if config.dry_run:
-        ci = resourceclaim_payload['spec']['provider']['name']
-        pv = resourceclaim_payload['spec']['provider'].get('parameterValues', {})
-        has_num_users = 'num_users' in pv
+        ci = resourceclaim_payload["spec"]["provider"]["name"]
+        pv = resourceclaim_payload["spec"]["provider"].get("parameterValues", {})
+        has_num_users = "num_users" in pv
         logger.info(f"[DRY-RUN] Would create Workshop for {ci} (num_users in payload: {has_num_users})")
-        logger.debug("Workshop payload (spec only):\n%s", json.dumps(resourceclaim_payload.get('spec', resourceclaim_payload), indent=2))
-        prefix = workshop_name_or_prefix.rstrip('-') if workshop_name_or_prefix.endswith('-') else workshop_name_or_prefix
+        logger.debug(
+            "Workshop payload (spec only):\n%s",
+            json.dumps(resourceclaim_payload.get("spec", resourceclaim_payload), indent=2),
+        )
+        if config.dry_run_export_yaml_dir:
+            w_manifest = build_workshop_resource_dict(
+                workshop_name_or_prefix, namespace, resourceclaim_payload, config, redirect
+            )
+            export_dry_run_manifest_yaml(config, f"workshop-{ci}", w_manifest)
+        prefix = (
+            workshop_name_or_prefix.rstrip("-")
+            if workshop_name_or_prefix.endswith("-")
+            else workshop_name_or_prefix
+        )
         return f"{prefix}-dryrun-{int(time.time())}"
     try:
-        # Extract information from ResourceClaim payload
-        ci = resourceclaim_payload['spec']['provider']['name']
-        ci_name = resourceclaim_payload['metadata']['annotations'].get('babylon.gpte.redhat.com/catalogItemDisplayName', '')
-        param_values = resourceclaim_payload['spec']['provider'].get('parameterValues', {})
-        requester_email = resourceclaim_payload['metadata']['annotations'].get('demo.redhat.com/requester', '')
-        # Get workshop display name from CSV (if provided), otherwise use CI name
-        workshop_display_name = resourceclaim_payload['metadata']['annotations'].get('rhdp-flow.gpte.redhat.com/workshop-name', ci_name)
-        
-        # Determine if we need to use generateName or a specific name
-        use_generate_name = workshop_name_or_prefix.endswith('-')
+        use_generate_name = workshop_name_or_prefix.endswith("-")
         if use_generate_name:
-            # Use generateName to let Kubernetes assign the name
-            workshop_metadata = {
-                "generateName": workshop_name_or_prefix,
-                "namespace": namespace,
-            }
             expected_workshop_name = None  # Will be determined after creation
         else:
-            # Use specific name
-            workshop_metadata = {
-                "name": workshop_name_or_prefix,
-                "namespace": namespace,
-            }
             expected_workshop_name = workshop_name_or_prefix
-        
-        # Add annotations and labels to metadata
-        workshop_metadata["annotations"] = {
-            "babylon.gpte.redhat.com/category": "Workshops",
-            "demo.redhat.com/orderedBy": requester_email,
-            "demo.redhat.com/purpose": resourceclaim_payload['metadata']['annotations'].get('demo.redhat.com/purpose', 'QA'),
-            "demo.redhat.com/purpose-activity": resourceclaim_payload['metadata']['annotations'].get('demo.redhat.com/purpose-activity', 'Admin'),
-            "demo.redhat.com/requester": requester_email
-        }
-        workshop_metadata["labels"] = {
-            "babylon.gpte.redhat.com/catalogItemName": ci,
-            "babylon.gpte.redhat.com/catalogItemNamespace": "babylon-catalog-prod",
-            "demo.redhat.com/lock-enabled": "true" if config.resource_lock else "false",
-            "demo.redhat.com/white-glove": "true" if config.white_glove else "false",
-        }
-        
-        # Build Workshop payload with UI enabled from the start
-        workshop = {
-            "apiVersion": "babylon.gpte.redhat.com/v1",
-            "kind": "Workshop",
-            "metadata": workshop_metadata,
-            "spec": {
-                "displayName": workshop_display_name,
-                "accessPassword": resourceclaim_payload['spec'].get('accessPassword', ''),
-                "actionSchedule": {
-                    "start": param_values.get('start_timestamp', ''),
-                    "stop": param_values.get('stop_timestamp', '')
-                },
-                "lifespan": {
-                    "start": param_values.get('start_timestamp', ''),
-                    "end": resourceclaim_payload['spec']['lifespan']['end'],
-                    "maximum": "180d",
-                    "relativeMaximum": "30d"
-                },
-                "labUserInterface": {
-                    "redirect": redirect
-                },
-                "multiuserServices": "num_users" in param_values,
-                "openRegistration": True
-            }
-        }
-        
+
+        workshop = build_workshop_resource_dict(
+            workshop_name_or_prefix, namespace, resourceclaim_payload, config, redirect
+        )
+
         # Create Workshop
         import tempfile
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp_file:
@@ -1306,57 +1451,40 @@ def create_workshop_provision(
     """
     count_val = count if count is not None and count > 0 else 1
     concurrency_val = concurrency if concurrency is not None else 1
+    ci = resourceclaim_payload["spec"]["provider"]["name"]
     if config.dry_run:
-        logger.info(f"[DRY-RUN] Would create WorkshopProvision: {workshop_name} (count={count_val}, concurrency={concurrency_val})")
+        logger.info(
+            f"[DRY-RUN] Would create WorkshopProvision: {workshop_name} "
+            f"(count={count_val}, concurrency={concurrency_val})"
+        )
+        if config.dry_run_export_yaml_dir:
+            wp = build_workshop_provision_dict(
+                workshop_name,
+                namespace,
+                resourceclaim_payload,
+                config,
+                concurrency,
+                count,
+                extra_parameters,
+                fetch_catalog_defaults=True,
+            )
+            stem = f"workshopprovision-{ci}-{workshop_name}"
+            if extra_parameters and extra_parameters.get("aws_region"):
+                stem = f"{stem}-{extra_parameters['aws_region']}"
+            export_dry_run_manifest_yaml(config, stem, wp)
         return workshop_name
     try:
-        # Extract information from ResourceClaim payload
-        ci = resourceclaim_payload['spec']['provider']['name']
-        ci_name = resourceclaim_payload['metadata']['annotations'].get('babylon.gpte.redhat.com/catalogItemDisplayName', '')
-        param_values = resourceclaim_payload['spec']['provider'].get('parameterValues', {})
-        
-        # Get catalog namespace from provider (default to babylon-catalog-prod)
-        catalog_namespace = resourceclaim_payload['spec']['provider'].get('namespace', 'babylon-catalog-prod')
-        
-        # Build WorkshopProvision payload
-        workshop_provision = {
-            "apiVersion": "babylon.gpte.redhat.com/v1",
-            "kind": "WorkshopProvision",
-            "metadata": {
-                "name": workshop_name,
-                "namespace": namespace,
-                "labels": {
-                    "babylon.gpte.redhat.com/catalogItemName": ci,
-                    "babylon.gpte.redhat.com/catalogItemNamespace": catalog_namespace,
-                    "babylon.gpte.redhat.com/workshop": workshop_name
-                },
-                "annotations": {
-                    "babylon.gpte.redhat.com/category": "Workshops"
-                }
-            },
-            "spec": {
-                "catalogItem": {
-                    "name": ci,
-                    "namespace": catalog_namespace
-                },
-                "workshopName": workshop_name,
-                "count": count_val,
-                "concurrency": concurrency_val,
-                "enableResourcePools": config.enable_resource_pools,
-                "actionSchedule": {
-                    "start": param_values.get('start_timestamp', ''),
-                    "stop": param_values.get('stop_timestamp', '')
-                },
-                "lifespan": {
-                    "start": param_values.get('start_timestamp', ''),
-                    "end": resourceclaim_payload['spec']['lifespan']['end']
-                },
-                "autoDetach": resourceclaim_payload['spec'].get('autoDetach', {}),
-                "parameters": _workshop_provision_parameters(param_values, resourceclaim_payload),
-                "startDelay": 30
-            }
-        }
-        
+        workshop_provision = build_workshop_provision_dict(
+            workshop_name,
+            namespace,
+            resourceclaim_payload,
+            config,
+            concurrency,
+            count,
+            extra_parameters,
+            fetch_catalog_defaults=True,
+        )
+
         # Create WorkshopProvision
         import tempfile
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp_file:
@@ -1643,6 +1771,85 @@ def get_catalog_item_num_users_limit(ci: str, config: RHDPConfig) -> Optional[Di
         return {"has_num_users": False, "maximum": None, "minimum": None, "default": None}
     except Exception:
         return None
+
+
+def _catalog_item_parameter_defs_by_name(spec: Dict) -> Dict[str, Dict]:
+    """Merge parameter definitions from all known CatalogItem spec locations; later sources win."""
+    by_name: Dict[str, Dict] = {}
+    sources: List[List[Any]] = []
+    params = spec.get("parameters", [])
+    if isinstance(params, list):
+        sources.append(params)
+    pdefs = spec.get("parameterDefinitions", [])
+    if isinstance(pdefs, list):
+        sources.append(pdefs)
+    prov = spec.get("providerSpec", {}) or {}
+    prov_defs = prov.get("parameterDefinitions", [])
+    if isinstance(prov_defs, list):
+        sources.append(prov_defs)
+    for source in sources:
+        for p in source:
+            if isinstance(p, dict) and p.get("name"):
+                by_name[p["name"]] = p
+    return by_name
+
+
+def _parameter_defaults_from_catalog_spec(spec: Dict) -> Dict:
+    """Map parameter name -> openAPIV3Schema default for WorkshopProvision / ResourceClaim merging."""
+    out: Dict = {}
+    for name, p in _catalog_item_parameter_defs_by_name(spec).items():
+        schema = p.get("openAPIV3Schema")
+        if isinstance(schema, dict) and "default" in schema:
+            out[name] = schema["default"]
+    return out
+
+
+def _try_get_catalog_item_json(ci: str, namespace: str, config: RHDPConfig) -> Optional[Dict]:
+    try:
+        cmd = [
+            config.oc_command,
+            "get", "catalogitem", ci,
+            "-n", namespace,
+            "-o", "json",
+        ]
+        env = os.environ.copy()
+        if config.kubeconfig_path:
+            env["KUBECONFIG"] = config.kubeconfig_path
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=config.timeout, env=env)
+        if result.returncode != 0:
+            return None
+        return json.loads(result.stdout)
+    except Exception:
+        return None
+
+
+def get_catalog_item_parameter_defaults(
+    ci: str,
+    config: RHDPConfig,
+    catalog_namespace: Optional[str] = None,
+) -> Dict:
+    """
+    Load CatalogItem from the cluster and return parameter defaults (openAPIV3Schema.default).
+
+    Used when building WorkshopProvision so unset CSV fields inherit the same defaults as the
+    RHDP UI (e.g. aws_region, cert manager flags). Returns {} if the CatalogItem cannot be read.
+    """
+    primary = "babylon-catalog-event" if ci.endswith(".event") else "babylon-catalog-prod"
+    secondary = (
+        "babylon-catalog-event" if primary == "babylon-catalog-prod" else "babylon-catalog-prod"
+    )
+    to_try: List[str] = []
+    if catalog_namespace:
+        to_try.append(catalog_namespace)
+    if primary not in to_try:
+        to_try.append(primary)
+    if secondary not in to_try:
+        to_try.append(secondary)
+    for ns in to_try:
+        data = _try_get_catalog_item_json(ci, ns, config)
+        if data is not None:
+            return _parameter_defaults_from_catalog_spec(data.get("spec", {}))
+    return {}
 
 
 def get_catalog_item_info(ci: str, config: RHDPConfig) -> Dict[str, str]:
@@ -2097,7 +2304,7 @@ def create_multi_region_workshop(
     remainder = total_users % len(regions)
 
     # Build the ResourceClaim payload for create_workshop_with_ui
-    payload = build_resource_claim_payload(schedule)
+    payload = build_resource_claim_payload(schedule, config)
     generate_name = f"{schedule.ci}-"
 
     workshop_name = create_workshop_with_ui(generate_name, schedule.namespace, payload, config, redirect=schedule.redirect)
@@ -3750,8 +3957,8 @@ def process_schedule(
                 )
 
         # Build payload
-        payload = build_resource_claim_payload(schedule)
-        
+        payload = build_resource_claim_payload(schedule, config)
+
         # If workshop UI is enabled, create Workshop directly without ResourceClaim to avoid duplicates
         if schedule.enable_workshop_interface:
             logger.info(f"Workshop UI enabled - creating Workshop directly (skipping ResourceClaim to avoid duplicate entries)")
@@ -4893,6 +5100,9 @@ Examples:
   # Dry-run mode (safe preview)
   %(prog)s --input-csv workshop_schedule.csv --dry-run
 
+  # Dry-run and write ResourceClaim / Workshop / WorkshopProvision YAMLs to a folder
+  %(prog)s --input-csv workshop_schedule.csv --dry-run --dry-run-export-yaml ./dry-run-manifests
+
   # Process all schedules in CSV
   %(prog)s --input-csv workshop_schedule.csv
 
@@ -4923,6 +5133,13 @@ Examples:
         "--dry-run",
         action="store_true",
         help="Print JSON payloads without creating ResourceClaims"
+    )
+    parser.add_argument(
+        "--dry-run-export-yaml",
+        metavar="DIR",
+        default="",
+        help="With --dry-run, write each ResourceClaim (non-UI path) plus Workshop and "
+        "WorkshopProvision manifests (workshop UI path) as numbered YAML files under DIR",
     )
     parser.add_argument(
         "--kubeconfig",
@@ -5034,7 +5251,12 @@ def main():
     config.dry_run = args.dry_run
     config.kubeconfig_path = args.kubeconfig or os.environ.get('KUBECONFIG')
     config.timeout = args.timeout
-    
+    if getattr(args, "dry_run_export_yaml", ""):
+        if not args.dry_run:
+            parser.error("--dry-run-export-yaml requires --dry-run")
+        config.dry_run_export_yaml_dir = args.dry_run_export_yaml
+        config.dry_run_yaml_export_seq = 0
+
     # Validate configuration
     if not config.validate():
         logger.error("Configuration validation failed")
@@ -5223,7 +5445,13 @@ def main():
             output_path = Path(args.input_csv).parent / output_path
         
         write_deployment_results(results, str(output_path))
-        
+
+        if config.dry_run and getattr(config, "dry_run_yaml_export_seq", 0) > 0 and config.dry_run_export_yaml_dir:
+            logger.info(
+                f"[DRY-RUN] Wrote {config.dry_run_yaml_export_seq} manifest YAML file(s) to "
+                f"{Path(config.dry_run_export_yaml_dir).expanduser().resolve()}"
+            )
+
         # Print summary
         status_counts = {}
         for result in results:
