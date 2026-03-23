@@ -60,6 +60,7 @@ from rhdp_flow import (
 
 from api.models import (
     CatalogItemEntry,
+    CatalogItemParameter,
     DeploymentResultResponse,
     DeployRequest,
     DestroyCheckResponse,
@@ -485,7 +486,18 @@ def get_catalog_items_list(request: Request):
     if not config.validate():
         raise HTTPException(503, "OpenShift client (oc) is not available on the API host")
     raw = list_catalog_items(config)
-    return [CatalogItemEntry(**x) for x in raw]
+    out = []
+    for x in raw:
+        params = [CatalogItemParameter(**p) for p in (x.get("parameters") or [])]
+        out.append(CatalogItemEntry(
+            id=x["id"],
+            display_name=x["display_name"],
+            catalog_namespace=x["catalog_namespace"],
+            description=x.get("description", ""),
+            category=x.get("category", ""),
+            parameters=params,
+        ))
+    return out
 
 
 # ---------------------------------------------------------------------------

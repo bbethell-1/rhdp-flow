@@ -31,12 +31,13 @@ export const SCHEDULE_CSV_HEADERS = [
   'White_Glove',
 ] as const;
 
-function escCell(v: string): string {
-  if (/[",\n\r]/.test(v)) return `"${v.replace(/"/g, '""')}"`;
-  return v;
+function escCell(v: unknown): string {
+  const s = v == null ? '' : String(v);
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
 }
 
-function boolCell(b: boolean): string {
+function boolCell(b: unknown): string {
   return b ? 'True' : 'False';
 }
 
@@ -45,7 +46,7 @@ function optNum(n: number | null | undefined): string {
   return String(n);
 }
 
-/** Build UTF-8 CSV text for download (re-upload compatible). */
+/** Build UTF-8 CSV text (with BOM for Excel) for re-upload compatible download. */
 export function workshopSchedulesToCsv(rows: WorkshopSchedule[]): string {
   const lines: string[] = [SCHEDULE_CSV_HEADERS.join(',')];
   for (const s of rows) {
@@ -71,10 +72,10 @@ export function workshopSchedulesToCsv(rows: WorkshopSchedule[]): string {
         escCell(s.salesforce_ids),
         escCell(s.salesforce_type || 'opportunity'),
         optNum(s.count),
-        escCell(s.aws_regions || ''),
+        escCell(s.aws_regions),
         boolCell(s.redirect),
         escCell(s.showroom_repo),
-        escCell(s.showroom_ref || ''),
+        escCell(s.showroom_ref),
         boolCell(s.showroom_novnc),
         boolCell(s.showroom_zerotouch),
         boolCell(s.white_glove),
@@ -90,6 +91,8 @@ export function downloadTextFile(filename: string, text: string, mime = 'text/cs
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
+  document.body.appendChild(a);
   a.click();
+  document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }

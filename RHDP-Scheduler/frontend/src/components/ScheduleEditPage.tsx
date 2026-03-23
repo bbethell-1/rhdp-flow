@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback, useMemo, type CSSProperties } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react';
 import {
   Alert,
+  Badge,
   Button,
   Card,
   CardBody,
@@ -11,6 +12,11 @@ import {
   FormGroup,
   FormSelect,
   FormSelectOption,
+  Label,
+  Modal,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
   PageSection,
   Split,
   SplitItem,
@@ -19,12 +25,20 @@ import {
   TextInput,
   Title,
   SearchInput,
+  Tooltip,
 } from '@patternfly/react-core';
 import EyeIcon from '@patternfly/react-icons/dist/esm/icons/eye-icon';
 import EyeSlashIcon from '@patternfly/react-icons/dist/esm/icons/eye-slash-icon';
+import PlusCircleIcon from '@patternfly/react-icons/dist/esm/icons/plus-circle-icon';
+import CopyIcon from '@patternfly/react-icons/dist/esm/icons/copy-icon';
+import TrashIcon from '@patternfly/react-icons/dist/esm/icons/trash-icon';
+import DownloadIcon from '@patternfly/react-icons/dist/esm/icons/download-icon';
+import UndoIcon from '@patternfly/react-icons/dist/esm/icons/undo-icon';
+import SaveIcon from '@patternfly/react-icons/dist/esm/icons/save-icon';
+import CheckCircleIcon from '@patternfly/react-icons/dist/esm/icons/check-circle-icon';
 
 import { api, clearApiCache } from '../services/api';
-import type { WorkshopSchedule, CatalogItemEntry } from '../types';
+import type { WorkshopSchedule, CatalogItemEntry, CatalogItemParameter } from '../types';
 import { createBlankWorkshopSchedule } from '../utils/scheduleDefaults';
 import { workshopSchedulesToCsv, downloadTextFile } from '../utils/scheduleCsv';
 
@@ -35,45 +49,92 @@ function parseOptInt(s: string): number | null {
   return Number.isNaN(n) ? null : n;
 }
 
+function findParam(params: CatalogItemParameter[], name: string): CatalogItemParameter | undefined {
+  return params.find((p) => p.name === name);
+}
+
+function paramSummary(p: CatalogItemParameter): string {
+  const parts: string[] = [p.name];
+  if (p.default != null) parts.push(`default: ${p.default}`);
+  if (p.minimum != null && p.maximum != null) parts.push(`${p.minimum}–${p.maximum}`);
+  else if (p.maximum != null) parts.push(`max: ${p.maximum}`);
+  if (p.enum) parts.push(`options: ${p.enum.join(', ')}`);
+  return parts.join(' · ');
+}
+
 type Props = {
   showToast: (msg: string, variant?: 'success' | 'danger' | 'info') => void;
 };
 
 const formGrid: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 380px), 1fr))',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 340px), 1fr))',
   gap: 'var(--pf-v6-global--spacer--md)',
   alignItems: 'start',
 };
 
-const catalogListStyle: CSSProperties = {
-  maxHeight: 280,
-  overflowY: 'auto',
-  border: '1px solid var(--pf-v6-global--BorderColor--100)',
-  borderRadius: 4,
+const sectionTitle: CSSProperties = {
+  gridColumn: '1 / -1',
+  fontWeight: 600,
+  fontSize: '0.95rem',
+  borderBottom: '1px solid var(--pf-v6-global--BorderColor--100)',
+  paddingBottom: 4,
   marginTop: 8,
 };
+
+const catalogListStyle: CSSProperties = {
+  maxHeight: 300,
+  overflowY: 'auto',
+  border: '1px solid var(--pf-v6-global--BorderColor--100)',
+  borderRadius: 6,
+  marginTop: 8,
+  padding: 0,
+};
+
+const catalogItemStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'baseline',
+  gap: 8,
+  padding: '6px 12px',
+  borderBottom: '1px solid var(--pf-v6-global--BorderColor--100)',
+  cursor: 'pointer',
+  transition: 'background 0.1s',
+};
+
+const CATALOG_PAGE_SIZE = 200;
 
 export function ScheduleEditPage({ showToast }: Props) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [drafts, setDrafts] = useState<WorkshopSchedule[]>([]);
+  const [serverSnapshot, setServerSnapshot] = useState<string>('');
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
   const [catalogItems, setCatalogItems] = useState<CatalogItemEntry[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogSearch, setCatalogSearch] = useState('');
+  const [catalogPage, setCatalogPage] = useState(0);
+  const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false);
+  const fieldsRef = useRef<HTMLDivElement>(null);
+
+  const isDirty = useMemo(
+    () => JSON.stringify(drafts) !== serverSnapshot,
+    [drafts, serverSnapshot],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       clearApiCache();
       const rows = await api.getSchedules();
-      setDrafts(rows.map((r) => ({ ...r })));
+      const cloned = rows.map((r) => ({ ...r }));
+      setDrafts(cloned);
+      setServerSnapshot(JSON.stringify(cloned));
       setSelectedIdx(0);
     } catch (e) {
       showToast(`Failed to load schedules: ${e}`, 'danger');
       setDrafts([]);
+      setServerSnapshot('[]');
     } finally {
       setLoading(false);
     }
@@ -88,11 +149,17 @@ export function ScheduleEditPage({ showToast }: Props) {
   }, []);
 
   const handleSave = async () => {
+    const missing = drafts.some((r) => !r.ci.trim() || !r.namespace.trim());
+    if (missing) {
+      showToast('Every row needs at least a CI and Namespace before saving', 'danger');
+      return;
+    }
     setSaving(true);
     try {
       await api.updateSchedules(drafts);
       clearApiCache();
-      showToast(`Saved ${drafts.length} schedule row(s) on the server`, 'success');
+      setServerSnapshot(JSON.stringify(drafts));
+      showToast(`Saved ${drafts.length} schedule(s) to the server`, 'success');
     } catch (e) {
       showToast(`Save failed: ${e}`, 'danger');
     } finally {
@@ -100,46 +167,63 @@ export function ScheduleEditPage({ showToast }: Props) {
     }
   };
 
-  const handleRevert = () => {
-    load();
-    showToast('Reloaded from server', 'info');
+  const handleRevert = async () => {
+    await load();
+    showToast('Reloaded schedules from server', 'info');
   };
 
   const addRow = () => {
-    setDrafts((prev) => {
-      const next = [...prev, createBlankWorkshopSchedule()];
-      setSelectedIdx(next.length - 1);
-      return next;
-    });
-    showToast('Added a new row — fill in CI & namespace, then Save all', 'info');
+    const blank = createBlankWorkshopSchedule();
+    setDrafts((prev) => [...prev, blank]);
+    setSelectedIdx(drafts.length);
+    showToast('New row added — fill in the required fields', 'info');
+    setTimeout(() => fieldsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
   };
 
   const duplicateRow = () => {
-    setDrafts((prev) => {
-      const row = prev[selectedIdx];
-      if (!row) return prev;
-      const copy = { ...row, ci_name: `${row.ci_name || row.ci || 'Row'} (copy)` };
-      const next = [...prev.slice(0, selectedIdx + 1), copy, ...prev.slice(selectedIdx + 1)];
-      setSelectedIdx(selectedIdx + 1);
-      return next;
-    });
+    const row = drafts[selectedIdx];
+    if (!row) return;
+    const base = row.ci_name || row.ci || 'Row';
+    const copy = { ...row, ci_name: `${base} (copy)` };
+    const next = [...drafts.slice(0, selectedIdx + 1), copy, ...drafts.slice(selectedIdx + 1)];
+    setDrafts(next);
+    setSelectedIdx(selectedIdx + 1);
+    showToast('Duplicated row', 'info');
   };
 
   const removeRow = () => {
-    setDrafts((prev) => {
-      if (prev.length === 0) return prev;
-      const next = prev.filter((_, j) => j !== selectedIdx);
-      setSelectedIdx((s) => Math.min(s, Math.max(0, next.length - 1)));
-      return next;
-    });
+    if (drafts.length <= 1) {
+      setDrafts([]);
+      setSelectedIdx(0);
+    } else {
+      const next = drafts.filter((_, j) => j !== selectedIdx);
+      setDrafts(next);
+      setSelectedIdx(Math.min(selectedIdx, next.length - 1));
+    }
+    setConfirmRemoveOpen(false);
+    showToast('Row removed (unsaved)', 'info');
   };
 
   const applyCatalogItem = (item: CatalogItemEntry) => {
-    patch(selectedIdx, {
+    const updates: Partial<WorkshopSchedule> = {
       ci: item.id,
       ci_name: item.display_name || item.id,
-    });
-    showToast(`Set CI to ${item.id}`, 'success');
+    };
+
+    const numUsers = findParam(item.parameters, 'num_users');
+    if (numUsers?.default != null) {
+      updates.users = Number(numUsers.default) || null;
+    }
+
+    const awsRegion = findParam(item.parameters, 'aws_region');
+    if (awsRegion?.default != null && typeof awsRegion.default === 'string') {
+      updates.aws_regions = awsRegion.default;
+    }
+
+    patch(selectedIdx, updates);
+    const filled = Object.keys(updates).filter((k) => k !== 'ci' && k !== 'ci_name');
+    const extra = filled.length ? ` (also set ${filled.join(', ')})` : '';
+    showToast(`Applied "${item.display_name}" to row ${selectedIdx + 1}${extra}`, 'success');
   };
 
   const fetchCatalog = async () => {
@@ -147,10 +231,11 @@ export function ScheduleEditPage({ showToast }: Props) {
     try {
       const items = await api.listCatalogItems();
       setCatalogItems(items);
-      showToast(`Loaded ${items.length} catalog item(s)`, 'success');
+      setCatalogPage(0);
+      showToast(`Loaded ${items.length} catalog item(s) from cluster`, 'success');
     } catch (e) {
       setCatalogItems([]);
-      showToast(`Catalog list failed: ${e}`, 'danger');
+      showToast(`Catalog fetch failed — is the API connected to a cluster? ${e}`, 'danger');
     } finally {
       setCatalogLoading(false);
     }
@@ -162,26 +247,38 @@ export function ScheduleEditPage({ showToast }: Props) {
     return catalogItems.filter(
       (it) =>
         it.id.toLowerCase().includes(q) ||
-        it.display_name.toLowerCase().includes(q),
+        it.display_name.toLowerCase().includes(q) ||
+        it.category.toLowerCase().includes(q) ||
+        it.description.toLowerCase().includes(q),
     );
   }, [catalogItems, catalogSearch]);
 
+  const catalogTotalPages = Math.max(1, Math.ceil(filteredCatalog.length / CATALOG_PAGE_SIZE));
+  const catalogSlice = filteredCatalog.slice(
+    catalogPage * CATALOG_PAGE_SIZE,
+    (catalogPage + 1) * CATALOG_PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setCatalogPage(0);
+  }, [catalogSearch]);
+
   const handleDownloadCsv = () => {
     if (drafts.length === 0) {
-      showToast('Nothing to download', 'danger');
+      showToast('No rows to download', 'danger');
       return;
     }
     const text = workshopSchedulesToCsv(drafts);
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
     downloadTextFile(`schedules-${stamp}.csv`, text);
-    showToast('Downloaded CSV — you can re-upload it on the Upload tab', 'success');
+    showToast('CSV downloaded — re-upload on the Upload tab any time', 'success');
   };
 
   const startBlank = () => {
     setDrafts([createBlankWorkshopSchedule()]);
+    setServerSnapshot('[]');
     setSelectedIdx(0);
     setLoading(false);
-    showToast('Blank row added — pick a catalog item or type CI manually', 'info');
   };
 
   const goBack = () => {
@@ -190,6 +287,7 @@ export function ScheduleEditPage({ showToast }: Props) {
 
   const s = drafts[selectedIdx];
 
+  // ── Loading state ──
   if (loading) {
     return (
       <PageSection>
@@ -198,31 +296,26 @@ export function ScheduleEditPage({ showToast }: Props) {
     );
   }
 
+  // ── Empty state ──
   if (drafts.length === 0) {
     return (
       <PageSection>
         <Title headingLevel="h1" style={{ marginBottom: 16 }}>
-          Schedule builder
+          Schedule Builder
         </Title>
-        <EmptyState titleText="No schedules in this session" headingLevel="h2">
+        <EmptyState titleText="No schedules loaded" headingLevel="h2" icon={PlusCircleIcon}>
           <EmptyStateBody>
-            Start from scratch here, or load CSVs from the Upload tab in the main window and open this page again.
+            Start a blank schedule from scratch, or go back to the Upload tab, load a CSV, then open the editor again.
           </EmptyStateBody>
-          <Split hasGutter>
+          <Split hasGutter style={{ justifyContent: 'center' }}>
             <SplitItem>
-              <Button variant="primary" onClick={startBlank}>
-                Start blank schedule
-              </Button>
+              <Button variant="primary" onClick={startBlank}>Start blank schedule</Button>
             </SplitItem>
             <SplitItem>
-              <Button variant="secondary" onClick={load}>
-                Reload from server
-              </Button>
+              <Button variant="secondary" onClick={load}>Reload from server</Button>
             </SplitItem>
             <SplitItem>
-              <Button variant="link" onClick={goBack}>
-                Back to app
-              </Button>
+              <Button variant="link" onClick={goBack}>Back to app</Button>
             </SplitItem>
           </Split>
         </EmptyState>
@@ -230,42 +323,60 @@ export function ScheduleEditPage({ showToast }: Props) {
     );
   }
 
+  // ── Row validation ──
+  const rowErrors: string[] = [];
+  if (s) {
+    if (!s.ci.trim()) rowErrors.push('CI is required');
+    if (!s.namespace.trim()) rowErrors.push('Namespace is required');
+    if (!s.password.trim()) rowErrors.push('Password is required');
+    if (!s.provisioning_date.trim()) rowErrors.push('Provisioning date is required');
+    if (!s.auto_destroy.trim()) rowErrors.push('Auto-destroy date is required');
+  }
+
   return (
     <PageSection>
-      <Split hasGutter style={{ marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+      {/* ── Toolbar ── */}
+      <Split hasGutter style={{ marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         <SplitItem>
-          <Title headingLevel="h1">Schedule builder</Title>
+          <Title headingLevel="h1" size="xl">Schedule Builder</Title>
+        </SplitItem>
+        <SplitItem>
+          {isDirty ? (
+            <Label color="orange">Unsaved changes</Label>
+          ) : (
+            <Label color="green" icon={<CheckCircleIcon />}>Saved</Label>
+          )}
         </SplitItem>
         <SplitItem isFilled />
         <SplitItem>
-          <Button variant="link" onClick={goBack}>
-            ← Back to app
-          </Button>
+          <Button variant="link" onClick={goBack}>← Back to app</Button>
         </SplitItem>
         <SplitItem>
-          <Button variant="secondary" onClick={handleDownloadCsv} isDisabled={saving}>
-            Download CSV
-          </Button>
+          <Tooltip content="Download current rows as a CSV you can re-upload later">
+            <Button variant="secondary" icon={<DownloadIcon />} onClick={handleDownloadCsv} isDisabled={saving}>
+              Download CSV
+            </Button>
+          </Tooltip>
         </SplitItem>
         <SplitItem>
-          <Button variant="secondary" onClick={handleRevert} isDisabled={saving}>
-            Revert from server
-          </Button>
+          <Tooltip content="Discard local changes and reload from server">
+            <Button variant="secondary" icon={<UndoIcon />} onClick={handleRevert} isDisabled={saving}>
+              Revert
+            </Button>
+          </Tooltip>
         </SplitItem>
         <SplitItem>
-          <Button variant="primary" onClick={handleSave} isLoading={saving} isDisabled={saving}>
-            Save all to server
+          <Button variant="primary" icon={<SaveIcon />} onClick={handleSave} isLoading={saving} isDisabled={saving || !isDirty}>
+            Save all
           </Button>
         </SplitItem>
       </Split>
 
-      <Alert variant="info" isInline title="Tip" style={{ marginBottom: 16 }}>
-        Edits stay in this page until you click <strong>Save all to server</strong>. Refresh the Upload tab (reload the page there) to see the same rows. Use{' '}
-        <strong>Download CSV</strong> to back up or edit offline.
-      </Alert>
+      {/* ── Info alert ── */}
+      <Alert variant="info" isInline isPlain title="Edits are local drafts until you Save. Use Download CSV to back up your work." style={{ marginBottom: 12 }} />
 
-      <Card isCompact style={{ marginBottom: 16 }}>
-        <CardTitle>Rows</CardTitle>
+      {/* ── Row selector ── */}
+      <Card isCompact style={{ marginBottom: 12 }}>
         <CardBody>
           <Split hasGutter style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <SplitItem>
@@ -275,118 +386,200 @@ export function ScheduleEditPage({ showToast }: Props) {
                   value={String(selectedIdx)}
                   onChange={(_e, val) => setSelectedIdx(Number(val))}
                   aria-label="Select schedule row"
+                  style={{ minWidth: 260 }}
                 >
                   {drafts.map((row, i) => (
                     <FormSelectOption
                       key={i}
                       value={String(i)}
-                      label={`${i + 1}. ${row.ci_name || row.ci || '(unnamed)'}`}
+                      label={`${i + 1}. ${row.ci_name || row.ci || '(new row)'}`}
                     />
                   ))}
                 </FormSelect>
               </FormGroup>
             </SplitItem>
             <SplitItem>
-              <Button variant="secondary" onClick={addRow} isDisabled={saving}>
+              <Badge isRead>{drafts.length} row{drafts.length !== 1 ? 's' : ''}</Badge>
+            </SplitItem>
+            <SplitItem isFilled />
+            <SplitItem>
+              <Button variant="secondary" icon={<PlusCircleIcon />} onClick={addRow} isDisabled={saving}>
                 Add row
               </Button>
             </SplitItem>
             <SplitItem>
-              <Button variant="secondary" onClick={duplicateRow} isDisabled={saving || !s}>
-                Duplicate row
+              <Button variant="secondary" icon={<CopyIcon />} onClick={duplicateRow} isDisabled={saving || !s}>
+                Duplicate
               </Button>
             </SplitItem>
             <SplitItem>
-              <Button variant="danger" onClick={removeRow} isDisabled={saving || drafts.length === 0}>
-                Remove row
+              <Button variant="danger" icon={<TrashIcon />} onClick={() => setConfirmRemoveOpen(true)} isDisabled={saving || drafts.length === 0}>
+                Remove
               </Button>
             </SplitItem>
           </Split>
         </CardBody>
       </Card>
 
-      <Card isCompact style={{ marginBottom: 16 }}>
-        <CardTitle>Pick from cluster catalog</CardTitle>
+      {/* ── Remove confirmation modal ── */}
+      <Modal
+        variant="small"
+        isOpen={confirmRemoveOpen}
+        onClose={() => setConfirmRemoveOpen(false)}
+        aria-label="Confirm remove"
+      >
+        <ModalHeader title="Remove row?" />
+        <ModalBody>
+          Remove row {selectedIdx + 1} ({s?.ci_name || s?.ci || 'unnamed'})? This is a local change — click Save to persist it.
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="danger" onClick={removeRow}>Remove</Button>
+          <Button variant="link" onClick={() => setConfirmRemoveOpen(false)}>Cancel</Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* ── Catalog picker ── */}
+      <Card isCompact style={{ marginBottom: 12 }}>
+        <CardTitle>
+          Catalog Item Picker
+          {catalogItems.length > 0 && (
+            <Badge isRead style={{ marginLeft: 8 }}>{catalogItems.length} items</Badge>
+          )}
+        </CardTitle>
         <CardBody>
-          <p style={{ marginTop: 0, fontSize: '0.875rem', color: 'var(--pf-v6-global--Color--200)' }}>
-            Loads CatalogItems from <code>babylon-catalog-prod</code> and <code>babylon-catalog-event</code>. Applies to the <strong>active row</strong>; you can still edit CI name and ID by hand.
-          </p>
           <Split hasGutter style={{ flexWrap: 'wrap', alignItems: 'center' }}>
             <SplitItem>
-              <Button variant="primary" onClick={fetchCatalog} isLoading={catalogLoading}>
+              <Button variant="primary" onClick={fetchCatalog} isLoading={catalogLoading} isDisabled={catalogLoading}>
                 {catalogItems.length ? 'Refresh catalog' : 'Load catalog from cluster'}
               </Button>
             </SplitItem>
-            <SplitItem isFilled style={{ minWidth: 200 }}>
-              <SearchInput
-                placeholder="Filter by name or Catalog Item ID…"
-                value={catalogSearch}
-                onChange={(_e, v) => setCatalogSearch(v)}
-                onClear={() => setCatalogSearch('')}
-              />
-            </SplitItem>
+            {catalogItems.length > 0 && (
+              <SplitItem isFilled style={{ minWidth: 220 }}>
+                <SearchInput
+                  placeholder="Search by name, CI ID, category, or description…"
+                  value={catalogSearch}
+                  onChange={(_e, v) => setCatalogSearch(v)}
+                  onClear={() => setCatalogSearch('')}
+                  aria-label="Filter catalog items"
+                />
+              </SplitItem>
+            )}
           </Split>
+
           {catalogItems.length > 0 && (
-            <div style={catalogListStyle} className="pf-v6-u-p-sm">
-              {filteredCatalog.length === 0 ? (
-                <span style={{ color: 'var(--pf-v6-global--Color--200)' }}>No matches — clear the filter.</span>
-              ) : (
-                <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-                  {filteredCatalog.slice(0, 500).map((it) => (
-                    <li key={`${it.catalog_namespace}/${it.id}`} style={{ marginBottom: 6 }}>
-                      <Button
-                        variant="link"
-                        isInline
+            <>
+              <div style={catalogListStyle}>
+                {catalogSlice.length === 0 ? (
+                  <div style={{ padding: 16, color: 'var(--pf-v6-global--Color--200)' }}>
+                    No matches. Try a different search term.
+                  </div>
+                ) : (
+                  catalogSlice.map((it) => {
+                    const isActive = s && s.ci === it.id;
+                    const keyParams = it.parameters.filter((p) =>
+                      ['num_users', 'aws_region'].includes(p.name) || p.enum,
+                    );
+                    return (
+                      <div
+                        key={`${it.catalog_namespace}/${it.id}`}
+                        role="button"
+                        tabIndex={0}
+                        style={{
+                          ...catalogItemStyle,
+                          flexWrap: 'wrap',
+                          background: isActive ? 'var(--pf-v6-global--palette--blue-50)' : undefined,
+                        }}
+                        onMouseOver={(e) => { if (!isActive) (e.currentTarget.style.background = 'var(--pf-v6-global--BackgroundColor--200)'); }}
+                        onMouseOut={(e) => { e.currentTarget.style.background = isActive ? 'var(--pf-v6-global--palette--blue-50)' : ''; }}
                         onClick={() => applyCatalogItem(it)}
-                        style={{ textAlign: 'left', padding: 0, height: 'auto', whiteSpace: 'normal' }}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); applyCatalogItem(it); } }}
                       >
-                        <strong>{it.display_name}</strong>
-                        <span style={{ color: 'var(--pf-v6-global--Color--200)', fontSize: '0.85rem' }}>
-                          {' '}
-                          — {it.id}
-                        </span>
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
+                        <span style={{ fontWeight: 500, flex: 1, minWidth: 180 }}>{it.display_name}</span>
+                        <span style={{ color: 'var(--pf-v6-global--Color--200)', fontSize: '0.82rem', flexShrink: 0 }}>{it.id}</span>
+                        <Label isCompact color={it.catalog_namespace.includes('event') ? 'orange' : 'blue'}>
+                          {it.catalog_namespace.includes('event') ? 'event' : 'prod'}
+                        </Label>
+                        {it.category && (
+                          <Label isCompact color="grey">{it.category}</Label>
+                        )}
+                        {isActive && <CheckCircleIcon style={{ color: 'var(--pf-v6-global--success-color--100)' }} />}
+                        {(it.description || keyParams.length > 0) && (
+                          <div style={{ width: '100%', fontSize: '0.78rem', color: 'var(--pf-v6-global--Color--200)', marginTop: 2 }}>
+                            {it.description && <span>{it.description.slice(0, 120)}{it.description.length > 120 ? '…' : ''} </span>}
+                            {keyParams.length > 0 && (
+                              <span style={{ fontStyle: 'italic' }}>
+                                {keyParams.map((p) => paramSummary(p)).join(' | ')}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+              {catalogTotalPages > 1 && (
+                <Split hasGutter style={{ marginTop: 6, alignItems: 'center', justifyContent: 'center' }}>
+                  <SplitItem>
+                    <Button variant="plain" size="sm" isDisabled={catalogPage === 0} onClick={() => setCatalogPage((p) => p - 1)}>← Prev</Button>
+                  </SplitItem>
+                  <SplitItem>
+                    <span style={{ fontSize: '0.85rem' }}>Page {catalogPage + 1} of {catalogTotalPages} ({filteredCatalog.length} matches)</span>
+                  </SplitItem>
+                  <SplitItem>
+                    <Button variant="plain" size="sm" isDisabled={catalogPage >= catalogTotalPages - 1} onClick={() => setCatalogPage((p) => p + 1)}>Next →</Button>
+                  </SplitItem>
+                </Split>
               )}
-              {filteredCatalog.length > 500 && (
-                <p style={{ fontSize: '0.8rem', marginBottom: 0 }}>
-                  Showing first 500 matches — narrow the filter to find others.
-                </p>
-              )}
-            </div>
+            </>
           )}
         </CardBody>
       </Card>
 
+      {/* ── Row fields ── */}
       {s && (
-        <Card isCompact>
-          <CardTitle>Fields for row {selectedIdx + 1}</CardTitle>
+        <Card isCompact ref={fieldsRef}>
+          <CardTitle>
+            <Split hasGutter style={{ alignItems: 'center' }}>
+              <SplitItem>Row {selectedIdx + 1} of {drafts.length}</SplitItem>
+              <SplitItem isFilled />
+              {rowErrors.length > 0 && (
+                <SplitItem>
+                  <Label color="orange">{rowErrors.length} missing field{rowErrors.length !== 1 ? 's' : ''}</Label>
+                </SplitItem>
+              )}
+              <SplitItem>
+                <Switch
+                  id="show-password-global"
+                  label="Show passwords"
+                  isChecked={showPassword}
+                  onChange={(_e, c) => setShowPassword(c)}
+                  isReversed
+                />
+              </SplitItem>
+            </Split>
+          </CardTitle>
           <CardBody>
-            <div style={{ marginBottom: 16 }}>
-              <Switch
-                id="show-password-global"
-                label="Show password in plain text"
-                isChecked={showPassword}
-                onChange={(_e, c) => setShowPassword(c)}
-              />
-            </div>
+            {rowErrors.length > 0 && (
+              <Alert variant="warning" isInline isPlain title={rowErrors.join(' · ')} style={{ marginBottom: 12 }} />
+            )}
             <Form>
+              {/* Identity */}
               <div style={formGrid}>
-                <FormGroup label="CI name" fieldId="ci_name">
-                  <TextInput id="ci_name" value={s.ci_name} onChange={(_e, v) => patch(selectedIdx, { ci_name: v })} />
+                <div style={sectionTitle}>Identity</div>
+                <FormGroup label="CI Name" fieldId="ci_name" isRequired>
+                  <TextInput id="ci_name" value={s.ci_name} onChange={(_e, v) => patch(selectedIdx, { ci_name: v })} placeholder="Display name for this workshop" />
                 </FormGroup>
-                <FormGroup label="CI (Catalog Item ID)" fieldId="ci">
-                  <TextInput id="ci" value={s.ci} onChange={(_e, v) => patch(selectedIdx, { ci: v })} />
+                <FormGroup label="CI (Catalog Item ID)" fieldId="ci" isRequired>
+                  <TextInput id="ci" value={s.ci} onChange={(_e, v) => patch(selectedIdx, { ci: v })} validated={!s.ci.trim() ? 'error' : 'default'} placeholder="vendor.item.env" />
                 </FormGroup>
-                <FormGroup label="Namespace" fieldId="namespace">
-                  <TextInput id="namespace" value={s.namespace} onChange={(_e, v) => patch(selectedIdx, { namespace: v })} />
+                <FormGroup label="Namespace" fieldId="namespace" isRequired>
+                  <TextInput id="namespace" value={s.namespace} onChange={(_e, v) => patch(selectedIdx, { namespace: v })} validated={!s.namespace.trim() ? 'error' : 'default'} placeholder="user-you-redhat-com" />
                 </FormGroup>
-                <FormGroup label="Workshop name" fieldId="workshop_name">
-                  <TextInput id="workshop_name" value={s.workshop_name} onChange={(_e, v) => patch(selectedIdx, { workshop_name: v })} />
+                <FormGroup label="Workshop Name" fieldId="workshop_name">
+                  <TextInput id="workshop_name" value={s.workshop_name} onChange={(_e, v) => patch(selectedIdx, { workshop_name: v })} placeholder="Falls back to CI Name" />
                 </FormGroup>
-                <FormGroup label="Password" fieldId="password">
+                <FormGroup label="Password" fieldId="password" isRequired>
                   <Split hasGutter>
                     <SplitItem isFilled>
                       <TextInput
@@ -394,7 +587,9 @@ export function ScheduleEditPage({ showToast }: Props) {
                         type={showPassword ? 'text' : 'password'}
                         value={s.password}
                         onChange={(_e, v) => patch(selectedIdx, { password: v })}
+                        validated={!s.password.trim() ? 'error' : 'default'}
                         autoComplete="off"
+                        placeholder="Workshop access password"
                       />
                     </SplitItem>
                     <SplitItem>
@@ -408,79 +603,93 @@ export function ScheduleEditPage({ showToast }: Props) {
                     </SplitItem>
                   </Split>
                 </FormGroup>
-                <FormGroup label="Users (empty = catalog default)" fieldId="users">
+              </div>
+
+              {/* Scheduling */}
+              <div style={formGrid}>
+                <div style={sectionTitle}>Schedule (UTC)</div>
+                <FormGroup label="Provisioning Date" fieldId="provisioning_date" isRequired>
+                  <TextInput
+                    id="provisioning_date"
+                    value={s.provisioning_date}
+                    onChange={(_e, v) => patch(selectedIdx, { provisioning_date: v })}
+                    validated={!s.provisioning_date.trim() ? 'error' : 'default'}
+                    placeholder="DD/MM/YYYY HH:MM"
+                  />
+                </FormGroup>
+                <FormGroup label="Auto-stop" fieldId="auto_stop">
+                  <TextInput
+                    id="auto_stop"
+                    value={s.auto_stop}
+                    onChange={(_e, v) => patch(selectedIdx, { auto_stop: v })}
+                    placeholder="DD/MM/YYYY HH:MM (optional)"
+                  />
+                </FormGroup>
+                <FormGroup label="Auto-destroy" fieldId="auto_destroy" isRequired>
+                  <TextInput
+                    id="auto_destroy"
+                    value={s.auto_destroy}
+                    onChange={(_e, v) => patch(selectedIdx, { auto_destroy: v })}
+                    validated={!s.auto_destroy.trim() ? 'error' : 'default'}
+                    placeholder="DD/MM/YYYY HH:MM"
+                  />
+                </FormGroup>
+              </div>
+
+              {/* Capacity */}
+              <div style={formGrid}>
+                <div style={sectionTitle}>Capacity &amp; Purpose</div>
+                <FormGroup label="Users" fieldId="users">
                   <TextInput
                     id="users"
+                    type="number"
                     value={s.users == null ? '' : String(s.users)}
                     onChange={(_e, v) => patch(selectedIdx, { users: parseOptInt(v) })}
+                    placeholder="Empty = catalog default"
                   />
                 </FormGroup>
                 <FormGroup label="Instances" fieldId="instances">
                   <TextInput
                     id="instances"
+                    type="number"
                     value={s.instances == null ? '' : String(s.instances)}
                     onChange={(_e, v) => patch(selectedIdx, { instances: parseOptInt(v) })}
+                    placeholder="Seat count for multi-asset"
                   />
                 </FormGroup>
                 <FormGroup label="Concurrency" fieldId="concurrency">
                   <TextInput
                     id="concurrency"
+                    type="number"
                     value={s.concurrency == null ? '' : String(s.concurrency)}
                     onChange={(_e, v) => patch(selectedIdx, { concurrency: parseOptInt(v) })}
+                    placeholder="Default: 1"
                   />
-                </FormGroup>
-                <FormGroup label="Activity" fieldId="activity">
-                  <TextInput id="activity" value={s.activity} onChange={(_e, v) => patch(selectedIdx, { activity: v })} />
-                </FormGroup>
-                <FormGroup label="Purpose" fieldId="purpose">
-                  <TextInput id="purpose" value={s.purpose} onChange={(_e, v) => patch(selectedIdx, { purpose: v })} />
-                </FormGroup>
-                <FormGroup label="Salesforce IDs" fieldId="salesforce_ids">
-                  <TextInput id="salesforce_ids" value={s.salesforce_ids} onChange={(_e, v) => patch(selectedIdx, { salesforce_ids: v })} />
-                </FormGroup>
-                <FormGroup label="Salesforce type" fieldId="salesforce_type">
-                  <TextInput id="salesforce_type" value={s.salesforce_type} onChange={(_e, v) => patch(selectedIdx, { salesforce_type: v })} />
-                </FormGroup>
-                <FormGroup label="AWS regions" fieldId="aws_regions">
-                  <TextInput id="aws_regions" value={s.aws_regions} onChange={(_e, v) => patch(selectedIdx, { aws_regions: v })} />
                 </FormGroup>
                 <FormGroup label="Count" fieldId="count">
                   <TextInput
                     id="count"
+                    type="number"
                     value={s.count == null ? '' : String(s.count)}
                     onChange={(_e, v) => patch(selectedIdx, { count: parseOptInt(v) })}
+                    placeholder="Deployment count"
                   />
                 </FormGroup>
-                <FormGroup label="Provisioning (UTC)" fieldId="provisioning_date">
-                  <TextInput
-                    id="provisioning_date"
-                    value={s.provisioning_date}
-                    onChange={(_e, v) => patch(selectedIdx, { provisioning_date: v })}
-                    placeholder="DD/MM/YYYY HH:MM"
-                  />
+                <FormGroup label="Activity" fieldId="activity">
+                  <TextInput id="activity" value={s.activity} onChange={(_e, v) => patch(selectedIdx, { activity: v })} placeholder="Admin" />
                 </FormGroup>
-                <FormGroup label="Auto-stop (UTC)" fieldId="auto_stop">
-                  <TextInput
-                    id="auto_stop"
-                    value={s.auto_stop}
-                    onChange={(_e, v) => patch(selectedIdx, { auto_stop: v })}
-                    placeholder="DD/MM/YYYY HH:MM"
-                  />
-                </FormGroup>
-                <FormGroup label="Auto-destroy (UTC)" fieldId="auto_destroy">
-                  <TextInput
-                    id="auto_destroy"
-                    value={s.auto_destroy}
-                    onChange={(_e, v) => patch(selectedIdx, { auto_destroy: v })}
-                    placeholder="DD/MM/YYYY HH:MM"
-                  />
+                <FormGroup label="Purpose" fieldId="purpose">
+                  <TextInput id="purpose" value={s.purpose} onChange={(_e, v) => patch(selectedIdx, { purpose: v })} placeholder="QA" />
                 </FormGroup>
               </div>
-              <div style={{ ...formGrid, marginTop: 16 }}>
+
+              {/* Toggles */}
+              <div style={formGrid}>
+                <div style={sectionTitle}>Options</div>
                 <FormGroup label="Workshop UI" fieldId="enable_workshop_interface">
                   <Switch
                     id="enable_workshop_interface"
-                    label="Enable workshop interface"
+                    label="Workshop interface"
                     isChecked={s.enable_workshop_interface}
                     onChange={(_e, c) => patch(selectedIdx, { enable_workshop_interface: c })}
                   />
@@ -488,49 +697,58 @@ export function ScheduleEditPage({ showToast }: Props) {
                 <FormGroup label="Redirect" fieldId="redirect">
                   <Switch id="redirect" label="Lab redirect" isChecked={s.redirect} onChange={(_e, c) => patch(selectedIdx, { redirect: c })} />
                 </FormGroup>
-                <FormGroup label="White glove" fieldId="white_glove">
-                  <Switch
-                    id="white_glove"
-                    label="White glove mode"
-                    isChecked={s.white_glove}
-                    onChange={(_e, c) => patch(selectedIdx, { white_glove: c })}
-                  />
+                <FormGroup label="White Glove" fieldId="white_glove">
+                  <Switch id="white_glove" label="White glove mode" isChecked={s.white_glove} onChange={(_e, c) => patch(selectedIdx, { white_glove: c })} />
                 </FormGroup>
+              </div>
+
+              {/* Multi-asset */}
+              <div style={formGrid}>
+                <div style={sectionTitle}>Multi-Asset</div>
                 <FormGroup label="Multi-asset" fieldId="is_multi_asset">
-                  <Switch
-                    id="is_multi_asset"
-                    label="Multi-asset workshop"
-                    isChecked={s.is_multi_asset}
-                    onChange={(_e, c) => patch(selectedIdx, { is_multi_asset: c })}
-                  />
+                  <Switch id="is_multi_asset" label="Multi-asset workshop" isChecked={s.is_multi_asset} onChange={(_e, c) => patch(selectedIdx, { is_multi_asset: c })} />
                 </FormGroup>
                 <FormGroup label="Asset CIs" fieldId="asset_cis">
-                  <TextInput id="asset_cis" value={s.asset_cis} onChange={(_e, v) => patch(selectedIdx, { asset_cis: v })} />
+                  <TextInput id="asset_cis" value={s.asset_cis} onChange={(_e, v) => patch(selectedIdx, { asset_cis: v })} placeholder="ci1,ci2,ci3" />
                 </FormGroup>
-                <FormGroup label="Multi workshop name" fieldId="multi_workshop_name">
-                  <TextInput id="multi_workshop_name" value={s.multi_workshop_name} onChange={(_e, v) => patch(selectedIdx, { multi_workshop_name: v })} />
+                <FormGroup label="Multi Workshop Name" fieldId="multi_workshop_name">
+                  <TextInput id="multi_workshop_name" value={s.multi_workshop_name} onChange={(_e, v) => patch(selectedIdx, { multi_workshop_name: v })} placeholder="Shared name for grouped assets" />
                 </FormGroup>
-                <FormGroup label="Showroom repo" fieldId="showroom_repo">
-                  <TextInput id="showroom_repo" value={s.showroom_repo} onChange={(_e, v) => patch(selectedIdx, { showroom_repo: v })} />
+              </div>
+
+              {/* Salesforce & regions */}
+              <div style={formGrid}>
+                <div style={sectionTitle}>Salesforce &amp; Regions</div>
+                <FormGroup label="Salesforce IDs" fieldId="salesforce_ids">
+                  <TextInput id="salesforce_ids" value={s.salesforce_ids} onChange={(_e, v) => patch(selectedIdx, { salesforce_ids: v })} placeholder="type:id;type:id or plain IDs" />
                 </FormGroup>
-                <FormGroup label="Showroom ref" fieldId="showroom_ref">
-                  <TextInput id="showroom_ref" value={s.showroom_ref} onChange={(_e, v) => patch(selectedIdx, { showroom_ref: v })} />
+                <FormGroup label="Salesforce Type" fieldId="salesforce_type">
+                  <FormSelect id="salesforce_type" value={s.salesforce_type} onChange={(_e, v) => patch(selectedIdx, { salesforce_type: v })}>
+                    <FormSelectOption value="opportunity" label="opportunity" />
+                    <FormSelectOption value="campaign" label="campaign" />
+                    <FormSelectOption value="project" label="project" />
+                    <FormSelectOption value="cdh" label="cdh" />
+                  </FormSelect>
                 </FormGroup>
-                <FormGroup label="Showroom noVNC" fieldId="showroom_novnc">
-                  <Switch
-                    id="showroom_novnc"
-                    label="noVNC desktop"
-                    isChecked={s.showroom_novnc}
-                    onChange={(_e, c) => patch(selectedIdx, { showroom_novnc: c })}
-                  />
+                <FormGroup label="AWS Regions" fieldId="aws_regions">
+                  <TextInput id="aws_regions" value={s.aws_regions} onChange={(_e, v) => patch(selectedIdx, { aws_regions: v })} placeholder="us-east-1,eu-west-1" />
                 </FormGroup>
-                <FormGroup label="Showroom zerotouch" fieldId="showroom_zerotouch">
-                  <Switch
-                    id="showroom_zerotouch"
-                    label="Zerotouch"
-                    isChecked={s.showroom_zerotouch}
-                    onChange={(_e, c) => patch(selectedIdx, { showroom_zerotouch: c })}
-                  />
+              </div>
+
+              {/* Showroom */}
+              <div style={formGrid}>
+                <div style={sectionTitle}>Showroom</div>
+                <FormGroup label="Repo URL" fieldId="showroom_repo">
+                  <TextInput id="showroom_repo" value={s.showroom_repo} onChange={(_e, v) => patch(selectedIdx, { showroom_repo: v })} placeholder="https://github.com/rhpds/showroom-*.git" />
+                </FormGroup>
+                <FormGroup label="Ref (branch/tag)" fieldId="showroom_ref">
+                  <TextInput id="showroom_ref" value={s.showroom_ref} onChange={(_e, v) => patch(selectedIdx, { showroom_ref: v })} placeholder="main" />
+                </FormGroup>
+                <FormGroup label="noVNC Desktop" fieldId="showroom_novnc">
+                  <Switch id="showroom_novnc" label="noVNC desktop" isChecked={s.showroom_novnc} onChange={(_e, c) => patch(selectedIdx, { showroom_novnc: c })} />
+                </FormGroup>
+                <FormGroup label="Zerotouch" fieldId="showroom_zerotouch">
+                  <Switch id="showroom_zerotouch" label="Zerotouch" isChecked={s.showroom_zerotouch} onChange={(_e, c) => patch(selectedIdx, { showroom_zerotouch: c })} />
                 </FormGroup>
               </div>
             </Form>

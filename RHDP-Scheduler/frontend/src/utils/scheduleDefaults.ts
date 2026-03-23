@@ -27,7 +27,7 @@ export function createBlankWorkshopSchedule(): WorkshopSchedule {
     white_glove: true,
     redirect: true,
     showroom_repo: '',
-    showroom_ref: 'main',
+    showroom_ref: '',
     showroom_novnc: false,
     showroom_zerotouch: false,
   };

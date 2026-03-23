@@ -1794,14 +1794,14 @@ def get_catalog_item_num_users_limit(ci: str, config: RHDPConfig) -> Optional[Di
         return None
 
 
-def list_catalog_items(config: RHDPConfig) -> List[Dict[str, str]]:
+def list_catalog_items(config: RHDPConfig) -> List[Dict]:
     """
     List CatalogItem resources from babylon-catalog-prod and babylon-catalog-event.
 
-    Returns sorted list of dicts with keys: id (metadata.name), display_name,
-    catalog_namespace (OpenShift namespace queried).
+    Returns sorted list of dicts with keys: id, display_name, catalog_namespace,
+    description, category, and a list of parameter summaries extracted from the spec.
     """
-    out: List[Dict[str, str]] = []
+    out: List[Dict] = []
     env = os.environ.copy()
     if config.kubeconfig_path:
         env["KUBECONFIG"] = config.kubeconfig_path
@@ -1831,16 +1831,45 @@ def list_catalog_items(config: RHDPConfig) -> List[Dict[str, str]]:
                 disp = (
                     ann.get("babylon.gpte.redhat.com/catalogItemDisplayName") or name
                 ).strip()
-                out.append(
-                    {
-                        "id": name,
-                        "display_name": disp,
-                        "catalog_namespace": ns,
-                    }
-                )
+                description = (ann.get("babylon.gpte.redhat.com/description") or "").strip()
+                category = (ann.get("babylon.gpte.redhat.com/category") or "").strip()
+
+                params = _extract_catalog_item_parameters(item.get("spec") or {})
+                entry: Dict = {
+                    "id": name,
+                    "display_name": disp,
+                    "catalog_namespace": ns,
+                    "description": description,
+                    "category": category,
+                    "parameters": params,
+                }
+                out.append(entry)
         except Exception as e:
             logger.warning("list_catalog_items failed for %s: %s", ns, e)
     out.sort(key=lambda x: (x["display_name"].lower(), x["id"]))
+    return out
+
+
+def _extract_catalog_item_parameters(spec: Dict) -> List[Dict]:
+    """Build a compact list of parameter summaries from a CatalogItem spec."""
+    by_name = _catalog_item_parameter_defs_by_name(spec)
+    out: List[Dict] = []
+    for name, p in by_name.items():
+        schema = p.get("openAPIV3Schema") or {}
+        entry: Dict = {"name": name}
+        if schema.get("type"):
+            entry["type"] = schema["type"]
+        if "default" in schema:
+            entry["default"] = schema["default"]
+        if "minimum" in schema:
+            entry["minimum"] = schema["minimum"]
+        if "maximum" in schema:
+            entry["maximum"] = schema["maximum"]
+        if "enum" in schema:
+            entry["enum"] = schema["enum"]
+        if p.get("description"):
+            entry["description"] = p["description"]
+        out.append(entry)
     return out
 
 
