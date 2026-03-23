@@ -79,4 +79,4 @@ The tool loads these automatically when the main CSV is `multi_asset_companion.c
 
 ## Column reference
 
-See the [main README — CSV format](../../README.md#csv-format) for required and optional columns.
+See the [main README — CSV format](../../README.md#csv-format) for the **complete** column list (required headers, optional headers, date styles, Users vs **Instances** vs **Count**, Showroom columns, and ignored `Archive`).

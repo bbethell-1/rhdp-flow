@@ -63,34 +63,34 @@ except ImportError:
 # ============================================================================
 
 BASIC_WORKSHOP_CSV = """\
-CI Name,CI,Namespace,Users,Workshop_instance_count,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Count,AWS_Region
-Experience OpenShift Virtualization Roadshow,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,20,2,True,Workshop1,Admin,QA,Virt Roadshow Basic,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,,,,,,
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Instances,Count,AWS_Region
+Experience OpenShift Virtualization Roadshow,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,20,True,Workshop1,Admin,QA,Virt Roadshow Basic,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,,,,,,2,,
 """
 
 MULTI_ASSET_OLD_CSV = """\
-CI Name,CI,Namespace,Users,Workshop_instance_count,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Count,AWS_Region
-Multi Asset Workshop,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,20,,True,Pass1,Admin,QA,Summit Multi,19/02/2026 10:00,19/02/2026 18:00,21/02/2026 10:00,True,"openshift-cnv.ocp-virt-roadshow-multi-user.prod,zt-ansiblebu.ansible-network-automation-basics-lab-2.event",summit-multi-2026,,,
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Instances,Count,AWS_Region
+Multi Asset Workshop,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,20,True,Pass1,Admin,QA,Summit Multi,19/02/2026 10:00,19/02/2026 18:00,21/02/2026 10:00,True,"openshift-cnv.ocp-virt-roadshow-multi-user.prod,zt-ansiblebu.ansible-network-automation-basics-lab-2.event",summit-multi-2026,,,,
 """
 
 MULTI_ASSET_GROUPED_CSV = """\
-CI Name,CI,Namespace,Users,Workshop_instance_count,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Count,AWS_Region
-Virt Roadshow Asset,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,20,,True,VirtPass1,Admin,QA,Summit Demo,19/02/2026 10:00,19/02/2026 18:00,21/02/2026 10:00,,,summit-demo-2026,,,
-Ansible Lab Asset,zt-ansiblebu.ansible-network-automation-basics-lab-2.event,user-bbethell-redhat-com,20,,True,AnsPass2,Admin,QA,Summit Demo,19/02/2026 10:00,19/02/2026 18:00,21/02/2026 10:00,,,summit-demo-2026,,,
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Instances,Count,AWS_Region
+Virt Roadshow Asset,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,20,True,VirtPass1,Admin,QA,Summit Demo,19/02/2026 10:00,19/02/2026 18:00,21/02/2026 10:00,,,summit-demo-2026,,,,
+Ansible Lab Asset,zt-ansiblebu.ansible-network-automation-basics-lab-2.event,user-bbethell-redhat-com,20,True,AnsPass2,Admin,QA,Summit Demo,19/02/2026 10:00,19/02/2026 18:00,21/02/2026 10:00,,,summit-demo-2026,,,,
 """
 
 MULTI_REGION_CSV = (
-    "CI Name,CI,Namespace,Users,Workshop_instance_count,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Count,AWS_Region\n"
-    'Regional Workshop,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,40,,True,RegPass1,Admin,QA,Regional Virt,20/02/2026 10:00,20/02/2026 18:00,22/02/2026 10:00,,,,,,"us-east-1,eu-west-1"\n'
+    "CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Instances,Count,AWS_Region\n"
+    'Regional Workshop,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,40,True,RegPass1,Admin,QA,Regional Virt,20/02/2026 10:00,20/02/2026 18:00,22/02/2026 10:00,,,,,,,"us-east-1,eu-west-1"\n'
 )
 
 COUNT_EXPANSION_CSV = """\
-CI Name,CI,Namespace,Users,Workshop_instance_count,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Count,AWS_Region
-OpenShift AI Workshop,openshift-ai.ai-workshop-multi-user.prod,user-bbethell-redhat-com,40,,True,AIPass1,Admin,Demo,AI Workshop,17/02/2026 10:00,17/02/2026 18:00,19/02/2026 10:00,,,,3,2,
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Instances,Count,AWS_Region
+OpenShift AI Workshop,openshift-ai.ai-workshop-multi-user.prod,user-bbethell-redhat-com,40,True,AIPass1,Admin,Demo,AI Workshop,17/02/2026 10:00,17/02/2026 18:00,19/02/2026 10:00,,,,3,,2,
 """
 
 OLD_DATE_HEADERS_CSV = """\
-CI Name,CI,Namespace,Users,Workshop_instance_count,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date,Auto-stop,Auto-destroy,Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Count,AWS_Region
-Basic Workshop,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,20,,True,Pass1,Admin,QA,Old Headers,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,,,,,,
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date,Auto-stop,Auto-destroy,Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Instances,Count,AWS_Region
+Basic Workshop,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,20,True,Pass1,Admin,QA,Old Headers,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,,,,,,,
 """
 
 MISSING_HEADERS_CSV = """\
@@ -1357,9 +1357,9 @@ class TestMainCLI(unittest.TestCase):
     def test_ci_filter(self, mock_run):
         mock_run.side_effect = make_oc_dispatcher()
         csv_text = """\
-CI Name,CI,Namespace,Users,Workshop_instance_count,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Count,AWS_Region
-Workshop A,ci-a.prod,user-ns,20,,True,Pass1,Admin,QA,WS A,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,,,,,,
-Workshop B,ci-b.prod,user-ns,20,,True,Pass2,Admin,QA,WS B,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,,,,,,
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Instances,Count,AWS_Region
+Workshop A,ci-a.prod,user-ns,20,True,Pass1,Admin,QA,WS A,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,,,,,,,
+Workshop B,ci-b.prod,user-ns,20,True,Pass2,Admin,QA,WS B,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,,,,,,,
 """
         csv_path = self._write(csv_text)
         output_path = tempfile.NamedTemporaryFile(suffix=".csv", delete=False).name
@@ -1940,8 +1940,8 @@ class TestCountExpansion(unittest.TestCase):
         """Count=1 produces exactly 1 result with original workshop_name (no Instance suffix)."""
         mock_run.side_effect = make_oc_dispatcher()
         csv_text = """\
-CI Name,CI,Namespace,Users,Workshop_instance_count,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Count,AWS_Region
-Single Workshop,openshift-ai.ai-workshop-multi-user.prod,user-bbethell-redhat-com,40,,True,Pass1,Admin,Demo,Single WS,17/02/2026 10:00,17/02/2026 18:00,19/02/2026 10:00,,,,3,1,
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Instances,Count,AWS_Region
+Single Workshop,openshift-ai.ai-workshop-multi-user.prod,user-bbethell-redhat-com,40,True,Pass1,Admin,Demo,Single WS,17/02/2026 10:00,17/02/2026 18:00,19/02/2026 10:00,,,,3,,1,
 """
         csv_path = self._write(csv_text)
         output_path = tempfile.NamedTemporaryFile(suffix=".csv", delete=False).name

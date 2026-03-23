@@ -1272,36 +1272,68 @@ def export_results():
 
 @router.get("/templates/schedule")
 def download_template():
-    """Download a CSV template with headers and an example row."""
+    """Download a CSV template with headers and an example row.
+
+    Headers match ``read_csv_input`` in rhdp_flow.py (case-insensitive).
+    """
     output = io.StringIO()
     fieldnames = [
-        "CI Name", "Catalog Item", "Namespace", "Users", "Instances",
-        "Workshop Name", "Enable Workshop Interface", "Password", "Activity",
-        "Purpose", "Provisioning Date", "Auto Stop", "Auto Destroy",
-        "Concurrency", "Salesforce IDs", "Is Multi-Asset", "Asset CIs",
-        "Multi Workshop Name",
+        "CI Name",
+        "CI",
+        "Namespace",
+        "Users",
+        "Enable_workshop_interface",
+        "Password",
+        "Activity",
+        "Purpose",
+        "Workshop Name",
+        "Provisioning Date (UTC)",
+        "Auto-stop (UTC)",
+        "Auto-destroy (UTC)",
+        "Multi_Asset",
+        "Asset_CIs",
+        "Multi_Workshop_Name",
+        "Concurrency",
+        "Instances",
+        "Salesforce IDs",
+        "Salesforce_Type",
+        "Count",
+        "AWS_Region",
+        "Redirect",
+        "Showroom_Repo",
+        "Showroom_Ref",
+        "Showroom_NoVNC",
+        "Showroom_Zerotouch",
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
     writer.writerow({
         "CI Name": "Example Workshop",
-        "Catalog Item": "vendor.workshop.prod",
+        "CI": "vendor.workshop.prod",
         "Namespace": "user-ns",
         "Users": "30",
-        "Instances": "",
-        "Workshop Name": "my-workshop",
-        "Enable Workshop Interface": "Yes",
+        "Enable_workshop_interface": "True",
         "Password": "changeme",
         "Activity": "Training",
         "Purpose": "Demo",
-        "Provisioning Date": "15/03/2025 09:00",
-        "Auto Stop": "15/03/2025 17:00",
-        "Auto Destroy": "16/03/2025 09:00",
+        "Workshop Name": "my-workshop",
+        "Provisioning Date (UTC)": "15/03/2025 09:00",
+        "Auto-stop (UTC)": "15/03/2025 17:00",
+        "Auto-destroy (UTC)": "16/03/2025 09:00",
+        "Multi_Asset": "",
+        "Asset_CIs": "",
+        "Multi_Workshop_Name": "",
         "Concurrency": "",
+        "Instances": "",
         "Salesforce IDs": "",
-        "Is Multi-Asset": "No",
-        "Asset CIs": "",
-        "Multi Workshop Name": "",
+        "Salesforce_Type": "",
+        "Count": "",
+        "AWS_Region": "",
+        "Redirect": "",
+        "Showroom_Repo": "",
+        "Showroom_Ref": "",
+        "Showroom_NoVNC": "",
+        "Showroom_Zerotouch": "",
     })
     output.seek(0)
     return StreamingResponse(

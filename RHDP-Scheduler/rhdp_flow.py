@@ -329,7 +329,7 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
     - CI Name
     - CI (Catalog Item ID)
     - Namespace
-    - Users
+    - Users (header required; cell may be empty = no override)
     - Enable_workshop_interface
     - Password
     - Activity (e.g., "Admin")
@@ -337,9 +337,16 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
     - Provisioning Date (or Provisioning Date (UTC))
     - Auto-stop (or Auto-stop (UTC))
     - Auto-destroy (or Auto-destroy (UTC))
-    
+
+    Optional columns (all): Workshop Name, Multi_Asset, Asset_CIs,
+    Multi_Workshop_Name, Concurrency, Instances, Salesforce IDs (alias campaign_id),
+    Salesforce_Type, Count, AWS_Region, Redirect, Showroom_Repo, Showroom_Ref,
+    Showroom_NoVNC, Showroom_Zerotouch.
+
     An optional "Archive" column is ignored if present (any value or blank);
     it is not used by the script and can be used for your own logic.
+
+    Full reference: README.md (CSV Format section).
     
     Args:
         filepath: Path to input CSV file
@@ -423,17 +430,10 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                     is_multi_asset_str = row.get(header_map.get('multi_asset', 'Multi_Asset'), '').strip()
                     asset_cis = row.get(header_map.get('asset_cis', 'Asset_CIs'), '').strip()
                     multi_workshop_name = row.get(header_map.get('multi_workshop_name', 'Multi_Workshop_Name'), '').strip()
-                    # Workshop instance / seat count (WorkshopProvision.spec.count source via schedule.instances):
-                    # - If "instances" header exists: use that cell (trimmed). If the cell is blank, treat as empty.
-                    # - If still empty and "workshop_instance_count" header exists: use that cell.
-                    # - If neither header exists, or both cells are blank: instances_str stays "" → instances stays
-                    #   None below; create_workshop_provision then uses its existing default (count 1).
+                    # Optional Instances column → schedule.instances (WorkshopProvision.spec.count). No default in CSV;
+                    # blank or missing column leaves instances unset (downstream uses existing provision default).
                     instances_key = header_map.get("instances")
                     instances_str = row.get(instances_key, "").strip() if instances_key else ""
-                    if not instances_str:
-                        wic_key = header_map.get("workshop_instance_count")
-                        if wic_key:
-                            instances_str = row.get(wic_key, "").strip()
                     concurrency_str = row.get(header_map.get('concurrency', 'Concurrency'), '').strip()
                     salesforce_ids = row.get(header_map.get('salesforce ids', header_map.get('campaign_id', 'Salesforce IDs')), '').strip()
                     salesforce_type = row.get(header_map.get('salesforce_type', header_map.get('salesforce type', 'Salesforce_Type')), '').strip().lower() or 'opportunity'

@@ -178,27 +178,4 @@ python3 rhdp_flow.py --wizard
 
 ## CSV Column Reference
 
-| Column | Required | Default | Description |
-|--------|----------|---------|-------------|
-| CI Name | Yes | - | Display name for the catalog item |
-| CI | Yes | - | Catalog Item ID |
-| Namespace | Yes | - | Kubernetes namespace |
-| Users | No | unset | Number of users/seats; empty = no override |
-| Enable_workshop_interface | Yes | - | Enable Workshop UI (True/False) |
-| Password | Yes | - | Access password |
-| Activity | Yes | Admin | Purpose activity |
-| Purpose | Yes | QA | Purpose |
-| Workshop Name | No | CI Name | Display name for the workshop |
-| Provisioning Date (UTC) | Yes | - | DD/MM/YYYY HH:MM format |
-| Auto-stop (UTC) | Yes | - | DD/MM/YYYY HH:MM format |
-| Auto-destroy (UTC) | Yes | - | DD/MM/YYYY HH:MM format |
-| Multi_Asset | No | False | Old-style multi-asset flag |
-| Asset_CIs | No | - | Old-style comma-separated asset CIs |
-| Multi_Workshop_Name | No | - | Group rows into a multi-asset workshop (new style: per-item passwords) |
-| Concurrency | No | 1 | Deployment concurrency |
-| Instances | No | - | Seat count for multi-asset workshops |
-| Count | No | 1 | Number of instances to create |
-| AWS_Region | No | - | Comma-separated AWS regions for multi-region |
-| Salesforce IDs | No | - | Salesforce items; plain ID or `type:id` pairs separated by `;` (e.g. `opportunity:71456169;campaign:701Pe00000wHJg2IAG;project:P144`) |
-| Salesforce_Type | No | opportunity | Default type when IDs have no prefix: `opportunity`, `campaign`, `project`, or `cdh` |
-| Redirect | No | True | Per-schedule `labUserInterface.redirect`; False/0/No/N disables |
+Authoritative table (required vs optional, every parser column, Users vs Instances vs Count, Showroom, Archive): **[README.md — CSV Format](README.md#csv-format)**.

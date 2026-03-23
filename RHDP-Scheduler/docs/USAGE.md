@@ -120,7 +120,7 @@ npm run build
 
 ### CSV Template Download
 
-Click **Download CSV Template** in the Upload tab toolbar to get a pre-formatted CSV with all column headers and an example row. Available at `GET /api/templates/schedule`.
+Click **Download CSV Template** in the Upload tab toolbar to get a CSV whose headers match `read_csv_input()` (required + optional columns such as Showroom and Salesforce). The example row validates when uploaded. Endpoint: `GET /api/templates/schedule`. For semantics of each column, see **[README.md — CSV Format](../README.md#csv-format)** (authoritative list).
 
 ### Keyboard Shortcuts
 

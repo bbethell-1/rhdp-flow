@@ -190,35 +190,84 @@ After uploading a CSV, the **Deploy Settings** card appears with three toggles:
 
 ## CSV Format
 
-The schedule CSV uses these columns (order doesn't matter, column names are case-insensitive):
+Schedule files are read by `read_csv_input()` in `rhdp_flow.py`.
+
+### General rules
+
+- **Column order** does not matter.
+- **Header names** are matched **case-insensitively** (spaces and underscores are preserved as you type them in the file).
+- **`Archive`**: optional column. If present, it is **ignored** by the tool (any value or blank). Use it for your own filtering or spreadsheet workflows.
+- **Dates** use **`DD/MM/YYYY HH:MM`** (24-hour). **Auto-stop** may be empty on a row when you intentionally omit a stop time (same rules as cluster/RHDP expectations).
+
+### Required headers
+
+These header names **must** appear in the file (case-insensitive match):
+
+| Column | Row values |
+|--------|------------|
+| `CI Name` | Display name for the workshop |
+| `CI` | Catalog Item ID (e.g. `openshift-cnv.ocp-virt-roadshow-multi-user.prod`) |
+| `Namespace` | Target OpenShift namespace |
+| `Users` | **Header required**; cell may be **empty** (means “do not override seat count from CSV”) |
+| `Enable_workshop_interface` | `True` / `False` / `Yes` / `No` / `1` / `0` |
+| `Password` | Workshop access password |
+| `Activity` | Purpose activity (e.g. `Admin`); defaults to `Admin` if blank when building the schedule object |
+| `Purpose` | Purpose label (e.g. `QA`); defaults to `QA` if blank |
+
+**Date columns — use one style only (all three must match that style):**
+
+| Style | Headers |
+|-------|---------|
+| **A — legacy** | `Provisioning Date`, `Auto-stop`, `Auto-destroy` |
+| **B — UTC suffix (recommended)** | `Provisioning Date (UTC)`, `Auto-stop (UTC)`, `Auto-destroy (UTC)` |
+
+### Optional headers (complete list)
+
+All columns below are **optional**. If a header is **missing**, the behavior is the same as an **empty** cell unless noted.
+
+| Column | Default / if empty | Description |
+|--------|-------------------|-------------|
+| `Workshop Name` | Falls back to `CI Name` | Workshop / provision display name override |
+| `Multi_Asset` | `False` | `True` / `Yes` / `1` for legacy single-row multi-asset |
+| `Asset_CIs` | — | Comma-separated catalog item IDs (legacy multi-asset) |
+| `Multi_Workshop_Name` | — | Same value on multiple rows groups **new-style** multi-asset (one row per asset, each with its own password) |
+| `Concurrency` | `1` when creating provisions | `WorkshopProvision` concurrency |
+| `Instances` | unset | Seat / **numberSeats** override when `Users` is not set; also used in multi-asset seating. **Not** the same as `Count`. Only the **`Instances`** column is read (there is **no** `Workshop_instance_count` or other alias). |
+| `Salesforce IDs` | — | Chargeback IDs. Semicolon-separated; entries may be `type:id` or plain id (see `Salesforce_Type`). **Alias header:** `campaign_id` |
+| `Salesforce_Type` | `opportunity` | Default type for IDs without a prefix: `opportunity`, `campaign`, `project`, or `cdh`. **Alias headers:** `Salesforce_Type`, `Salesforce Type` |
+| `Count` | unset | **Deployment replication**: values **> 1** expand one logical row into that many identical schedules. Distinct from **Instances** (seats) and **Users**. |
+| `AWS_Region` | — | Comma-separated AWS regions for multi-region provisioning |
+| `Redirect` | `True` | Per-row `labUserInterface.redirect`. `False` / `0` / `No` / `N` disables |
+| `Showroom_Repo` | — | Showroom Antora docs git repo URL |
+| `Showroom_Ref` | `main` if repo set | Git branch / tag for Showroom docs |
+| `Showroom_NoVNC` | `False` | `True` / `Yes` / `1` enables noVNC in Showroom |
+| `Showroom_Zerotouch` | `False` | `True` / `Yes` / `1` selects zerotouch chart variant |
+
+### Users vs Instances vs Count
+
+| Concept | CSV column | Meaning |
+|---------|------------|--------|
+| **Catalog `num_users`** | `Users` | Maps to `num_users` when set. Empty = no CSV override (catalog defaults may still apply). |
+| **Seat / numberSeats** | `Instances` | Used when you want a seat count **without** setting `Users` (typical multi-asset / showroom cases). Empty = unset. |
+| **Duplicate deployments** | `Count` | **> 1** creates multiple copies of the same schedule row. Does **not** set `numberSeats` by itself. |
+
+### Not controlled by the schedule CSV
+
+- **White Glove** — Set from **Deploy Settings** in the UI, deploy API body, or `RHDPConfig` / CLI flags — **not** a column in `read_csv_input()`. Extra columns such as `White_Glove` in hand-made sheets are **ignored** unless the parser is extended.
+
+### Redirect vs UI
+
+The **`Redirect`** column is per schedule row. The global **Redirect (all)** toggle in Deploy Settings sets defaults for new uploads and can flip all loaded rows; per-row toggles in the table still override individual rows.
+
+### Canonical example header line
+
+Use this as a checklist (wrap as needed in your editor):
 
 ```
-CI Name, CI, Namespace, Users, Enable_workshop_interface, Password,
-Activity, Purpose, Salesforce IDs, Workshop Name,
-Provisioning Date (UTC), Auto-stop (UTC), Auto-destroy (UTC),
-Multi_Asset, Asset_CIs, Multi_Workshop_Name, Instances, Concurrency
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Instances,Salesforce IDs,Salesforce_Type,Count,AWS_Region,Redirect,Showroom_Repo,Showroom_Ref,Showroom_NoVNC,Showroom_Zerotouch
 ```
 
-| Column | Required | Description |
-|--------|----------|-------------|
-| CI Name | Yes | Friendly display name |
-| CI | Yes | Catalog Item ID (e.g. `openshift-cnv.ocp-virt-roadshow-multi-user.prod`) |
-| Namespace | Yes | Target namespace (e.g. `user-bbethell-redhat-com`) |
-| Users | No | Number of users/seats per workshop |
-| Enable_workshop_interface | No | `True` / `False` — enable the student UI |
-| Password | No | Workshop password |
-| Activity | No | Activity label |
-| Purpose | No | Purpose label |
-| Salesforce IDs | No | Salesforce campaign/opportunity IDs for chargeback |
-| Workshop Name | No | Display name for the workshop provision |
-| Provisioning Date (UTC) | Yes | `DD/MM/YYYY HH:MM` format |
-| Auto-stop (UTC) | Yes | When to stop the workshop |
-| Auto-destroy (UTC) | Yes | When to destroy resources |
-| Multi_Asset | No | `True` if this is a multi-asset workshop |
-| Asset_CIs | No | Comma-separated CIs for multi-asset workshops |
-| Multi_Workshop_Name | No | Name for the grouped MultiWorkshop |
-| Instances | No | Total seat/instance count (used for multi-asset numberSeats) |
-| Concurrency | No | WorkshopProvision concurrency (default 1) |
+Download a working template from the UI (**Download CSV Template**) or `GET /api/templates/schedule` — the file uses headers that pass validation.
 
 See **sample-csvs/** for working examples and **docs/examples/** for more:
 

@@ -157,30 +157,33 @@ done
 
 ## CSV Column Reference
 
-| Column | Required | Default | Notes |
-|--------|----------|---------|-------|
-| `CI Name` | Yes | — | Display name for the workshop |
-| `CI` | Yes | — | Catalog Item ID (vendor.item.env) |
-| `Namespace` | Yes | — | Kubernetes namespace |
-| `Users` | No | unset | Number of users; empty = no override |
-| `Enable_workshop_interface` | Yes | — | True/False — create Workshop resource with UI |
-| `Password` | Yes | — | Workshop access password |
-| `Activity` | Yes | Admin | Purpose activity |
-| `Purpose` | Yes | QA | Purpose label |
-| `Workshop Name` | No | CI Name | Display name override |
-| `Provisioning Date (UTC)` | Yes | — | DD/MM/YYYY HH:MM |
-| `Auto-stop (UTC)` | Yes | — | DD/MM/YYYY HH:MM (can be empty) |
-| `Auto-destroy (UTC)` | Yes | — | DD/MM/YYYY HH:MM |
-| `Multi_Asset` | No | False | True if multi-asset workshop |
-| `Asset_CIs` | No | — | Comma-separated CIs for multi-asset |
-| `Multi_Workshop_Name` | No | — | Custom name for grouped multi-asset |
-| `Concurrency` | No | 1 | WorkshopProvision concurrency |
-| `Instances` | No | — | Seat count for multi-asset |
-| `Salesforce IDs` | No | — | SF IDs (semicolon-separated, type-prefixed) |
-| `Salesforce_Type` | No | opportunity | Default type for unprefixed SF IDs |
-| `Count` | No | — | Deployment count (distinct from instances) |
-| `AWS_Region` | No | — | Comma-separated AWS regions for multi-region |
-| `Redirect` | No | True | Per-schedule labUserInterface.redirect; False/0/No/N disables |
+**Rules:** Case-insensitive headers; column order free. **`Archive`** column ignored if present. **Dates:** either all three of `Provisioning Date` / `Auto-stop` / `Auto-destroy` **or** all three `… (UTC)` variants — `DD/MM/YYYY HH:MM`. **Full detail:** [README.md — CSV Format](README.md#csv-format).
+
+### Required headers
+
+`CI Name`, `CI`, `Namespace`, `Users` (header required; cell may be empty), `Enable_workshop_interface`, `Password`, `Activity`, `Purpose`, plus the three date headers in one style (legacy or UTC).
+
+### Optional headers (parser-complete)
+
+| Column | Default / empty | Notes |
+|--------|-----------------|-------|
+| `Workshop Name` | CI Name | |
+| `Multi_Asset` | False | |
+| `Asset_CIs` | — | Legacy multi-asset CIs |
+| `Multi_Workshop_Name` | — | New-style grouped rows |
+| `Concurrency` | 1 at provision | |
+| `Instances` | unset | **numberSeats** / seat count when `Users` not set; only **`Instances`** is read (no `Workshop_instance_count`) |
+| `Salesforce IDs` | — | Alias: `campaign_id`; `;`-separated, optional `type:id` |
+| `Salesforce_Type` | opportunity | Aliases: `Salesforce Type` |
+| `Count` | unset | **>1** expands row into N schedules; not seat count |
+| `AWS_Region` | — | Comma-separated regions |
+| `Redirect` | True | False/0/No/N disables |
+| `Showroom_Repo` / `Showroom_Ref` | ref→main | |
+| `Showroom_NoVNC` / `Showroom_Zerotouch` | False | True/Yes/1 |
+
+### Not in CSV
+
+**White Glove** — UI Deploy Settings / API / `RHDPConfig`, not `read_csv_input`.
 
 The `Redirect` column is per-schedule. The global "Redirect (all)" toggle in Deploy Settings sets the default for new uploads and flips all loaded rows. Per-row toggles in the schedule table override individual rows.
 
