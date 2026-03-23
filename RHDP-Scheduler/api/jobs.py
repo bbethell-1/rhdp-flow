@@ -49,12 +49,12 @@ _jobs_truncated: int = 0
 
 
 def _cleanup_old_jobs() -> None:
-    """Remove oldest completed/failed jobs when store exceeds MAX_JOBS."""
+    """Remove oldest terminal jobs when store exceeds MAX_JOBS."""
     global _jobs_truncated
     if len(_jobs) <= MAX_JOBS:
         return
     terminal = [(jid, j) for jid, j in _jobs.items()
-                 if j.status in (Status.completed, Status.failed)]
+                 if j.status in (Status.completed, Status.failed, Status.cancelled)]
     terminal.sort(key=lambda x: x[1].created_at)
     to_remove = len(_jobs) - MAX_JOBS
     for jid, _ in terminal[:to_remove]:

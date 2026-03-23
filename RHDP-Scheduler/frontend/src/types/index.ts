@@ -92,7 +92,7 @@ export interface DeploymentResult {
 
 export interface JobResponse {
   job_id: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'paused';
   progress: number;
   message: string;
   results: DeploymentResult[] | null;

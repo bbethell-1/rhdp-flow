@@ -191,6 +191,8 @@ class JobStatus(str, Enum):
     running = "running"
     completed = "completed"
     failed = "failed"
+    cancelled = "cancelled"
+    paused = "paused"
 
 
 class JobResponse(BaseModel):

@@ -332,6 +332,17 @@ def test_deploy_status_not_found(client):
     assert resp.status_code == 404
 
 
+@pytest.mark.parametrize("status", [jobs.Status.paused, jobs.Status.cancelled])
+def test_deploy_status_supports_paused_and_cancelled(client, status):
+    job = jobs.create_job()
+    jobs.update_job(job.job_id, status=status, progress=55, message=status.value.title())
+    resp = client.get(f"/api/deploy/status/{job.job_id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == status.value
+    assert data["progress"] == 55
+
+
 # ---------------------------------------------------------------------------
 # Operations (require loaded schedules)
 # ---------------------------------------------------------------------------
@@ -1309,6 +1320,20 @@ def test_debug_config_includes_job_stats(client):
     assert data["jobs"]["total"] >= 0
     assert data["jobs"]["max"] > 0
     assert "truncated" in data["jobs"]
+
+
+def test_job_cleanup_prunes_cancelled_jobs(monkeypatch):
+    monkeypatch.setattr(jobs, "MAX_JOBS", 1)
+    cancelled = jobs.create_job()
+    jobs.update_job(cancelled.job_id, status=jobs.Status.cancelled)
+    completed = jobs.create_job()
+    jobs.update_job(completed.job_id, status=jobs.Status.completed)
+
+    jobs._cleanup_old_jobs()
+
+    assert cancelled.job_id not in jobs._jobs
+    assert completed.job_id in jobs._jobs
+    assert jobs._jobs_truncated == 1
 
 
 # ---------------------------------------------------------------------------

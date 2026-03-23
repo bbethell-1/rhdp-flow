@@ -67,10 +67,18 @@ export const UploadTab: React.FC<Props> = ({
   const logRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const jobIdRef = useRef<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Clean up WebSocket on unmount
   useEffect(() => {
-    return () => { wsRef.current?.close(); wsRef.current = null; };
+    return () => {
+      wsRef.current?.close();
+      wsRef.current = null;
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -438,6 +446,10 @@ export const UploadTab: React.FC<Props> = ({
           ws.close();
           wsRef.current = null;
           jobIdRef.current = null;
+          if (pollRef.current) {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+          }
           setDeploying(false);
           setDeployPaused(false);
           if (d.log_file) setDeployLogFile?.(d.log_file as string);
@@ -460,12 +472,24 @@ export const UploadTab: React.FC<Props> = ({
         appendLog('WebSocket error — falling back to polling');
         ws.close();
         wsRef.current = null;
-        const poll = setInterval(async () => {
+        if (pollRef.current) clearInterval(pollRef.current);
+        pollRef.current = setInterval(async () => {
           try {
             const s = await api.deployStatus(job.job_id);
             handleStatus(s as unknown as Record<string, unknown>);
-            if (s.status === 'completed' || s.status === 'failed') clearInterval(poll);
-          } catch { clearInterval(poll); setDeploying(false); }
+            if (s.status === 'completed' || s.status === 'failed' || s.status === 'cancelled') {
+              if (pollRef.current) {
+                clearInterval(pollRef.current);
+                pollRef.current = null;
+              }
+            }
+          } catch {
+            if (pollRef.current) {
+              clearInterval(pollRef.current);
+              pollRef.current = null;
+            }
+            setDeploying(false);
+          }
         }, 2000);
       };
     } catch (e) {
