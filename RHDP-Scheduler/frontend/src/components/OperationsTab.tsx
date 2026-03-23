@@ -118,6 +118,7 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
   const [scaleLoading, setScaleLoading] = useState(false);
   const [showroomCleanupLoading, setShowroomCleanupLoading] = useState(false);
   const [showroomHealthLoading, setShowroomHealthLoading] = useState(false);
+  const [showroomPreflightLoading, setShowroomPreflightLoading] = useState(false);
 
   // Lock / Unlock confirmation modals
   const [showLockConfirm, setShowLockConfirm] = useState(false);
@@ -343,6 +344,22 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
     }
   };
 
+  const handleShowroomPreflight = async () => {
+    setShowroomPreflightLoading(true);
+    try {
+      const r = await api.showroomPreflight({ ci_filter: showroomFilter || undefined });
+      const msg = r.details?.length ? `${r.message} | ${r.details.join('; ')}` : r.message;
+      addRecord('Demolition Preflight', showroomFilter, '--', r.success, msg);
+      showToast(r.message, r.success ? 'success' : 'danger');
+    } catch (e) {
+      const errStr = e instanceof Error ? e.message : String(e);
+      addRecord('Demolition Preflight', showroomFilter, '--', false, errStr);
+      showToast(`Preflight failed: ${errStr}`, 'danger');
+    } finally {
+      setShowroomPreflightLoading(false);
+    }
+  };
+
   return (
     <PageSection>
       <div className="ops-grid" style={{ marginBottom: 16 }}>
@@ -522,22 +539,34 @@ export const OperationsTab: React.FC<Props> = ({ showToast, schedules }) => {
           <CardBody>
             <CIFilter options={ciOptions} value={showroomFilter} onChange={setShowroomFilter} id="showroom-ci-filter" />
             <p style={{ marginBottom: 8, fontSize: '0.85rem' }}>
-              Check health of Showroom deployments or clean up resources (Helm releases, ConfigMaps, pods).
+              Health Check verifies pods and routes via <code>oc</code>.
+              Preflight uses <a href="https://github.com/rhpds/demolition" target="_blank" rel="noopener noreferrer">Demolition</a> to
+              browser-test deployed workshop URLs.
             </p>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <Button
                 variant="primary"
                 onClick={handleShowroomHealth}
                 isLoading={showroomHealthLoading}
-                isDisabled={showroomHealthLoading || showroomCleanupLoading}
+                isDisabled={showroomHealthLoading || showroomCleanupLoading || showroomPreflightLoading}
               >
                 Health Check
               </Button>
+              <Tooltip content="Run Demolition preflight — opens each workshop URL in a headless browser to verify page loads correctly. Requires deployment results.">
+                <Button
+                  variant="secondary"
+                  onClick={handleShowroomPreflight}
+                  isLoading={showroomPreflightLoading}
+                  isDisabled={showroomHealthLoading || showroomCleanupLoading || showroomPreflightLoading}
+                >
+                  Preflight (Demolition)
+                </Button>
+              </Tooltip>
               <Button
                 variant="danger"
                 onClick={handleShowroomCleanup}
                 isLoading={showroomCleanupLoading}
-                isDisabled={showroomHealthLoading || showroomCleanupLoading}
+                isDisabled={showroomHealthLoading || showroomCleanupLoading || showroomPreflightLoading}
               >
                 Cleanup
               </Button>

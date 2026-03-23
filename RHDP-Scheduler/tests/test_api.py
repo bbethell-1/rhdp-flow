@@ -534,6 +534,89 @@ def test_showroom_applicationset_with_seat_count(mock_run, uploaded_showroom_cli
 
 
 # ---------------------------------------------------------------------------
+# Demolition Preflight
+# ---------------------------------------------------------------------------
+
+def test_showroom_preflight_no_results(client):
+    """Preflight requires deployment results."""
+    resp = client.post("/api/operations/showroom-preflight", json={})
+    assert resp.status_code == 400
+
+
+@patch("api.routes.run_demolition_preflight")
+def test_showroom_preflight_pass(mock_preflight, uploaded_client):
+    """Preflight with mocked deployment results and demolition."""
+    from rhdp_flow import DeploymentResult
+    routes._deployment_results = [
+        DeploymentResult(
+            ci_name="Test Workshop",
+            ci="test.workshop.prod",
+            namespace="user-test",
+            guid="test-abc",
+            url="https://demo.redhat.com/workshop/test-abc",
+            status="verified",
+            provisioning_date="25/03/2026 10:00",
+            auto_stop="",
+            auto_destroy="26/03/2026 10:00",
+            timestamp="2026-03-25T10:00:00",
+            password="test123",
+        )
+    ]
+    mock_preflight.return_value = [
+        {"ci_name": "Test Workshop", "url": "https://demo.redhat.com/workshop/test-abc", "status": "pass", "message": "Preflight passed"}
+    ]
+    resp = uploaded_client.post("/api/operations/showroom-preflight", json={})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is True
+    assert "1/1 passed" in data["message"]
+    mock_preflight.assert_called_once()
+
+
+@patch("api.routes.run_demolition_preflight")
+def test_showroom_preflight_fail(mock_preflight, uploaded_client):
+    """Preflight reports failure correctly."""
+    from rhdp_flow import DeploymentResult
+    routes._deployment_results = [
+        DeploymentResult(
+            ci_name="Broken Workshop",
+            ci="broken.lab.prod",
+            namespace="user-test",
+            guid="broken-1",
+            url="https://demo.redhat.com/workshop/broken-1",
+            status="verified",
+            provisioning_date="25/03/2026 10:00",
+            auto_stop="",
+            auto_destroy="26/03/2026 10:00",
+            timestamp="2026-03-25T10:00:00",
+            password="pw",
+        )
+    ]
+    mock_preflight.return_value = [
+        {"ci_name": "Broken Workshop", "url": "https://demo.redhat.com/workshop/broken-1", "status": "fail", "message": "Page returned 503"}
+    ]
+    resp = uploaded_client.post("/api/operations/showroom-preflight", json={})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is False
+    assert "0/1 passed" in data["message"]
+
+
+def test_showroom_preflight_with_filter_no_match(uploaded_client):
+    """Preflight with a filter that matches nothing returns 400."""
+    from rhdp_flow import DeploymentResult
+    routes._deployment_results = [
+        DeploymentResult(
+            ci_name="A", ci="a.b.c", namespace="ns", guid="g",
+            url="https://x", status="ok", provisioning_date="", auto_stop="",
+            auto_destroy="", timestamp="", password="",
+        )
+    ]
+    resp = uploaded_client.post("/api/operations/showroom-preflight", json={"ci_filter": "nonexistent"})
+    assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
 # QA
 # ---------------------------------------------------------------------------
 
