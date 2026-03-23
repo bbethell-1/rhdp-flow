@@ -158,6 +158,12 @@ def test_get_catalog_items(mock_get_config, mock_list, client):
             "id": "vendor.item.prod",
             "display_name": "Test Lab",
             "catalog_namespace": "babylon-catalog-prod",
+            "description": "A test lab for demos",
+            "category": "Workshops",
+            "parameters": [
+                {"name": "num_users", "type": "integer", "default": 20, "minimum": 1, "maximum": 100},
+                {"name": "aws_region", "type": "string", "default": "us-east-1"},
+            ],
         },
     ]
     resp = client.get("/api/catalog/items")
@@ -167,6 +173,14 @@ def test_get_catalog_items(mock_get_config, mock_list, client):
     assert data[0]["id"] == "vendor.item.prod"
     assert data[0]["display_name"] == "Test Lab"
     assert data[0]["catalog_namespace"] == "babylon-catalog-prod"
+    assert data[0]["description"] == "A test lab for demos"
+    assert data[0]["category"] == "Workshops"
+    assert len(data[0]["parameters"]) == 2
+    assert data[0]["parameters"][0]["name"] == "num_users"
+    assert data[0]["parameters"][0]["default"] == 20
+    assert data[0]["parameters"][0]["maximum"] == 100
+    assert data[0]["parameters"][1]["name"] == "aws_region"
+    assert data[0]["parameters"][1]["default"] == "us-east-1"
 
 
 @patch("api.routes._get_config")

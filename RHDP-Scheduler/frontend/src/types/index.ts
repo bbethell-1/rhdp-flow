@@ -52,11 +52,25 @@ export interface ScheduleExampleMeta {
   label: string;
 }
 
+/** Parameter summary from a CatalogItem spec (openAPIV3Schema). */
+export interface CatalogItemParameter {
+  name: string;
+  type?: string;
+  default?: unknown;
+  minimum?: unknown;
+  maximum?: unknown;
+  enum?: unknown[];
+  description?: string;
+}
+
 /** Cluster CatalogItem row (GET /api/catalog/items). */
 export interface CatalogItemEntry {
   id: string;
   display_name: string;
   catalog_namespace: string;
+  description: string;
+  category: string;
+  parameters: CatalogItemParameter[];
 }
 
 export interface DeploymentResult {

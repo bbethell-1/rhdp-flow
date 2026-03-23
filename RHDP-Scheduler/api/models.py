@@ -44,12 +44,27 @@ class WorkshopScheduleResponse(BaseModel):
     showroom_zerotouch: bool = False
 
 
+class CatalogItemParameter(BaseModel):
+    """Summary of a single parameter from a CatalogItem spec (openAPIV3Schema)."""
+
+    name: str
+    type: Optional[str] = None
+    default: Optional[object] = None
+    minimum: Optional[object] = None
+    maximum: Optional[object] = None
+    enum: Optional[List[object]] = None
+    description: Optional[str] = None
+
+
 class CatalogItemEntry(BaseModel):
     """One row from cluster CatalogItem list (prod + event namespaces)."""
 
     id: str = Field(description="Catalog Item ID, e.g. openshift-cnv.ocp-virt-roadshow-multi-user.prod")
     display_name: str = Field(description="babylon.gpte.redhat.com/catalogItemDisplayName or id")
     catalog_namespace: str = Field(description="Kubernetes namespace listing was read from")
+    description: str = Field("", description="babylon.gpte.redhat.com/description annotation")
+    category: str = Field("", description="babylon.gpte.redhat.com/category annotation")
+    parameters: List[CatalogItemParameter] = Field(default_factory=list, description="Parameter definitions from spec")
 
 
 class DeploymentResultResponse(BaseModel):
