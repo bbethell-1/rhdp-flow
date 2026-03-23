@@ -430,8 +430,9 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                     is_multi_asset_str = row.get(header_map.get('multi_asset', 'Multi_Asset'), '').strip()
                     asset_cis = row.get(header_map.get('asset_cis', 'Asset_CIs'), '').strip()
                     multi_workshop_name = row.get(header_map.get('multi_workshop_name', 'Multi_Workshop_Name'), '').strip()
-                    # Optional Instances column → schedule.instances (WorkshopProvision.spec.count). No default in CSV;
-                    # blank or missing column leaves instances unset (downstream uses existing provision default).
+                    # Optional Instances column → schedule.instances (passed as WorkshopProvision spec.count). No CSV default:
+                    # blank or missing column leaves schedule.instances None; create_workshop_provision / build_workshop_provision_dict
+                    # then use spec.count = 1 when count is None or not positive.
                     instances_key = header_map.get("instances")
                     instances_str = row.get(instances_key, "").strip() if instances_key else ""
                     concurrency_str = row.get(header_map.get('concurrency', 'Concurrency'), '').strip()

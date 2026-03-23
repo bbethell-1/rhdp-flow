@@ -172,7 +172,7 @@ done
 | `Asset_CIs` | — | Legacy multi-asset CIs |
 | `Multi_Workshop_Name` | — | New-style grouped rows |
 | `Concurrency` | 1 at provision | |
-| `Instances` | unset | **numberSeats** / seat count when `Users` not set; only **`Instances`** is read (no `Workshop_instance_count`) |
+| `Instances` | unset (`None` in schedule) | Seat count when `Users` not set; only **`Instances`** is read (no `Workshop_instance_count`). Blank/missing column → **WorkshopProvision** `spec.count` still defaults to **1** in code (`build_workshop_provision_dict`). MultiWorkshop `numberSeats` only if Users or Instances set. |
 | `Salesforce IDs` | — | Alias: `campaign_id`; `;`-separated, optional `type:id` |
 | `Salesforce_Type` | opportunity | Aliases: `Salesforce Type` |
 | `Count` | unset | **>1** expands row into N schedules; not seat count |

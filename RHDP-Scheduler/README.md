@@ -232,7 +232,7 @@ All columns below are **optional**. If a header is **missing**, the behavior is 
 | `Asset_CIs` | — | Comma-separated catalog item IDs (legacy multi-asset) |
 | `Multi_Workshop_Name` | — | Same value on multiple rows groups **new-style** multi-asset (one row per asset, each with its own password) |
 | `Concurrency` | `1` when creating provisions | `WorkshopProvision` concurrency |
-| `Instances` | unset | Seat / **numberSeats** override when `Users` is not set; also used in multi-asset seating. **Not** the same as `Count`. Only the **`Instances`** column is read (there is **no** `Workshop_instance_count` or other alias). |
+| `Instances` | `None` in schedule object | Seat / **numberSeats** when `Users` is not set; not the same as `Count`. Only **`Instances`** is read (no `Workshop_instance_count`). If blank or column missing, **`WorkshopProvision.spec.count` still becomes `1`** when we create the provision (see `build_workshop_provision_dict`). **MultiWorkshop** `numberSeats` is only set from `Users` or `Instances`. |
 | `Salesforce IDs` | — | Chargeback IDs. Semicolon-separated; entries may be `type:id` or plain id (see `Salesforce_Type`). **Alias header:** `campaign_id` |
 | `Salesforce_Type` | `opportunity` | Default type for IDs without a prefix: `opportunity`, `campaign`, `project`, or `cdh`. **Alias headers:** `Salesforce_Type`, `Salesforce Type` |
 | `Count` | unset | **Deployment replication**: values **> 1** expand one logical row into that many identical schedules. Distinct from **Instances** (seats) and **Users**. |
@@ -248,7 +248,7 @@ All columns below are **optional**. If a header is **missing**, the behavior is 
 | Concept | CSV column | Meaning |
 |---------|------------|--------|
 | **Catalog `num_users`** | `Users` | Maps to `num_users` when set. Empty = no CSV override (catalog defaults may still apply). |
-| **Seat / numberSeats** | `Instances` | Used when you want a seat count **without** setting `Users` (typical multi-asset / showroom cases). Empty = unset. |
+| **Seat / numberSeats** | `Instances` | Drives **WorkshopProvision** **`spec.count`** (with **Users** unset or zero). Empty cell → `schedule.instances` is `None` and the code still sets **`spec.count` = `1`**. **`Users`** is separate: it sets **`num_users`** on the ResourceClaim when positive, not `spec.count`. |
 | **Duplicate deployments** | `Count` | **> 1** creates multiple copies of the same schedule row. Does **not** set `numberSeats` by itself. |
 
 ### Not controlled by the schedule CSV
