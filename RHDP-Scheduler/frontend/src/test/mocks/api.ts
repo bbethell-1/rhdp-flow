@@ -67,6 +67,7 @@ export const mockResult: DeploymentResult = {
   error_message: '',
   showroom_url: '',
   showroom_status: '',
+  password: 'secret',
 };
 
 export const mockFailedResult: DeploymentResult = {

@@ -174,6 +174,7 @@ class DeploymentResult:
     error_message: str = ""
     showroom_url: str = ""
     showroom_status: str = ""
+    password: str = ""  # Workshop access password from schedule (for downstream CSV consumers)
 
 # ============================================================================
 # CONFIGURATION CLASS
@@ -716,6 +717,7 @@ def write_deployment_results(
             'ci_name', 'ci', 'namespace', 'guid', 'url', 'status',
             'provisioning_date', 'auto_stop', 'auto_destroy',
             'timestamp', 'error_message', 'showroom_url', 'showroom_status',
+            'password',
         ]
         
         with open(output_file, 'w', newline='', encoding='utf-8') as f:
@@ -3893,6 +3895,7 @@ def process_schedule(
                     auto_destroy=schedule.auto_destroy,
                     timestamp=utc_timestamp_str(),
                     error_message=f"num_users validation failed: {schedule.users} requested, max is {limit_info['maximum']}",
+                    password=schedule.password,
                 )
 
     try:
@@ -3913,7 +3916,8 @@ def process_schedule(
                     auto_stop=schedule.auto_stop,
                     auto_destroy=schedule.auto_destroy,
                     timestamp=utc_timestamp_str(),
-                    error_message="Failed to create MultiWorkshop"
+                    error_message="Failed to create MultiWorkshop",
+                    password=schedule.password,
                 )
             
             # Construct URL for multi-workshop
@@ -3931,7 +3935,8 @@ def process_schedule(
                 provisioning_date=schedule.provisioning_date,
                 auto_stop=schedule.auto_stop,
                 auto_destroy=schedule.auto_destroy,
-                timestamp=utc_timestamp_str()
+                timestamp=utc_timestamp_str(),
+                password=schedule.password,
             )
         
         # Check if this is a multi-region workshop
@@ -3951,7 +3956,8 @@ def process_schedule(
                     provisioning_date=schedule.provisioning_date,
                     auto_stop=schedule.auto_stop,
                     auto_destroy=schedule.auto_destroy,
-                    timestamp=utc_timestamp_str()
+                    timestamp=utc_timestamp_str(),
+                    password=schedule.password,
                 )
             else:
                 return DeploymentResult(
@@ -3965,7 +3971,8 @@ def process_schedule(
                     auto_stop=schedule.auto_stop,
                     auto_destroy=schedule.auto_destroy,
                     timestamp=utc_timestamp_str(),
-                    error_message="Failed to create multi-region workshop"
+                    error_message="Failed to create multi-region workshop",
+                    password=schedule.password,
                 )
 
         # Build payload
@@ -4008,7 +4015,8 @@ def process_schedule(
                 auto_stop=schedule.auto_stop,
                 auto_destroy=schedule.auto_destroy,
                 timestamp=utc_timestamp_str(),
-                error_message=error or "Unknown error"
+                error_message=error or "Unknown error",
+                password=schedule.password,
             )
         
         # Wait a bit for ResourceClaim to be created
@@ -4055,6 +4063,7 @@ def process_schedule(
             error_message="",
             showroom_url=sr_url,
             showroom_status=sr_status,
+            password=schedule.password,
         )
         
     except Exception as e:
@@ -4070,7 +4079,8 @@ def process_schedule(
             auto_stop=schedule.auto_stop,
             auto_destroy=schedule.auto_destroy,
             timestamp=utc_timestamp_str(),
-            error_message=str(e)
+            error_message=str(e),
+            password=schedule.password,
         )
 
 # ============================================================================

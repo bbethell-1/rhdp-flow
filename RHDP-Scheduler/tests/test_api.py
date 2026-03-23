@@ -1,5 +1,6 @@
 """Tests for the FastAPI endpoints using TestClient."""
 
+import csv
 import io
 import json
 import os
@@ -494,6 +495,10 @@ def test_export_results_after_dry_run(uploaded_client):
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "text/csv; charset=utf-8"
     assert "ci_name" in resp.text
+    rows = list(csv.DictReader(io.StringIO(resp.text)))
+    assert len(rows) >= 1
+    assert "password" in rows[0]
+    assert rows[0]["password"] == "Workshop1"
 
 
 def test_export_students_no_data(client):
