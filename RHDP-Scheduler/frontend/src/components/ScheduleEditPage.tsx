@@ -722,17 +722,29 @@ export function ScheduleEditPage({ showToast }: Props) {
               {/* Capacity */}
               <div style={formGrid}>
                 <div style={sectionTitle}>Capacity & Purpose</div>
-                <FormGroup label="Users" fieldId="users">
+                <FormGroup label="Users (num_users)" fieldId="users">
                   <TextInput id="users" type="number" value={s.users == null ? '' : String(s.users)} onChange={(_e, v) => patch(selectedIdx, { users: parseOptInt(v) })} placeholder="Empty = catalog default" />
+                  <FormHelperText>
+                    <HelperText><HelperTextItem variant="indeterminate">How many concurrent users the lab environment supports (passed as num_users to the catalog item)</HelperTextItem></HelperText>
+                  </FormHelperText>
                 </FormGroup>
-                <FormGroup label="Instances" fieldId="instances">
-                  <TextInput id="instances" type="number" value={s.instances == null ? '' : String(s.instances)} onChange={(_e, v) => patch(selectedIdx, { instances: parseOptInt(v) })} placeholder="Seat count for multi-asset" />
+                <FormGroup label="Instances (seat count)" fieldId="instances">
+                  <TextInput id="instances" type="number" value={s.instances == null ? '' : String(s.instances)} onChange={(_e, v) => patch(selectedIdx, { instances: parseOptInt(v) })} placeholder="Empty = uses Users value" />
+                  <FormHelperText>
+                    <HelperText><HelperTextItem variant="indeterminate">Replica count for WorkshopProvision (spec.count) and MultiWorkshop (numberSeats). Use when the catalog item has no num_users parameter.</HelperTextItem></HelperText>
+                  </FormHelperText>
+                </FormGroup>
+                <FormGroup label="Count (repeat deploy)" fieldId="count">
+                  <TextInput id="count" type="number" value={s.count == null ? '' : String(s.count)} onChange={(_e, v) => patch(selectedIdx, { count: parseOptInt(v) })} placeholder="Empty = 1 deployment" />
+                  <FormHelperText>
+                    <HelperText><HelperTextItem variant="indeterminate">Creates N independent deployments of this row (e.g. Count=2 deploys two separate clusters with the same config)</HelperTextItem></HelperText>
+                  </FormHelperText>
                 </FormGroup>
                 <FormGroup label="Concurrency" fieldId="concurrency">
                   <TextInput id="concurrency" type="number" value={s.concurrency == null ? '' : String(s.concurrency)} onChange={(_e, v) => patch(selectedIdx, { concurrency: parseOptInt(v) })} placeholder="Default: 1" />
-                </FormGroup>
-                <FormGroup label="Count" fieldId="count">
-                  <TextInput id="count" type="number" value={s.count == null ? '' : String(s.count)} onChange={(_e, v) => patch(selectedIdx, { count: parseOptInt(v) })} placeholder="Deployment count" />
+                  <FormHelperText>
+                    <HelperText><HelperTextItem variant="indeterminate">WorkshopProvision concurrency — how many provisions can run in parallel</HelperTextItem></HelperText>
+                  </FormHelperText>
                 </FormGroup>
                 <FormGroup label="Activity" fieldId="activity">
                   <TextInput id="activity" value={s.activity} onChange={(_e, v) => patch(selectedIdx, { activity: v })} placeholder="Admin" />
