@@ -52,6 +52,13 @@ export interface ScheduleExampleMeta {
   label: string;
 }
 
+/** Cluster CatalogItem row (GET /api/catalog/items). */
+export interface CatalogItemEntry {
+  id: string;
+  display_name: string;
+  catalog_namespace: string;
+}
+
 export interface DeploymentResult {
   ci_name: string;
   ci: string;

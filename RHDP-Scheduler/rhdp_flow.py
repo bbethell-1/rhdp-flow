@@ -524,6 +524,12 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                     redirect_val = redirect_str.lower() not in ['false', '0', 'no', 'n'] if redirect_str else True
                     showroom_novnc_val = showroom_novnc_str.lower() in ['true', '1', 'yes', 'y'] if showroom_novnc_str else False
                     showroom_zerotouch_val = showroom_zerotouch_str.lower() in ['true', '1', 'yes', 'y'] if showroom_zerotouch_str else False
+                    white_glove_str = row.get(header_map.get('white_glove', 'White_Glove'), '').strip()
+                    white_glove_val = (
+                        white_glove_str.lower() not in ['false', '0', 'no', 'n']
+                        if white_glove_str
+                        else True
+                    )
 
                     schedule = WorkshopSchedule(
                         ci_name=ci_name,
@@ -547,6 +553,7 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                         salesforce_type=salesforce_type,
                         aws_regions=aws_regions,
                         count=count,
+                        white_glove=white_glove_val,
                         redirect=redirect_val,
                         showroom_repo=showroom_repo,
                         showroom_ref=showroom_ref or "main",
@@ -1785,6 +1792,56 @@ def get_catalog_item_num_users_limit(ci: str, config: RHDPConfig) -> Optional[Di
         return {"has_num_users": False, "maximum": None, "minimum": None, "default": None}
     except Exception:
         return None
+
+
+def list_catalog_items(config: RHDPConfig) -> List[Dict[str, str]]:
+    """
+    List CatalogItem resources from babylon-catalog-prod and babylon-catalog-event.
+
+    Returns sorted list of dicts with keys: id (metadata.name), display_name,
+    catalog_namespace (OpenShift namespace queried).
+    """
+    out: List[Dict[str, str]] = []
+    env = os.environ.copy()
+    if config.kubeconfig_path:
+        env["KUBECONFIG"] = config.kubeconfig_path
+    for ns in ("babylon-catalog-prod", "babylon-catalog-event"):
+        try:
+            cmd = [
+                config.oc_command,
+                "get", "catalogitem", "-n", ns, "-o", "json",
+            ]
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=90, env=env
+            )
+            if result.returncode != 0:
+                logger.debug(
+                    "list_catalog_items: oc get catalogitem failed in %s: %s",
+                    ns,
+                    (result.stderr or result.stdout or "").strip()[:200],
+                )
+                continue
+            data = json.loads(result.stdout)
+            for item in data.get("items") or []:
+                meta = item.get("metadata") or {}
+                name = (meta.get("name") or "").strip()
+                if not name:
+                    continue
+                ann = meta.get("annotations") or {}
+                disp = (
+                    ann.get("babylon.gpte.redhat.com/catalogItemDisplayName") or name
+                ).strip()
+                out.append(
+                    {
+                        "id": name,
+                        "display_name": disp,
+                        "catalog_namespace": ns,
+                    }
+                )
+        except Exception as e:
+            logger.warning("list_catalog_items failed for %s: %s", ns, e)
+    out.sort(key=lambda x: (x["display_name"].lower(), x["id"]))
+    return out
 
 
 def users_column_ignored_by_catalog_advisory(

@@ -44,6 +44,14 @@ class WorkshopScheduleResponse(BaseModel):
     showroom_zerotouch: bool = False
 
 
+class CatalogItemEntry(BaseModel):
+    """One row from cluster CatalogItem list (prod + event namespaces)."""
+
+    id: str = Field(description="Catalog Item ID, e.g. openshift-cnv.ocp-virt-roadshow-multi-user.prod")
+    display_name: str = Field(description="babylon.gpte.redhat.com/catalogItemDisplayName or id")
+    catalog_namespace: str = Field(description="Kubernetes namespace listing was read from")
+
+
 class DeploymentResultResponse(BaseModel):
     """Mirrors rhdp_flow.DeploymentResult."""
 

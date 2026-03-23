@@ -54,10 +54,12 @@ from rhdp_flow import (
     derive_base_domain,
     utc_timestamp_str,
     get_catalog_item_num_users_limit,
+    list_catalog_items,
     users_column_ignored_by_catalog_advisory,
 )
 
 from api.models import (
+    CatalogItemEntry,
     DeploymentResultResponse,
     DeployRequest,
     DestroyCheckResponse,
@@ -468,6 +470,22 @@ async def health():
             oc_connected=False,
             message=f"Cluster connectivity check failed: {e}",
         )
+
+
+# ---------------------------------------------------------------------------
+# Catalog (cluster)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/catalog/items", response_model=List[CatalogItemEntry])
+@_rate_limit("30/minute")
+def get_catalog_items_list(request: Request):
+    """List CatalogItem resources from babylon-catalog-prod and babylon-catalog-event."""
+    config = _get_config()
+    if not config.validate():
+        raise HTTPException(503, "OpenShift client (oc) is not available on the API host")
+    raw = list_catalog_items(config)
+    return [CatalogItemEntry(**x) for x in raw]
 
 
 # ---------------------------------------------------------------------------
@@ -1423,6 +1441,7 @@ def download_template():
         "Showroom_Ref",
         "Showroom_NoVNC",
         "Showroom_Zerotouch",
+        "White_Glove",
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
@@ -1453,6 +1472,7 @@ def download_template():
         "Showroom_Ref": "",
         "Showroom_NoVNC": "",
         "Showroom_Zerotouch": "",
+        "White_Glove": "True",
     })
     output.seek(0)
     return StreamingResponse(
