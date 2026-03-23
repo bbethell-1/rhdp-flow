@@ -720,6 +720,7 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                         provisioning_date=first.provisioning_date,
                         auto_stop=first.auto_stop, auto_destroy=first.auto_destroy,
                         timestamp=utc_timestamp_str(),
+                        password=first.password,
                     ))
                 else:
                     results.append(DeploymentResult(
@@ -729,6 +730,7 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                         auto_stop=first.auto_stop, auto_destroy=first.auto_destroy,
                         timestamp=utc_timestamp_str(),
                         error_message="Failed to create grouped MultiWorkshop",
+                        password=first.password,
                     ))
                 done += 1
                 pct = int(done / total * 100) if total else 100
@@ -822,6 +824,7 @@ def deploy_dry_run(request: Request, body: DeployRequest = DeployRequest(), _key
                     provisioning_date=first.provisioning_date,
                     auto_stop=first.auto_stop, auto_destroy=first.auto_destroy,
                     timestamp=utc_timestamp_str(),
+                    password=first.password,
                 ))
             else:
                 results.append(DeploymentResult(
@@ -831,6 +834,7 @@ def deploy_dry_run(request: Request, body: DeployRequest = DeployRequest(), _key
                     auto_stop=first.auto_stop, auto_destroy=first.auto_destroy,
                     timestamp=utc_timestamp_str(),
                     error_message="Failed to create grouped MultiWorkshop",
+                    password=first.password,
                 ))
 
         for s in regular_schedules:
@@ -1321,7 +1325,9 @@ def export_results():
     fieldnames = [
         "ci_name", "ci", "namespace", "guid", "url", "status",
         "provisioning_date", "auto_stop", "auto_destroy",
-        "timestamp", "error_message", "showroom_url", "showroom_status", "log_url",
+        "timestamp", "error_message", "showroom_url", "showroom_status",
+        "password",
+        "log_url",
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()

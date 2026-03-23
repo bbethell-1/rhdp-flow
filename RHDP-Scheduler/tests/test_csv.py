@@ -138,6 +138,7 @@ class TestCSVParsing:
                 status="verified", provisioning_date="15/02/2026 11:00",
                 auto_stop="15/02/2026 19:00", auto_destroy="17/02/2026 11:00",
                 timestamp="2026-02-15T11:00:00Z", error_message="",
+                password="workshop-secret",
             )
         ]
         output = tempfile.NamedTemporaryFile(suffix=".csv", delete=False)
@@ -149,6 +150,7 @@ class TestCSVParsing:
         assert len(rows) == 1
         assert rows[0]["ci_name"] == "Test"
         assert rows[0]["status"] == "verified"
+        assert rows[0]["password"] == "workshop-secret"
 
     def test_skip_incomplete_rows(self):
         csv_text = """\

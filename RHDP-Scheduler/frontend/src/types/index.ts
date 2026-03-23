@@ -56,6 +56,7 @@ export interface DeploymentResult {
   error_message: string;
   showroom_url: string;
   showroom_status: string;
+  password: string;
 }
 
 export interface JobResponse {

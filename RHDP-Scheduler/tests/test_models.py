@@ -29,3 +29,4 @@ def test_deployment_result_fields():
     )
     assert r.status == "verified"
     assert r.error_message == ""
+    assert r.password == ""

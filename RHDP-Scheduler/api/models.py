@@ -56,6 +56,7 @@ class DeploymentResultResponse(BaseModel):
     error_message: str = ""
     showroom_url: str = ""
     showroom_status: str = ""
+    password: str = ""
 
 
 # ---------------------------------------------------------------------------

@@ -332,7 +332,7 @@ zt-ansiblebu.ansible-network-automation-basics-lab-2.event,AnsibleSecret2
 | Flag | Description |
 |------|-------------|
 | `--input-csv` | Path to input CSV file (required unless `--wizard`) |
-| `--output-csv` | Output CSV path (default: `deployment_results.csv`) |
+| `--output-csv` | Output CSV path (default: `deployment_results.csv`). The written file includes a **password** column from the input schedule; treat exports as sensitive. |
 | `--ci` | Filter to specific Catalog Item ID |
 | `--dry-run` | Preview payloads without creating resources |
 | `--kubeconfig` | Path to kubeconfig file |
