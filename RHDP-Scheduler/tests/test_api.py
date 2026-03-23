@@ -861,6 +861,7 @@ def test_validate_num_users_no_violations(mock_limit, uploaded_client):
     assert resp.status_code == 200
     data = resp.json()
     assert data["violations"] == []
+    assert data.get("users_not_in_catalog") == []
     assert data["checked"] == 1
     assert data["limits"]["openshift-cnv.ocp-virt-roadshow-multi-user.prod"] == 40
 
@@ -873,6 +874,7 @@ def test_validate_num_users_violation(mock_limit, uploaded_client):
     assert resp.status_code == 200
     data = resp.json()
     assert len(data["violations"]) == 1
+    assert data.get("users_not_in_catalog") == []
     v = data["violations"][0]
     assert v["requested_users"] == 20
     assert v["maximum"] == 10
@@ -886,8 +888,56 @@ def test_validate_num_users_cluster_unreachable(mock_limit, uploaded_client):
     assert resp.status_code == 200
     data = resp.json()
     assert data["violations"] == []
+    assert data.get("users_not_in_catalog") == []
     assert data["skipped"] == 1
     assert data["checked"] == 0
+
+
+ANSIBLE_LAB_NO_INSTANCES_CSV = """\
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Instances,Salesforce IDs
+Ansible Lab,zt-ansiblebu.ansible-network-automation-basics-lab-2.event,user-bbethell-redhat-com,30,True,Pass1,Admin,QA,Lab,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,,,,,,,
+"""
+
+VIRT_WITH_INSTANCES_CSV = """\
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Instances,Salesforce IDs
+Virt Row,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,20,True,Pass1,Admin,QA,Virt,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,,,,,2,
+"""
+
+
+@patch("api.routes.get_catalog_item_num_users_limit")
+def test_validate_num_users_advisory_when_catalog_has_no_num_users(mock_limit, client):
+    """Workshop UI + Users set + catalog without num_users → advisory (use Instances for spec.count)."""
+    mock_limit.return_value = {"has_num_users": False, "maximum": None, "minimum": None, "default": None}
+    assert client.post(
+        "/api/schedules/upload",
+        files={"file": ("lab.csv", ANSIBLE_LAB_NO_INSTANCES_CSV.encode(), "text/csv")},
+    ).status_code == 200
+    resp = client.post("/api/schedules/validate-num-users")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["violations"] == []
+    adv = data["users_not_in_catalog"]
+    assert len(adv) == 1
+    assert adv[0]["severity"] == "high"
+    assert adv[0]["users"] == 30
+    assert "Instances" in adv[0]["message"]
+
+
+@patch("api.routes.get_catalog_item_num_users_limit")
+def test_validate_num_users_advisory_medium_when_instances_set(mock_limit, client):
+    """Same mismatch with Instances set → medium severity (count from Instances)."""
+    mock_limit.return_value = {"has_num_users": False, "maximum": None, "minimum": None, "default": None}
+    assert client.post(
+        "/api/schedules/upload",
+        files={"file": ("virt.csv", VIRT_WITH_INSTANCES_CSV.encode(), "text/csv")},
+    ).status_code == 200
+    resp = client.post("/api/schedules/validate-num-users")
+    assert resp.status_code == 200
+    data = resp.json()
+    adv = data["users_not_in_catalog"]
+    assert len(adv) == 1
+    assert adv[0]["severity"] == "medium"
+    assert adv[0]["instances"] == 2
 
 
 @patch("api.routes.get_catalog_item_num_users_limit")

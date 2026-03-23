@@ -33,6 +33,10 @@ class WorkshopScheduleResponse(BaseModel):
     instances: Optional[int] = None
     concurrency: Optional[int] = None
     salesforce_ids: str = ""
+    salesforce_type: str = "opportunity"
+    aws_regions: str = ""
+    count: Optional[int] = None
+    white_glove: bool = True
     redirect: bool = True
     showroom_repo: str = ""
     showroom_ref: str = ""
@@ -230,10 +234,27 @@ class NumUsersViolation(BaseModel):
     default_value: Optional[int] = None
 
 
+class UsersNotInCatalogAdvisory(BaseModel):
+    """Users > 0 but catalog item has no num_users (e.g. use Instances for WorkshopProvision count)."""
+
+    ci_name: str
+    ci: str
+    namespace: str
+    users: int
+    enable_workshop_interface: bool
+    instances: Optional[int] = None
+    severity: Literal["high", "medium"]
+    message: str
+
+
 class NumUsersValidationResponse(BaseModel):
     """Response for POST /schedules/validate-num-users."""
 
     violations: List[NumUsersViolation] = Field(default_factory=list)
+    users_not_in_catalog: List[UsersNotInCatalogAdvisory] = Field(
+        default_factory=list,
+        description="Schedules with Users set where the catalog item does not define num_users",
+    )
     checked: int = 0
     skipped: int = 0
     limits: dict = Field(default_factory=dict, description="Per-CI maximum map, e.g. {'ci-name': 40}")

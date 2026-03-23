@@ -1787,6 +1787,66 @@ def get_catalog_item_num_users_limit(ci: str, config: RHDPConfig) -> Optional[Di
         return None
 
 
+def users_column_ignored_by_catalog_advisory(
+    schedule: WorkshopSchedule,
+    catalog_ci: str,
+    catalog_limit_info: Optional[Dict],
+) -> Optional[Dict[str, Any]]:
+    """
+    When Users > 0 but the catalog CatalogItem has no num_users parameter, return advisory fields.
+
+    With workshop UI enabled, seat/replica count for WorkshopProvision comes from Instances
+    (spec.count), not Users, for items that do not expose num_users (e.g. some .event labs).
+
+    With workshop UI disabled, ResourceClaim parameterValues may still omit num_users if the
+    catalog does not define it.
+
+    catalog_ci: the CatalogItem id being checked (schedule.ci or an asset CI for multi-asset).
+    """
+    if catalog_limit_info is None:
+        return None
+    if catalog_limit_info.get("has_num_users"):
+        return None
+    if schedule.users is None or schedule.users <= 0:
+        return None
+
+    inst = getattr(schedule, "instances", None)
+    has_positive_instances = inst is not None and inst > 0
+    u = schedule.users
+
+    if schedule.enable_workshop_interface:
+        if not has_positive_instances:
+            severity = "high"
+            message = (
+                f'"{schedule.ci_name}" has {u} in Users but catalog item {catalog_ci} '
+                "does not define num_users, so Users is ignored for WorkshopProvision. "
+                f"Set the Instances column to {u} (or your target replica count) for spec.count."
+            )
+        else:
+            severity = "medium"
+            message = (
+                f'"{schedule.ci_name}" catalog item {catalog_ci} has no num_users parameter; '
+                f"Users is ignored. WorkshopProvision spec.count uses Instances (currently {inst})."
+            )
+    else:
+        severity = "medium"
+        message = (
+            f'"{schedule.ci_name}" catalog item {catalog_ci} has no num_users parameter; '
+            "the Users column may not be applied to the ResourceClaim. Verify catalog parameters."
+        )
+
+    return {
+        "ci_name": schedule.ci_name,
+        "ci": catalog_ci,
+        "namespace": schedule.namespace,
+        "users": u,
+        "enable_workshop_interface": schedule.enable_workshop_interface,
+        "instances": inst,
+        "severity": severity,
+        "message": message,
+    }
+
+
 def _catalog_item_parameter_defs_by_name(spec: Dict) -> Dict[str, Dict]:
     """Merge parameter definitions from all known CatalogItem spec locations; later sources win."""
     by_name: Dict[str, Dict] = {}

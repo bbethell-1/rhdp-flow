@@ -28,6 +28,10 @@ export interface WorkshopSchedule {
   concurrency: number | null;
   instances: number | null;
   salesforce_ids: string;
+  salesforce_type: string;
+  aws_regions: string;
+  count: number | null;
+  white_glove: boolean;
   redirect: boolean;
   showroom_repo: string;
   showroom_ref: string;
@@ -181,8 +185,20 @@ export interface NumUsersViolation {
   default_value: number | null;
 }
 
+export interface UsersNotInCatalogAdvisory {
+  ci_name: string;
+  ci: string;
+  namespace: string;
+  users: number;
+  enable_workshop_interface: boolean;
+  instances: number | null;
+  severity: 'high' | 'medium';
+  message: string;
+}
+
 export interface NumUsersValidationResponse {
   violations: NumUsersViolation[];
+  users_not_in_catalog: UsersNotInCatalogAdvisory[];
   checked: number;
   skipped: number;
   limits: Record<string, number>;

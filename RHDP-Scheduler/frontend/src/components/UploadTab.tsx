@@ -28,7 +28,7 @@ import TrashIcon from '@patternfly/react-icons/dist/esm/icons/trash-icon';
 
 import { api } from '../services/api';
 import { DiffView } from './DiffView';
-import type { WorkshopSchedule, DeploymentResult, NumUsersViolation, ScheduleExampleMeta } from '../types';
+import type { WorkshopSchedule, DeploymentResult, NumUsersViolation, UsersNotInCatalogAdvisory, ScheduleExampleMeta } from '../types';
 
 /* ── Schedule date validation helpers ── */
 
@@ -108,6 +108,7 @@ export const UploadTab: React.FC<Props> = ({
 
   // num_users limit validation
   const [numUsersViolations, setNumUsersViolations] = useState<NumUsersViolation[]>([]);
+  const [usersNotInCatalog, setUsersNotInCatalog] = useState<UsersNotInCatalogAdvisory[]>([]);
   const [numUsersLimits, setNumUsersLimits] = useState<Record<string, number>>({});
 
   // Confirmation modal state
@@ -225,6 +226,7 @@ export const UploadTab: React.FC<Props> = ({
   const refreshClusterValidation = useCallback(async () => {
     setMissingNamespaces([]);
     setNumUsersViolations([]);
+    setUsersNotInCatalog([]);
     setNumUsersLimits({});
     const [nsRes, nuRes] = await Promise.all([
       api.validateNamespaces(),
@@ -232,6 +234,7 @@ export const UploadTab: React.FC<Props> = ({
     ]);
     if (nsRes.missing.length) setMissingNamespaces(nsRes.missing);
     if (nuRes.violations.length) setNumUsersViolations(nuRes.violations);
+    if (nuRes.users_not_in_catalog?.length) setUsersNotInCatalog(nuRes.users_not_in_catalog);
     if (Object.keys(nuRes.limits).length) setNumUsersLimits(nuRes.limits);
     return { nsRes, nuRes };
   }, []);
@@ -246,14 +249,15 @@ export const UploadTab: React.FC<Props> = ({
       const { nsRes, nuRes } = await refreshClusterValidation();
       const nNs = nsRes.missing.length;
       const nNu = nuRes.violations.length;
-      if (nNs === 0 && nNu === 0) {
+      const nAdv = nuRes.users_not_in_catalog?.length ?? 0;
+      if (nNs === 0 && nNu === 0 && nAdv === 0) {
         showToast(
           'Validation passed: namespaces found on cluster; num_users within catalog limits where checked.',
           'success',
         );
       } else {
         showToast(
-          `Validation: ${nNs} missing namespace(s), ${nNu} num_users over catalog limit — see alerts below.`,
+          `Validation: ${nNs} missing namespace(s), ${nNu} num_users over limit, ${nAdv} catalog/Users mismatch — see alerts below.`,
           'info',
         );
       }
@@ -570,6 +574,21 @@ export const UploadTab: React.FC<Props> = ({
                 Download CSV Template
               </Button>
             </SplitItem>
+            <SplitItem>
+              <Tooltip content="Opens a new browser tab (#edit) with all CSV fields per row. Shares the same API session; use Save there, then reload this page to refresh the table.">
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    const u = new URL(window.location.href);
+                    u.hash = 'edit';
+                    window.open(u.toString(), '_blank', 'noopener,noreferrer');
+                  }}
+                  isDisabled={schedules.length === 0}
+                >
+                  Full editor (new tab)
+                </Button>
+              </Tooltip>
+            </SplitItem>
           </Split>
           {scheduleExamples.length > 0 && (
             <div style={{ marginBottom: 10, fontSize: '0.875rem', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px 8px' }}>
@@ -625,6 +644,22 @@ export const UploadTab: React.FC<Props> = ({
                 ))}
               </ul>
               Deployment will be blocked until user counts are reduced below the catalog limit.
+            </Alert>
+          )}
+
+          {/* Catalog item has no num_users but CSV sets Users (e.g. use Instances for WorkshopProvision) */}
+          {usersNotInCatalog.length > 0 && (
+            <Alert
+              variant={usersNotInCatalog.some(a => a.severity === 'high') ? 'warning' : 'info'}
+              isInline
+              title={`${usersNotInCatalog.length} row(s): Users set but catalog item has no num_users`}
+              style={{ marginBottom: 12 }}
+            >
+              <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+                {usersNotInCatalog.map((a, i) => (
+                  <li key={i}>{a.message}</li>
+                ))}
+              </ul>
             </Alert>
           )}
 
