@@ -190,37 +190,70 @@ After uploading a CSV, the **Deploy Settings** card appears with three toggles:
 
 ## CSV Format
 
-The schedule CSV uses these columns (order doesn't matter, column names are case-insensitive):
+Parsed by `read_csv_input()` in `rhdp_flow.py`. **Column order does not matter.** Header names are **case-insensitive**. Optional **`Archive`** column is always ignored.
+
+**Dates:** `DD/MM/YYYY HH:MM` (UTC-style headers recommended). Use **either** all legacy **or** all `(UTC)` date headers—see required table below.
+
+### Required columns
+
+| Column | Notes |
+|--------|--------|
+| `CI Name`, `CI`, `Namespace` | Workshop label, catalog item ID, target namespace |
+| `Users` | Header **required**; cell may be **empty** (no `num_users` from CSV—catalog defaults may still apply) |
+| `Enable_workshop_interface` | `True` / `False` / `Yes` / `No` / `1` / `0` |
+| `Password`, `Activity`, `Purpose` | `Activity` / `Purpose` default to `Admin` / `QA` if the cell is blank |
+| **Dates (pick one set)** | **Legacy:** `Provisioning Date`, `Auto-stop`, `Auto-destroy` — **or** **UTC:** `Provisioning Date (UTC)`, `Auto-stop (UTC)`, `Auto-destroy (UTC)` |
+
+### Users, Instances, and Count (read this first)
+
+1. **`Users`** — When the cell has a number **> 0**, it becomes **`num_users`** on the ResourceClaim. This is the seat count the **catalog** cares about for limits (see below). Empty `Users` = do not set `num_users` from the CSV.
+
+2. **`Enable_workshop_interface` = False** (single workshop, “backend only”) — Only a **ResourceClaim** is created. **`Instances` is not used** for that row. Set seats with **`Users`** (or catalog defaults).
+
+3. **`Enable_workshop_interface` = True** or **multi-asset** — The tool may create **Workshop** / **WorkshopProvision** / **MultiWorkshop**. Then **`Instances`** controls **WorkshopProvision `spec.count`** (how many provision replicas) when that path runs; if **`Instances`** is blank, **`spec.count` defaults to `1`**. **`MultiWorkshop`** `numberSeats` is set from **`Users`** or **`Instances`** when those are positive.
+
+4. **`Count`** — If **> 1**, one CSV row becomes **N identical schedules** (N separate deployments). This is **not** the same as “seats per workshop” and does not replace **`Instances`**.
+
+Only the column name **`Instances`** is read for workshop-instance count (no `Workshop_instance_count`).
+
+### Catalog `num_users` maximum (e.g. Virt roadshow cap 20)
+
+Many catalog items declare a **maximum** for **`num_users`**. When the cluster is reachable:
+
+- After **CSV upload**, the UI calls **`POST /api/schedules/validate-num-users`**, compares each row’s **`Users`** to the catalog max, and shows a **red alert** if over limit (multi-asset asset CIs are checked too).
+- **Live deploy** is **blocked** in the UI and returns **400** from **`POST /api/deploy`** if any schedule has **`Users`** above the max. The CLI **`process_schedule`** path fails the row with the same check (non–dry-run).
+- **Dry-run deploy** still runs so you can inspect YAML even when over limit.
+- Validation uses the **`Users`** column only today—not **`Instances`**.
+
+To run **40 seats** when the catalog allows **20** per claim, model it explicitly: e.g. **two rows** (or **`Count` = 2** with **`Users` = 20** each), or one row per namespace—whatever matches how you want **separate ResourceClaims** and billing. The tool does **not** auto-split one row into “2×20” for you.
+
+### Optional columns
+
+| Column | Role |
+|--------|------|
+| `Workshop Name` | Overrides display name (default: `CI Name`) |
+| `Multi_Asset`, `Asset_CIs` | Legacy multi-asset (one row, many CIs) |
+| `Multi_Workshop_Name` | New-style multi-asset: same name on each row, one CI per row |
+| `Concurrency` | WorkshopProvision concurrency (default 1) |
+| `Instances` | WorkshopProvision / MultiWorkshop seating path (see above) |
+| `Salesforce IDs` | Chargeback; `;`-separated; optional `type:id` (alias header: `campaign_id`) |
+| `Salesforce_Type` | Default type for plain IDs: `opportunity`, `campaign`, `project`, `cdh` |
+| `Count` | Expand row into N deployments |
+| `AWS_Region` | Comma-separated regions for multi-region |
+| `Redirect` | Per-row lab redirect; `False` / `0` / `No` / `N` off (global UI toggle still affects uploads) |
+| `Showroom_Repo`, `Showroom_Ref`, `Showroom_NoVNC`, `Showroom_Zerotouch` | Showroom lab content |
+
+**Not in CSV:** **White Glove** — only Deploy Settings / API / CLI config. Extra columns (e.g. `White_Glove`) are ignored by the parser.
+
+### Full header checklist
 
 ```
-CI Name, CI, Namespace, Users, Enable_workshop_interface, Password,
-Activity, Purpose, Salesforce IDs, Workshop Name,
-Provisioning Date (UTC), Auto-stop (UTC), Auto-destroy (UTC),
-Multi_Asset, Asset_CIs, Multi_Workshop_Name, Instances, Concurrency
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Instances,Salesforce IDs,Salesforce_Type,Count,AWS_Region,Redirect,Showroom_Repo,Showroom_Ref,Showroom_NoVNC,Showroom_Zerotouch
 ```
 
-| Column | Required | Description |
-|--------|----------|-------------|
-| CI Name | Yes | Friendly display name |
-| CI | Yes | Catalog Item ID (e.g. `openshift-cnv.ocp-virt-roadshow-multi-user.prod`) |
-| Namespace | Yes | Target namespace (e.g. `user-bbethell-redhat-com`) |
-| Users | No | Number of users/seats per workshop |
-| Enable_workshop_interface | No | `True` / `False` — enable the student UI |
-| Password | No | Workshop password |
-| Activity | No | Activity label |
-| Purpose | No | Purpose label |
-| Salesforce IDs | No | Salesforce campaign/opportunity IDs for chargeback |
-| Workshop Name | No | Display name for the workshop provision |
-| Provisioning Date (UTC) | Yes | `DD/MM/YYYY HH:MM` format |
-| Auto-stop (UTC) | Yes | When to stop the workshop |
-| Auto-destroy (UTC) | Yes | When to destroy resources |
-| Multi_Asset | No | `True` if this is a multi-asset workshop |
-| Asset_CIs | No | Comma-separated CIs for multi-asset workshops |
-| Multi_Workshop_Name | No | Name for the grouped MultiWorkshop |
-| Instances | No | Total seat/instance count (used for multi-asset numberSeats) |
-| Concurrency | No | WorkshopProvision concurrency (default 1) |
+Use **Download CSV Template** in the UI or **`GET /api/templates/schedule`**.
 
-See **sample-csvs/** for working examples and **docs/examples/** for more:
+See **sample-csvs/** and **docs/examples/** for more:
 
 - **sample-csvs:** `multi-asset-event-v2.csv`, `multi_asset_grouped.csv`, `dedicated_per_user.csv`, `asset_passwords_example.csv`
 - **docs/examples:** [README](docs/examples/README.md) — minimal_workshop, count_expansion, multi_region, no_auto_stop, event_catalog_item, salesforce_multi_type, two_workshops_same_namespace, and more

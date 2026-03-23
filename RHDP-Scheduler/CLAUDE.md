@@ -157,32 +157,15 @@ done
 
 ## CSV Column Reference
 
-| Column | Required | Default | Notes |
-|--------|----------|---------|-------|
-| `CI Name` | Yes | — | Display name for the workshop |
-| `CI` | Yes | — | Catalog Item ID (vendor.item.env) |
-| `Namespace` | Yes | — | Kubernetes namespace |
-| `Users` | No | unset | Number of users; empty = no override |
-| `Enable_workshop_interface` | Yes | — | True/False — create Workshop resource with UI |
-| `Password` | Yes | — | Workshop access password |
-| `Activity` | Yes | Admin | Purpose activity |
-| `Purpose` | Yes | QA | Purpose label |
-| `Workshop Name` | No | CI Name | Display name override |
-| `Provisioning Date (UTC)` | Yes | — | DD/MM/YYYY HH:MM |
-| `Auto-stop (UTC)` | Yes | — | DD/MM/YYYY HH:MM (can be empty) |
-| `Auto-destroy (UTC)` | Yes | — | DD/MM/YYYY HH:MM |
-| `Multi_Asset` | No | False | True if multi-asset workshop |
-| `Asset_CIs` | No | — | Comma-separated CIs for multi-asset |
-| `Multi_Workshop_Name` | No | — | Custom name for grouped multi-asset |
-| `Concurrency` | No | 1 | WorkshopProvision concurrency |
-| `Instances` | No | — | Seat count for multi-asset |
-| `Salesforce IDs` | No | — | SF IDs (semicolon-separated, type-prefixed) |
-| `Salesforce_Type` | No | opportunity | Default type for unprefixed SF IDs |
-| `Count` | No | — | Deployment count (distinct from instances) |
-| `AWS_Region` | No | — | Comma-separated AWS regions for multi-region |
-| `Redirect` | No | True | Per-schedule labUserInterface.redirect; False/0/No/N disables |
+Human-readable spec: [README.md — CSV Format](README.md#csv-format).
 
-The `Redirect` column is per-schedule. The global "Redirect (all)" toggle in Deploy Settings sets the default for new uploads and flips all loaded rows. Per-row toggles in the schedule table override individual rows.
+**Mechanics:** Case-insensitive headers; any column order; optional `Archive` ignored. Dates: `DD/MM/YYYY HH:MM`; either legacy three date columns or all three `… (UTC)`.
+
+**Seats:** `Users` → `num_users` when >0; catalog max enforced on deploy (UI alert + API 400 + CLI fail). `Enable_workshop_interface` False → ResourceClaim only → **`Instances` unused**; use `Users`. UI True or multi-asset → `Instances` → WorkshopProvision `spec.count` (default 1 if unset). `Count` >1 → N replicated schedules—not seat count. Only `Instances` column (no `Workshop_instance_count`).
+
+**Optional (all):** `Workshop Name`, `Multi_Asset`, `Asset_CIs`, `Multi_Workshop_Name`, `Concurrency`, `Instances`, `Salesforce IDs` (`campaign_id`), `Salesforce_Type`, `Count`, `AWS_Region`, `Redirect`, `Showroom_*`.
+
+**Not CSV:** White Glove (Deploy Settings / config). **Redirect:** per-row CSV column; global "Redirect (all)" in Deploy Settings sets defaults for new uploads and can flip all rows—per-row table toggles still win.
 
 ## Sample Data for Demos
 

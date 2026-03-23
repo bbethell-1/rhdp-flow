@@ -145,7 +145,7 @@ class WorkshopSchedule:
     asset_cis: str = ""  # Comma-separated list of catalog items for multi-asset workshops (e.g., "ci1,ci2,ci3")
     multi_workshop_name: str = ""  # Optional custom name for multi-asset workshop (e.g., "automation-test" or "test-qvvdw")
     users: Optional[int] = None  # Optional; when omitted/empty we don't set num_users
-    instances: Optional[int] = None  # Optional; workshop instance/seat count for multi-asset (e.g. 30); used for numberSeats when users not set
+    instances: Optional[int] = None  # Optional; WorkshopProvision spec.count / MultiWorkshop numberSeats when Users unset; not sent on ResourceClaim-only deploy (Enable_workshop_interface False)
     concurrency: Optional[int] = None  # Optional; WorkshopProvision concurrency (default 1)
     salesforce_ids: str = ""  # Semicolon-separated salesforce items, e.g. "opportunity:71456169;campaign:701Pe;project:P144" or plain ID
     salesforce_type: str = "opportunity"  # Default type when salesforce_ids has no type prefix (opportunity, campaign, project, cdh)
@@ -329,7 +329,7 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
     - CI Name
     - CI (Catalog Item ID)
     - Namespace
-    - Users
+    - Users (header required; cell may be empty = no override)
     - Enable_workshop_interface
     - Password
     - Activity (e.g., "Admin")
@@ -337,9 +337,16 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
     - Provisioning Date (or Provisioning Date (UTC))
     - Auto-stop (or Auto-stop (UTC))
     - Auto-destroy (or Auto-destroy (UTC))
-    
+
+    Optional columns (all): Workshop Name, Multi_Asset, Asset_CIs,
+    Multi_Workshop_Name, Concurrency, Instances, Salesforce IDs (alias campaign_id),
+    Salesforce_Type, Count, AWS_Region, Redirect, Showroom_Repo, Showroom_Ref,
+    Showroom_NoVNC, Showroom_Zerotouch.
+
     An optional "Archive" column is ignored if present (any value or blank);
     it is not used by the script and can be used for your own logic.
+
+    Full reference: README.md (CSV Format section).
     
     Args:
         filepath: Path to input CSV file
@@ -423,7 +430,12 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                     is_multi_asset_str = row.get(header_map.get('multi_asset', 'Multi_Asset'), '').strip()
                     asset_cis = row.get(header_map.get('asset_cis', 'Asset_CIs'), '').strip()
                     multi_workshop_name = row.get(header_map.get('multi_workshop_name', 'Multi_Workshop_Name'), '').strip()
-                    instances_str = row.get(header_map.get('instances', 'Instances'), '').strip()
+                    # Optional Instances column → schedule.instances. No CSV default: blank/missing → None.
+                    # Used when WorkshopProvision is created (workshop UI enabled) or multi-asset provisions / MultiWorkshop numberSeats.
+                    # ResourceClaim-only deploy (Enable_workshop_interface False) does not pass Instances into the claim; use Users → num_users.
+                    # build_workshop_provision_dict uses spec.count = 1 when count is None or not positive.
+                    instances_key = header_map.get("instances")
+                    instances_str = row.get(instances_key, "").strip() if instances_key else ""
                     concurrency_str = row.get(header_map.get('concurrency', 'Concurrency'), '').strip()
                     salesforce_ids = row.get(header_map.get('salesforce ids', header_map.get('campaign_id', 'Salesforce IDs')), '').strip()
                     salesforce_type = row.get(header_map.get('salesforce_type', header_map.get('salesforce type', 'Salesforce_Type')), '').strip().lower() or 'opportunity'
@@ -484,7 +496,7 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                             logger.warning(f"Row {row_num}: Invalid users value '{users_str}', treating as unspecified")
                             users = None
                     
-                    # Parse optional Instances (workshop instance/seat count for multi-asset)
+                    # Optional workshop instance count (None if no numeric value above)
                     instances: Optional[int] = None
                     if instances_str:
                         try:

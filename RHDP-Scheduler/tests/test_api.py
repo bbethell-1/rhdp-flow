@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from api.server import app
 from api import routes
 from api.limiter import limiter as _test_limiter
+from rhdp_flow import read_csv_input
 from tests.conftest import BASIC_WORKSHOP_CSV, SHOWROOM_CSV, make_oc_dispatcher
 
 
@@ -625,6 +626,19 @@ def test_template_download(client):
     assert resp.headers["content-type"] == "text/csv; charset=utf-8"
     assert "CI Name" in resp.text
     assert "Example Workshop" in resp.text
+    assert "CI" in resp.text
+    assert "Showroom_Repo" in resp.text
+
+
+def test_template_download_parseable(tmp_path, client):
+    """Downloaded template must use headers accepted by read_csv_input."""
+    resp = client.get("/api/templates/schedule")
+    assert resp.status_code == 200
+    p = tmp_path / "schedule_template.csv"
+    p.write_text(resp.text, encoding="utf-8")
+    schedules = read_csv_input(p)
+    assert len(schedules) == 1
+    assert schedules[0].ci == "vendor.workshop.prod"
 
 
 # ---------------------------------------------------------------------------
@@ -679,8 +693,8 @@ def test_diff_detects_removal(uploaded_client):
     """Uploading an empty-data CSV shows the original as removed."""
     # An entirely different CI should show 1 added, 1 removed
     other_csv = """\
-CI Name,CI,Namespace,Users,Workshop_instance_count,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Instances,Salesforce IDs
-New Workshop,new-vendor.new-item.prod,user-new-ns,10,1,True,Pass1,Admin,QA,New WS,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,,,,,,
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Instances,Salesforce IDs
+New Workshop,new-vendor.new-item.prod,user-new-ns,10,True,Pass1,Admin,QA,New WS,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,,,,,,1,
 """
     resp = uploaded_client.post(
         "/api/schedules/diff",
