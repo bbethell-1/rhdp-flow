@@ -1309,3 +1309,89 @@ def test_debug_config_includes_job_stats(client):
     assert data["jobs"]["total"] >= 0
     assert data["jobs"]["max"] > 0
     assert "truncated" in data["jobs"]
+
+
+# ---------------------------------------------------------------------------
+# Deploy cancel / pause / resume
+# ---------------------------------------------------------------------------
+
+def test_cancel_no_job(client):
+    resp = client.post("/api/deploy/cancel/nonexistent")
+    assert resp.status_code == 404
+
+
+def test_pause_no_job(client):
+    resp = client.post("/api/deploy/pause/nonexistent")
+    assert resp.status_code == 404
+
+
+def test_resume_no_job(client):
+    resp = client.post("/api/deploy/resume/nonexistent")
+    assert resp.status_code == 404
+
+
+def test_cancel_running_job(client):
+    """Create a job, set it running, then cancel it."""
+    job = jobs.create_job()
+    jobs.update_job(job.job_id, status=jobs.Status.running)
+    resp = client.post(f"/api/deploy/cancel/{job.job_id}")
+    assert resp.status_code == 200
+    assert jobs.is_cancel_requested(job.job_id)
+
+
+def test_pause_resume_job(client):
+    """Create a running job, pause it, then resume it."""
+    job = jobs.create_job()
+    jobs.update_job(job.job_id, status=jobs.Status.running)
+    resp = client.post(f"/api/deploy/pause/{job.job_id}")
+    assert resp.status_code == 200
+    assert job.status == jobs.Status.paused
+    resp = client.post(f"/api/deploy/resume/{job.job_id}")
+    assert resp.status_code == 200
+    assert job.status == jobs.Status.running
+
+
+# ---------------------------------------------------------------------------
+# Deploy preview (multi-region)
+# ---------------------------------------------------------------------------
+
+def test_deploy_preview_no_schedules(client):
+    resp = client.post("/api/deploy/preview", json={})
+    assert resp.status_code == 400
+
+
+def test_deploy_preview_single_region(uploaded_client):
+    """Single-region schedule has multi_region=False."""
+    resp = uploaded_client.post("/api/deploy/preview", json={})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["schedules"]) >= 1
+    for item in data["schedules"]:
+        assert item["multi_region"] is False
+
+
+MULTI_REGION_CSV = """CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),AWS_Region
+Region Test,vendor.test.prod,user-test-ns,30,True,pass123,Admin,QA,Region Workshop,01/01/2026 09:00,01/01/2026 17:00,02/01/2026 09:00,"us-east-1,eu-west-1,ap-southeast-1"
+"""
+
+
+def test_deploy_preview_multi_region(client):
+    """Multi-region schedule shows per-region user split."""
+    client.post(
+        "/api/schedules/upload",
+        files={"file": ("mr.csv", MULTI_REGION_CSV.encode(), "text/csv")},
+    )
+    resp = client.post("/api/deploy/preview", json={})
+    assert resp.status_code == 200
+    data = resp.json()
+    item = data["schedules"][0]
+    assert item["multi_region"] is True
+    assert len(item["regions"]) == 3
+    total_users = sum(r["users"] for r in item["regions"])
+    assert total_users == 30
+    assert item["regions"][0]["region"] == "us-east-1"
+    assert item["regions"][0]["users"] == 10
+    assert item["regions"][1]["region"] == "eu-west-1"
+    assert item["regions"][1]["users"] == 10
+    assert item["regions"][2]["region"] == "ap-southeast-1"
+    assert item["regions"][2]["users"] == 10

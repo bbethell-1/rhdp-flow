@@ -65,11 +65,12 @@ export const UploadTab: React.FC<Props> = ({
   dryRun, schedules, setSchedules, setResults, showToast, onClear, setDeployLogFile,
 }) => {
   const logRef = useRef<HTMLDivElement>(null);
-  const esRef = useRef<EventSource | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const jobIdRef = useRef<string | null>(null);
 
-  // Clean up EventSource on unmount
+  // Clean up WebSocket on unmount
   useEffect(() => {
-    return () => { esRef.current?.close(); esRef.current = null; };
+    return () => { wsRef.current?.close(); wsRef.current = null; };
   }, []);
 
   useEffect(() => {
@@ -79,6 +80,7 @@ export const UploadTab: React.FC<Props> = ({
   }, []);
 
   const [deploying, setDeploying] = useState(false);
+  const [deployPaused, setDeployPaused] = useState(false);
   const [validating, setValidating] = useState(false);
   const [yamlDownloading, setYamlDownloading] = useState(false);
   const [rowEditsLocked, setRowEditsLocked] = useState(false);
@@ -401,7 +403,6 @@ export const UploadTab: React.FC<Props> = ({
   }, []);
 
   const handleDeploy = async () => {
-    // If live deploy (not dry-run), require confirmation
     if (!dryRun && !showDeployConfirm) {
       setShowDeployConfirm(true);
       return;
@@ -414,76 +415,84 @@ export const UploadTab: React.FC<Props> = ({
       return;
     }
     setDeploying(true);
+    setDeployPaused(false);
     setProgress(0);
     setProgressMsg('Starting...');
     setLogLines([]);
 
     try {
       const job = await api.deploy({ dry_run: dryRun, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect, showroom_novnc: showroomNovnc, showroom_zerotouch: showroomZerotouch });
-      const es = api.deployStream(job.job_id);
-      esRef.current = es;
+      jobIdRef.current = job.job_id;
+      const ws = api.deployWebSocket(job.job_id);
+      wsRef.current = ws;
 
-      es.addEventListener('status', (e: MessageEvent) => {
-        const d = JSON.parse(e.data);
-        setProgress(d.progress);
-        setProgressMsg(d.message || '');
-        if (d.message) appendLog(d.message);
+      const handleStatus = (d: Record<string, unknown>) => {
+        if (d.keepalive) return;
+        setProgress(d.progress as number);
+        setProgressMsg((d.message as string) || '');
+        if (d.message) appendLog(d.message as string);
+        if (d.status === 'paused') setDeployPaused(true);
+        if (d.status === 'running') setDeployPaused(false);
 
-        if (d.status === 'completed' || d.status === 'failed') {
-          es.close();
-          esRef.current = null;
+        if (d.status === 'completed' || d.status === 'failed' || d.status === 'cancelled') {
+          ws.close();
+          wsRef.current = null;
+          jobIdRef.current = null;
           setDeploying(false);
-          if (d.log_file) setDeployLogFile?.(d.log_file);
+          setDeployPaused(false);
+          if (d.log_file) setDeployLogFile?.(d.log_file as string);
           if (d.status === 'completed') {
             showToast('Deployment completed', 'success');
-            api.deployResults().then(r => setResults(r)).catch((err) => { console.warn('Failed to fetch results after deploy', err); });
+            api.deployResults().then(r => setResults(r)).catch((err) => { console.warn('Failed to fetch results', err); });
+          } else if (d.status === 'cancelled') {
+            showToast(`Deployment cancelled after ${d.progress}%`, 'info');
+            api.deployResults().then(r => setResults(r)).catch(() => {});
           } else {
             showToast(`Deployment failed: ${d.error || 'unknown'}`, 'danger');
           }
         }
-      });
+      };
 
-      // Auto-reconnect with exponential backoff
-      let retryCount = 0;
-      const maxRetries = 5;
-      es.addEventListener('error', () => {
-        es.close();
-        esRef.current = null;
-        if (retryCount < maxRetries) {
-          retryCount++;
-          const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 16000);
-          appendLog(`SSE connection lost, reconnecting in ${delay / 1000}s (attempt ${retryCount}/${maxRetries})...`);
-          setTimeout(() => {
-            const retryEs = api.deployStream(job.job_id);
-            esRef.current = retryEs;
-            retryEs.addEventListener('status', (e: MessageEvent) => {
-              const d = JSON.parse(e.data);
-              setProgress(d.progress);
-              setProgressMsg(d.message || '');
-              if (d.message) appendLog(d.message);
-              if (d.status === 'completed' || d.status === 'failed') {
-                retryEs.close();
-                esRef.current = null;
-                setDeploying(false);
-                if (d.log_file) setDeployLogFile?.(d.log_file);
-                if (d.status === 'completed') {
-                  showToast('Deployment completed', 'success');
-                  api.deployResults().then(r => setResults(r)).catch((err) => { console.warn('Failed to fetch results after retry deploy', err); });
-                } else {
-                  showToast(`Deployment failed: ${d.error || 'unknown'}`, 'danger');
-                }
-              }
-            });
-            retryEs.addEventListener('error', () => { retryEs.close(); esRef.current = null; });
-          }, delay);
-        } else {
-          setDeploying(false);
-          showToast('Connection lost during deploy (max retries exceeded)', 'danger');
-        }
-      });
+      ws.onmessage = (e) => {
+        try { handleStatus(JSON.parse(e.data)); } catch { /* ignore parse errors */ }
+      };
+      ws.onerror = () => {
+        appendLog('WebSocket error — falling back to polling');
+        ws.close();
+        wsRef.current = null;
+        const poll = setInterval(async () => {
+          try {
+            const s = await api.deployStatus(job.job_id);
+            handleStatus(s as unknown as Record<string, unknown>);
+            if (s.status === 'completed' || s.status === 'failed') clearInterval(poll);
+          } catch { clearInterval(poll); setDeploying(false); }
+        }, 2000);
+      };
     } catch (e) {
       setDeploying(false);
       showToast(`Deploy failed: ${e}`, 'danger');
+    }
+  };
+
+  const handleDeployCancel = () => {
+    if (jobIdRef.current) {
+      wsRef.current?.send(JSON.stringify({ command: 'cancel' }));
+      api.deployCancel(jobIdRef.current).catch(() => {});
+      appendLog('Cancel requested...');
+    }
+  };
+
+  const handleDeployPause = () => {
+    if (jobIdRef.current) {
+      if (deployPaused) {
+        wsRef.current?.send(JSON.stringify({ command: 'resume' }));
+        api.deployResume(jobIdRef.current).catch(() => {});
+        appendLog('Resuming...');
+      } else {
+        wsRef.current?.send(JSON.stringify({ command: 'pause' }));
+        api.deployPause(jobIdRef.current).catch(() => {});
+        appendLog('Pausing after current workshop...');
+      }
     }
   };
 
@@ -808,6 +817,22 @@ export const UploadTab: React.FC<Props> = ({
                                   <div><strong>Multi Workshop Name:</strong> {s.multi_workshop_name || '-'}</div>
                                 </>
                               )}
+                              {s.aws_regions && (() => {
+                                const regions = s.aws_regions.split(',').map(r => r.trim()).filter(Boolean);
+                                const total = s.users || 0;
+                                const base = regions.length > 1 ? Math.floor(total / regions.length) : total;
+                                const rem = regions.length > 1 ? total % regions.length : 0;
+                                return (
+                                  <div style={{ gridColumn: '1 / -1' }}>
+                                    <strong>AWS Regions:</strong>{' '}
+                                    {regions.map((r, idx) => {
+                                      const count = base + (idx < rem ? 1 : 0);
+                                      return <span key={r} style={{ marginRight: 12 }}>{r} ({count} users)</span>;
+                                    })}
+                                    {regions.length >= 2 && <em style={{ fontSize: '0.85em', opacity: 0.7 }}> — multi-region deploy</em>}
+                                  </div>
+                                );
+                              })()}
                             </div>
                           </ExpandableRowContent>
                         </Td>
@@ -937,10 +962,18 @@ export const UploadTab: React.FC<Props> = ({
         </EmptyState>
       )}
 
-      {/* Progress */}
+      {/* Progress + Cancel/Pause controls */}
       {deploying && (
         <div style={{ marginBottom: 16 }}>
           <Progress value={progress} title={progressMsg} aria-label="Deploy progress" />
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <Button variant="secondary" size="sm" onClick={handleDeployPause}>
+              {deployPaused ? 'Resume' : 'Pause'}
+            </Button>
+            <Button variant="danger" size="sm" onClick={handleDeployCancel}>
+              Cancel
+            </Button>
+          </div>
         </div>
       )}
 
