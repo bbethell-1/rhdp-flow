@@ -958,7 +958,26 @@ export const UploadTab: React.FC<Props> = ({
         </>
       ) : (
         <EmptyState titleText="No schedules loaded" headingLevel="h3" icon={UploadIcon}>
-          <EmptyStateBody>Upload a CSV file to preview and deploy workshop schedules.</EmptyStateBody>
+          <EmptyStateBody>
+            Upload a CSV file to preview and deploy workshop schedules.
+            {scheduleExamples.length > 0 && (
+              <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', gap: '4px 8px' }}>
+                <span>Or load an example:</span>
+                {scheduleExamples.map((ex) => (
+                  <Button
+                    key={ex.slug}
+                    variant="link"
+                    isInline
+                    isDisabled={!!loadingExampleSlug}
+                    isLoading={loadingExampleSlug === ex.slug}
+                    onClick={() => handleLoadExample(ex.slug)}
+                  >
+                    {ex.label}
+                  </Button>
+                ))}
+              </div>
+            )}
+          </EmptyStateBody>
         </EmptyState>
       )}
 
