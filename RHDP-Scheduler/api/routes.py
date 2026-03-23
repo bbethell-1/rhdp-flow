@@ -787,6 +787,9 @@ def deploy_dry_run(request: Request, body: DeployRequest = DeployRequest(), _key
         white_glove=body.white_glove,
         redirect=body.redirect,
     )
+    if body.export_yaml_dir:
+        config.dry_run_export_yaml_dir = body.export_yaml_dir
+        config.dry_run_yaml_export_seq = 0
     # U3: Propagate showroom deploy settings to schedules
     for s in schedules:
         if s.showroom_repo:

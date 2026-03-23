@@ -6,10 +6,14 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from pathlib import Path
+
 from rhdp_flow import (
     derive_base_domain,
     build_resource_claim_payload,
+    export_dry_run_manifest_yaml,
     get_catalog_item_num_users_limit,
+    get_catalog_item_parameter_defaults,
     WorkshopSchedule,
     RHDPConfig,
 )
@@ -166,3 +170,75 @@ class TestGetCatalogItemNumUsersLimit:
         assert result is not None
         assert result["has_num_users"] is True
         assert result["maximum"] == 100
+
+
+class TestGetCatalogItemParameterDefaults:
+    """Tests for get_catalog_item_parameter_defaults."""
+
+    @patch("subprocess.run")
+    def test_collects_openapi_defaults(self, mock_run):
+        ci_json = {
+            "spec": {
+                "parameters": [
+                    {
+                        "name": "aws_region",
+                        "openAPIV3Schema": {"type": "string", "default": "us-east-2"},
+                    },
+                    {
+                        "name": "ocp4_fips_enable",
+                        "openAPIV3Schema": {"type": "boolean", "default": False},
+                    },
+                    {"name": "no_default", "openAPIV3Schema": {"type": "string"}},
+                ],
+            }
+        }
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=json.dumps(ci_json), stderr=""
+        )
+        config = make_config()
+        result = get_catalog_item_parameter_defaults("test.ci.prod", config)
+        assert result["aws_region"] == "us-east-2"
+        assert result["ocp4_fips_enable"] is False
+        assert "no_default" not in result
+
+    @patch("subprocess.run")
+    def test_provider_spec_definitions(self, mock_run):
+        ci_json = {
+            "spec": {
+                "parameters": [],
+                "providerSpec": {
+                    "parameterDefinitions": [
+                        {
+                            "name": "aws_region",
+                            "openAPIV3Schema": {"default": "eu-west-1"},
+                        }
+                    ]
+                },
+            }
+        }
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout=json.dumps(ci_json), stderr=""
+        )
+        config = make_config()
+        result = get_catalog_item_parameter_defaults("test.ci.prod", config)
+        assert result["aws_region"] == "eu-west-1"
+
+    @patch("subprocess.run")
+    def test_returns_empty_when_unreadable(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="nope")
+        config = make_config()
+        assert get_catalog_item_parameter_defaults("missing.ci.prod", config) == {}
+
+
+def test_export_dry_run_manifest_yaml_writes(tmp_path):
+    """Dry-run YAML export writes a file and strips internal keys."""
+    config = make_config(dry_run=True)
+    config.dry_run_export_yaml_dir = str(tmp_path)
+    config.dry_run_yaml_export_seq = 0
+    manifest = {"kind": "ResourceClaim", "apiVersion": "poolboy.gpte.redhat.com/v1", "_white_glove": True}
+    out = export_dry_run_manifest_yaml(config, "resourceclaim-test.ci", manifest)
+    assert out and Path(out).exists()
+    text = Path(out).read_text()
+    assert "ResourceClaim" in text
+    assert "_white_glove" not in text
+    assert config.dry_run_yaml_export_seq == 1
