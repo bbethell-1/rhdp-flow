@@ -423,7 +423,13 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                     is_multi_asset_str = row.get(header_map.get('multi_asset', 'Multi_Asset'), '').strip()
                     asset_cis = row.get(header_map.get('asset_cis', 'Asset_CIs'), '').strip()
                     multi_workshop_name = row.get(header_map.get('multi_workshop_name', 'Multi_Workshop_Name'), '').strip()
-                    instances_str = row.get(header_map.get('instances', 'Instances'), '').strip()
+                    # Instances cell first; if blank, use Workshop_instance_count when that column exists.
+                    instances_key = header_map.get("instances")
+                    instances_str = row.get(instances_key, "").strip() if instances_key else ""
+                    if not instances_str:
+                        wic_key = header_map.get("workshop_instance_count")
+                        if wic_key:
+                            instances_str = row.get(wic_key, "").strip()
                     concurrency_str = row.get(header_map.get('concurrency', 'Concurrency'), '').strip()
                     salesforce_ids = row.get(header_map.get('salesforce ids', header_map.get('campaign_id', 'Salesforce IDs')), '').strip()
                     salesforce_type = row.get(header_map.get('salesforce_type', header_map.get('salesforce type', 'Salesforce_Type')), '').strip().lower() or 'opportunity'
