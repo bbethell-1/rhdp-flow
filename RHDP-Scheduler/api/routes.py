@@ -199,6 +199,70 @@ def _write_qa_csv_for_namespace(namespace: str) -> str:
     return tmp.name
 
 
+def _coerce_optional_int(val) -> Optional[int]:
+    if val is None or val == "":
+        return None
+    if isinstance(val, bool):
+        return int(val)
+    if isinstance(val, int):
+        return val
+    if isinstance(val, float):
+        return int(val)
+    try:
+        return int(str(val).strip())
+    except ValueError:
+        return None
+
+
+def _normalize_qa_result_dict(r: dict) -> dict:
+    """Align QA1 / QA2 dict keys so QAResultItem and the UI see consistent fields."""
+    out = dict(r)
+
+    if out.get("expected_users") in (None, ""):
+        es = out.get("expected_seats")
+        if es not in (None, ""):
+            coerced = _coerce_optional_int(es)
+            if coerced is not None:
+                out["expected_users"] = coerced
+    elif out.get("expected_users") == "":
+        out["expected_users"] = None
+    elif not isinstance(out.get("expected_users"), int):
+        out["expected_users"] = _coerce_optional_int(out.get("expected_users"))
+
+    if out.get("actual_count") is None:
+        for key in ("actual_seats", "actual_users"):
+            raw = out.get(key)
+            if raw is not None and raw != "":
+                coerced = _coerce_optional_int(raw)
+                out["actual_count"] = coerced if coerced is not None else raw
+                break
+
+    if not out.get("deployed") and out.get("provisioned") is not None:
+        out["deployed"] = "Yes" if out.get("provisioned") else "No"
+
+    return out
+
+
+def _merge_qa1_qa2(qa1: List[dict], qa2: List[dict]) -> List[dict]:
+    """One row per workshop: prefer QA2 (deployment truth) when both ran."""
+    r2_by_key = {(r.get("ci_name"), r.get("ci"), r.get("namespace")): r for r in qa2}
+    merged: List[dict] = []
+    seen_q2: set = set()
+    for r in qa1:
+        k = (r.get("ci_name"), r.get("ci"), r.get("namespace"))
+        if k in r2_by_key:
+            merged.append(r2_by_key[k])
+            seen_q2.add(k)
+        else:
+            merged.append(r)
+    for r in qa2:
+        k = (r.get("ci_name"), r.get("ci"), r.get("namespace"))
+        if k not in seen_q2:
+            merged.append(r)
+            seen_q2.add(k)
+    return merged
+
+
 # Cached base domain derived from the connected cluster
 _cached_base_domain: Optional[str] = None
 
@@ -845,7 +909,12 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                 if s.showroom_repo:
                     s.showroom_novnc = body.showroom_novnc
                     s.showroom_zerotouch = body.showroom_zerotouch
-            jobs.update_job(job.job_id, status=jobs.Status.running, message="Starting deployment")
+            jobs.update_job(
+                job.job_id,
+                status=jobs.Status.running,
+                message="Starting deployment",
+                progress=1,
+            )
 
             # Replicate main() deploy loop logic
             grouped_multi = {}
@@ -865,7 +934,10 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                 await jobs.wait_if_paused(job.job_id)
                 if jobs.is_cancel_requested(job.job_id):
                     break
-                mw_name = create_multi_workshop_from_group(group_scheds, config)
+                # Run sync OpenShift work off the event loop so WebSocket/polling can deliver progress.
+                mw_name = await asyncio.to_thread(
+                    create_multi_workshop_from_group, group_scheds, config
+                )
                 first = group_scheds[0]
                 if mw_name:
                     url = f"https://{config.base_domain}/multi-workshop/{first.namespace}/{mw_name}"
@@ -895,7 +967,9 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                 await jobs.wait_if_paused(job.job_id)
                 if jobs.is_cancel_requested(job.job_id):
                     break
-                result = process_schedule(s, config, asset_passwords=_asset_passwords)
+                result = await asyncio.to_thread(
+                    process_schedule, s, config, _asset_passwords
+                )
                 results.append(result)
                 done += 1
                 pct = int(done / total * 100) if total else 100
@@ -1265,7 +1339,9 @@ async def deploy_retry(request: Request, body: RetryRequest, _key=Depends(verify
 
             results = []
             for i, s in enumerate(matching):
-                result = process_schedule(s, config, asset_passwords=_asset_passwords)
+                result = await asyncio.to_thread(
+                    process_schedule, s, config, _asset_passwords
+                )
                 results.append(result)
                 pct = int((i + 1) / len(matching) * 100)
                 jobs.update_job(
@@ -1555,13 +1631,16 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
 
     handler, log_path = start_log_capture("qa")
     try:
-        if body.type.value in ("1", "both"):
+        if body.type.value == "1":
+            all_raw = qa1_verify_setup(qa_csv_path, namespace, config)
+        elif body.type.value == "2":
+            all_raw = qa2_verify_deployment_status(qa_csv_path, namespace, config)
+        else:
             r1 = qa1_verify_setup(qa_csv_path, namespace, config)
-            all_raw.extend(r1)
-        if body.type.value in ("2", "both"):
             r2 = qa2_verify_deployment_status(qa_csv_path, namespace, config)
-            all_raw.extend(r2)
+            all_raw = _merge_qa1_qa2(r1, r2)
 
+        all_raw = [_normalize_qa_result_dict(r) for r in all_raw]
         all_results = [QAResultItem(**r) for r in all_raw]
         with _state_lock:
             _qa_results = all_results

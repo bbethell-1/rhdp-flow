@@ -3114,10 +3114,9 @@ def qa1_verify_setup(
                         
                         # Get user count from status or spec
                         user_count = status_obj.get('userCount', {}).get('total', 0)
-                        if user_count == 0 and _effective_users(schedule) is not None:
-                            # Try to get from WorkshopProvision or use expected
-                            user_count = _effective_users(schedule)
-                        
+                        # Do not substitute CSV expected users here — that made the UI show
+                        # e.g. 10/10 seats while the workshop was not yet provisioned.
+
                         # Get both URLs
                         full_url, catalog_url = get_workshop_urls(workshop_name, namespace, schedule.ci, config)
                         

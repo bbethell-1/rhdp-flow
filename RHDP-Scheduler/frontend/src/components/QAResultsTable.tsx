@@ -20,6 +20,22 @@ function healthyColorClass(h: boolean | string | null | undefined): string {
   return '';
 }
 
+/** Expected seats from CSV vs live count; hide actual when not deployed to avoid misleading 10/10. */
+function seatsDisplay(r: QAResult): string {
+  const rec = r as QAResult & { expected_seats?: unknown; actual_seats?: unknown; actual_users?: unknown };
+  const rawExp = rec.expected_users ?? rec.expected_seats;
+  const exp =
+    rawExp === null || rawExp === undefined || rawExp === '' ? '—' : String(rawExp);
+  const deployedYes = String(r.deployed || '').trim().toLowerCase() === 'yes';
+  if (!deployedYes) {
+    return `${exp} / —`;
+  }
+  const rawAct = rec.actual_count ?? rec.actual_seats ?? rec.actual_users;
+  const act =
+    rawAct === null || rawAct === undefined || rawAct === '' ? '—' : String(rawAct);
+  return `${exp} / ${act}`;
+}
+
 type SortableQAColumn = 'ci_name' | 'ci' | 'status';
 
 /** Extracted QA results table with sorting + pagination */
@@ -76,7 +92,7 @@ export const QAResultsTable: React.FC<{
             <Th sort={getSortParams('status')} info={{ tooltip: 'QA verification result: verified or failed' }}>Status</Th>
             <Th info={{ tooltip: 'Whether the workshop was successfully deployed and running' }}>Deployed</Th>
             <Th info={{ tooltip: 'Whether the deployed workshop passed health checks' }}>Healthy</Th>
-            <Th info={{ tooltip: 'Expected seats (from CSV) / Actual seats (provisioned)' }}>Seats</Th>
+            <Th info={{ tooltip: 'Expected from CSV / actual provisioned seats when deployed (— for actual if not deployed yet)' }}>Seats</Th>
             <Th info={{ tooltip: 'Student-facing URL for accessing the workshop — also available in the Students tab' }}>Landing Page URL</Th>
           </Tr>
         </Thead>
@@ -91,7 +107,7 @@ export const QAResultsTable: React.FC<{
               <Td dataLabel="Status"><span className={statusColorClass(r.status)}>{(() => { const Icon = statusIcon(r.status); return Icon ? <Icon style={{ marginRight: 4 }} /> : null; })()}{r.status}</span></Td>
               <Td dataLabel="Deployed">{r.deployed || '-'}</Td>
               <Td dataLabel="Healthy"><span className={healthyColorClass(r.healthy)}>{healthyDisplay(r.healthy)}</span></Td>
-              <Td dataLabel="Seats">{r.expected_users ?? '-'} / {r.actual_count ?? '-'}</Td>
+              <Td dataLabel="Seats">{seatsDisplay(r)}</Td>
               <Td dataLabel="Landing Page URL">
                 {r.landing_page_url ? (
                   <a href={r.landing_page_url} target="_blank" rel="noopener noreferrer" className="cell-truncate" title={r.landing_page_url}>
