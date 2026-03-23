@@ -86,6 +86,31 @@ class TestCSVParsing:
         schedules = read_csv_input(path)
         assert schedules[0].instances == 2
 
+    def test_no_instances_or_wic_columns(self):
+        """Neither Instances nor Workshop_instance_count in header → schedule.instances is None."""
+        csv_text = (
+            "CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,"
+            "Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC)\n"
+            "Test,test.ci.prod,user-test-ns,10,TRUE,pw,Admin,QA,,"
+            "15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00\n"
+        )
+        path = self._write(csv_text)
+        schedules = read_csv_input(path)
+        assert schedules[0].instances is None
+
+    def test_instances_and_wic_both_blank(self):
+        """Both columns present but cells empty → schedule.instances is None."""
+        csv_text = (
+            "CI Name,CI,Namespace,Users,Workshop_instance_count,Enable_workshop_interface,"
+            "Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),"
+            "Auto-destroy (UTC),Instances\n"
+            "Test,test.ci.prod,user-test-ns,10,,TRUE,pw,Admin,QA,,"
+            "15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,\n"
+        )
+        path = self._write(csv_text)
+        schedules = read_csv_input(path)
+        assert schedules[0].instances is None
+
     def test_missing_required_headers_raises(self):
         path = self._write(MISSING_HEADERS_CSV)
         with pytest.raises(ValueError):

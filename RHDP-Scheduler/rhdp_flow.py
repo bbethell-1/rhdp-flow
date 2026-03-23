@@ -423,7 +423,11 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                     is_multi_asset_str = row.get(header_map.get('multi_asset', 'Multi_Asset'), '').strip()
                     asset_cis = row.get(header_map.get('asset_cis', 'Asset_CIs'), '').strip()
                     multi_workshop_name = row.get(header_map.get('multi_workshop_name', 'Multi_Workshop_Name'), '').strip()
-                    # Instances cell first; if blank, use Workshop_instance_count when that column exists.
+                    # Workshop instance / seat count (WorkshopProvision.spec.count source via schedule.instances):
+                    # - If "instances" header exists: use that cell (trimmed). If the cell is blank, treat as empty.
+                    # - If still empty and "workshop_instance_count" header exists: use that cell.
+                    # - If neither header exists, or both cells are blank: instances_str stays "" → instances stays
+                    #   None below; create_workshop_provision then uses its existing default (count 1).
                     instances_key = header_map.get("instances")
                     instances_str = row.get(instances_key, "").strip() if instances_key else ""
                     if not instances_str:
@@ -490,7 +494,7 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                             logger.warning(f"Row {row_num}: Invalid users value '{users_str}', treating as unspecified")
                             users = None
                     
-                    # Parse optional Instances (workshop instance/seat count for multi-asset)
+                    # Optional workshop instance count (None if no numeric value above)
                     instances: Optional[int] = None
                     if instances_str:
                         try:
