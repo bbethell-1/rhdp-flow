@@ -71,7 +71,7 @@ describe('UploadTab', () => {
     expect(screen.getByText('White Glove')).toBeInTheDocument();
   });
 
-  it('renders deploy and dry-run buttons with schedules loaded', () => {
+  it('renders validate, dry-run, download YAML, and deploy buttons when schedules loaded', () => {
     render(
       <UploadTab
         dryRun={true}
@@ -83,7 +83,9 @@ describe('UploadTab', () => {
         onClear={noop}
       />
     );
-    expect(screen.getByText('Dry-Run')).toBeInTheDocument();
+    expect(screen.getByText('Validate')).toBeInTheDocument();
+    expect(screen.getByText('Dry-run')).toBeInTheDocument();
+    expect(screen.getByText('Download YAML')).toBeInTheDocument();
     expect(screen.getByText('Deploy (dry-run)')).toBeInTheDocument();
   });
 

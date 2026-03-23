@@ -73,6 +73,8 @@ export const UploadTab: React.FC<Props> = ({
   }, []);
 
   const [deploying, setDeploying] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [yamlDownloading, setYamlDownloading] = useState(false);
   const [passwordCount, setPasswordCount] = useState<number | null>(null);
   const [progress, setProgress] = useState(0);
   const [progressMsg, setProgressMsg] = useState('');
@@ -108,6 +110,10 @@ export const UploadTab: React.FC<Props> = ({
 
   // Search filter for schedule preview
   const [previewSearch, setPreviewSearch] = useState('');
+
+  // Skipped row tracking (CSV parse)
+  const [skippedRows, setSkippedRows] = useState<number>(0);
+  const [totalRows, setTotalRows] = useState<number>(0);
 
   // ── Schedule validation warnings ──
   const warnings = useMemo(() => {
@@ -206,6 +212,73 @@ export const UploadTab: React.FC<Props> = ({
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logLines]);
 
+  /** Re-fetch namespace + catalog num_users checks from the server (uses loaded schedules). */
+  const refreshClusterValidation = useCallback(async () => {
+    setMissingNamespaces([]);
+    setNumUsersViolations([]);
+    setNumUsersLimits({});
+    const [nsRes, nuRes] = await Promise.all([
+      api.validateNamespaces(),
+      api.validateNumUsers(),
+    ]);
+    if (nsRes.missing.length) setMissingNamespaces(nsRes.missing);
+    if (nuRes.violations.length) setNumUsersViolations(nuRes.violations);
+    if (Object.keys(nuRes.limits).length) setNumUsersLimits(nuRes.limits);
+    return { nsRes, nuRes };
+  }, []);
+
+  const handleValidate = async () => {
+    if (schedules.length === 0) {
+      showToast('Upload a CSV first', 'danger');
+      return;
+    }
+    setValidating(true);
+    try {
+      const { nsRes, nuRes } = await refreshClusterValidation();
+      const nNs = nsRes.missing.length;
+      const nNu = nuRes.violations.length;
+      if (nNs === 0 && nNu === 0) {
+        showToast(
+          'Validation passed: namespaces found on cluster; num_users within catalog limits where checked.',
+          'success',
+        );
+      } else {
+        showToast(
+          `Validation: ${nNs} missing namespace(s), ${nNu} num_users over catalog limit — see alerts below.`,
+          'info',
+        );
+      }
+    } catch (e) {
+      showToast(`Validation failed: ${e}`, 'danger');
+    } finally {
+      setValidating(false);
+    }
+  };
+
+  const handleDownloadYaml = async () => {
+    if (schedules.length === 0) {
+      showToast('Upload a CSV first', 'danger');
+      return;
+    }
+    setYamlDownloading(true);
+    try {
+      await api.downloadDryRunYaml({
+        dry_run: true,
+        resource_lock: resourceLock,
+        enable_resource_pools: enableResourcePools,
+        white_glove: whiteGlove,
+        redirect,
+        showroom_novnc: showroomNovnc,
+        showroom_zerotouch: showroomZerotouch,
+      });
+      showToast('Downloaded dry-run manifest YAML', 'success');
+    } catch (e) {
+      showToast(`YAML download failed: ${e}`, 'danger');
+    } finally {
+      setYamlDownloading(false);
+    }
+  };
+
   const toggleExpanded = (idx: number) => {
     setExpandedRows(prev => {
       const next = new Set(prev);
@@ -213,10 +286,6 @@ export const UploadTab: React.FC<Props> = ({
       return next;
     });
   };
-
-  // Skipped row tracking
-  const [skippedRows, setSkippedRows] = useState<number>(0);
-  const [totalRows, setTotalRows] = useState<number>(0);
 
   const handleUpload = async () => {
     if (!csvFile) { showToast('Please select a CSV file', 'danger'); return; }
@@ -229,20 +298,11 @@ export const UploadTab: React.FC<Props> = ({
         ? `Loaded ${data.count} of ${data.total_rows} row(s) — ${data.skipped_rows} row(s) skipped`
         : `Loaded ${data.count} schedule(s)`;
       showToast(msg, data.skipped_rows ? 'danger' : 'success');
-      // Validate namespaces in background
-      setMissingNamespaces([]);
-      api.validateNamespaces()
-        .then(r => { if (r.missing.length) setMissingNamespaces(r.missing); })
-        .catch((e) => { console.warn('Namespace validation failed', e); });
-      // Validate num_users limits in background
-      setNumUsersViolations([]);
-      setNumUsersLimits({});
-      api.validateNumUsers()
-        .then(r => {
-          if (r.violations.length) setNumUsersViolations(r.violations);
-          if (Object.keys(r.limits).length) setNumUsersLimits(r.limits);
-        })
-        .catch((e) => { console.warn('num_users validation failed', e); });
+      try {
+        await refreshClusterValidation();
+      } catch (e) {
+        console.warn('Post-upload cluster validation failed', e);
+      }
     } catch (e) {
       showToast(`Upload failed: ${e}`, 'danger');
     }
@@ -739,12 +799,30 @@ export const UploadTab: React.FC<Props> = ({
           </Card>
 
           {/* Deploy buttons */}
-          <Split hasGutter style={{ marginBottom: 16 }}>
+          <Split hasGutter style={{ marginBottom: 16, flexWrap: 'wrap' }}>
             <SplitItem>
-              <Button variant="secondary" onClick={handleDryRun} isDisabled={deploying}>Dry-Run</Button>
+              <Tooltip content="Check namespaces on the cluster and compare Users to each catalog item num_users maximum.">
+                <Button variant="secondary" onClick={handleValidate} isDisabled={deploying || validating || yamlDownloading}>
+                  {validating ? 'Validating…' : 'Validate'}
+                </Button>
+              </Tooltip>
             </SplitItem>
             <SplitItem>
-              <Button variant="primary" onClick={handleDeploy} isDisabled={deploying} isDanger={!dryRun}>
+              <Tooltip content="Simulate deploy and update results preview; no resources created.">
+                <Button variant="secondary" onClick={handleDryRun} isDisabled={deploying || validating || yamlDownloading}>
+                  Dry-run
+                </Button>
+              </Tooltip>
+            </SplitItem>
+            <SplitItem>
+              <Tooltip content="Run dry-run and download ResourceClaim / Workshop / WorkshopProvision YAML (combined file).">
+                <Button variant="secondary" onClick={handleDownloadYaml} isDisabled={deploying || validating || yamlDownloading}>
+                  {yamlDownloading ? 'Preparing YAML…' : 'Download YAML'}
+                </Button>
+              </Tooltip>
+            </SplitItem>
+            <SplitItem>
+              <Button variant="primary" onClick={handleDeploy} isDisabled={deploying || validating || yamlDownloading} isDanger={!dryRun}>
                 {dryRun ? 'Deploy (dry-run)' : 'Deploy'}
               </Button>
             </SplitItem>

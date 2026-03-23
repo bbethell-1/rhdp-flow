@@ -122,6 +122,14 @@ npm run build
 
 Click **Download CSV Template** in the Upload tab toolbar to get a CSV whose headers match `read_csv_input()` (required + optional columns such as Showroom and Salesforce). The example row validates when uploaded. Endpoint: `GET /api/templates/schedule`. For semantics of each column, see **[README.md — CSV Format](../README.md#csv-format)** (authoritative list).
 
+### Upload tab: Validate, dry-run, and YAML download
+
+After schedules are loaded:
+
+- **Validate** — Re-runs namespace checks (`POST /api/schedules/validate-namespaces`) and catalog **num_users** limits (`POST /api/schedules/validate-num-users`), then refreshes the same alerts as after upload.
+- **Dry-run** — `POST /api/deploy/dry-run` (preview results; no cluster changes).
+- **Download YAML** — `POST /api/deploy/dry-run-yaml` returns a single `rhdp-dry-run-manifests.yaml` file (manifests separated by `---`), built from the same dry-run path that writes ResourceClaim / Workshop / WorkshopProvision YAML when export is enabled.
+
 ### Catalog `num_users` limits
 
 After upload, the UI checks loaded schedules against each catalog item’s **maximum `num_users`** (cluster must be reachable). Rows where **`Users`** exceeds the max show a **red alert**; **live deploy** is blocked until counts are fixed. **Dry-run** is still allowed. The same check runs on **`POST /api/deploy`** and in the CLI **`process_schedule`** path. See README **Catalog num_users maximum** for behavior and how to model “more seats than one claim allows” (e.g. `Count` or multiple rows)—there is no automatic split into 2×20 today.
