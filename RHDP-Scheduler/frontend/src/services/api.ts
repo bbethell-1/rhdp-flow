@@ -31,6 +31,11 @@ function getApiKey(): string | null {
   return sessionStorage.getItem('rhdp-api-key');
 }
 
+function getApiKeyHeader(): Record<string, string> {
+  const apiKey = getApiKey();
+  return apiKey ? { 'X-API-Key': apiKey } : {};
+}
+
 export function setApiKey(key: string): void {
   sessionStorage.setItem('rhdp-api-key', key);
 }
@@ -44,10 +49,7 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
     'Content-Type': 'application/json',
     ...opts.headers as Record<string, string>,
   };
-  const apiKey = getApiKey();
-  if (apiKey) {
-    headers['X-API-Key'] = apiKey;
-  }
+  Object.assign(headers, getApiKeyHeader());
   const res = await fetch(`${API}${path}`, { ...opts, headers });
   if (!res.ok) {
     const body = await res.text();
@@ -81,14 +83,22 @@ export const api = {
   uploadCSV: async (file: File): Promise<UploadResponse> => {
     const form = new FormData();
     form.append('file', file);
-    const res = await fetch(`${API}/schedules/upload`, { method: 'POST', body: form });
+    const res = await fetch(`${API}/schedules/upload`, {
+      method: 'POST',
+      body: form,
+      headers: getApiKeyHeader(),
+    });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   uploadPasswordsCSV: async (file: File): Promise<{count: number; message: string}> => {
     const form = new FormData();
     form.append('file', file);
-    const res = await fetch(`${API}/schedules/upload-passwords`, { method: 'POST', body: form });
+    const res = await fetch(`${API}/schedules/upload-passwords`, {
+      method: 'POST',
+      body: form,
+      headers: getApiKeyHeader(),
+    });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
@@ -106,7 +116,11 @@ export const api = {
   diffSchedules: async (file: File): Promise<import('../types').DiffResponse> => {
     const form = new FormData();
     form.append('file', file);
-    const res = await fetch(`${API}/schedules/diff`, { method: 'POST', body: form });
+    const res = await fetch(`${API}/schedules/diff`, {
+      method: 'POST',
+      body: form,
+      headers: getApiKeyHeader(),
+    });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
@@ -119,9 +133,10 @@ export const api = {
 
   /** POST dry-run with YAML export; triggers browser download of combined manifests. */
   downloadDryRunYaml: async (body: DeployRequest): Promise<void> => {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    const apiKey = getApiKey();
-    if (apiKey) headers['X-API-Key'] = apiKey;
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...getApiKeyHeader(),
+    };
     const res = await fetch(`${API}/deploy/dry-run-yaml`, {
       method: 'POST',
       headers,
