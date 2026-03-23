@@ -657,6 +657,50 @@ def test_qa_results_empty(client):
     assert resp.json()["count"] == 0
 
 
+QA_NAMESPACE_FILTER_CSV = """CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC)
+Workshop A,vendor.a.prod,qa-ns-a,10,True,pass123,Admin,QA,Workshop A,01/01/2026 09:00,01/01/2026 17:00,02/01/2026 09:00
+Workshop B,vendor.b.prod,qa-ns-b,12,True,pass456,Admin,QA,Workshop B,01/01/2026 09:00,01/01/2026 17:00,02/01/2026 09:00
+"""
+
+
+@patch("api.routes.qa1_verify_setup")
+def test_qa_run_with_namespace_override_filters_csv(mock_qa1, client):
+    """QA namespace override should run against only matching schedule rows."""
+    upload = client.post(
+        "/api/schedules/upload",
+        files={"file": ("qa.csv", QA_NAMESPACE_FILTER_CSV.encode(), "text/csv")},
+    )
+    assert upload.status_code == 200
+
+    def fake_qa(csv_file, namespace, config):
+        schedules = read_csv_input(csv_file)
+        assert namespace == "qa-ns-b"
+        assert len(schedules) == 1
+        assert schedules[0].ci_name == "Workshop B"
+        assert schedules[0].namespace == "qa-ns-b"
+        return [{
+            "ci_name": schedules[0].ci_name,
+            "ci": schedules[0].ci,
+            "namespace": namespace,
+            "status": "verified",
+            "deployed": "Yes",
+            "healthy": True,
+            "expected_users": schedules[0].users,
+            "actual_count": schedules[0].users,
+            "landing_page_url": "",
+            "showroom_status": "",
+            "showroom_url": "",
+        }]
+
+    mock_qa1.side_effect = fake_qa
+    resp = client.post("/api/qa/run", json={"type": "1", "namespace": "qa-ns-b"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["count"] == 1
+    assert data["results"][0]["namespace"] == "qa-ns-b"
+    assert data["results"][0]["ci_name"] == "Workshop B"
+
+
 # ---------------------------------------------------------------------------
 # Export
 # ---------------------------------------------------------------------------

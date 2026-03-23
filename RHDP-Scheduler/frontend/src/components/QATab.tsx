@@ -18,6 +18,7 @@ import {
   SplitItem,
   ToggleGroup,
   ToggleGroupItem,
+  TextInput,
   Tooltip,
 } from '@patternfly/react-core';
 import SearchIcon from '@patternfly/react-icons/dist/esm/icons/search-icon';
@@ -41,6 +42,7 @@ type QAStatusFilter = 'all' | 'verified' | 'failed';
 
 export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) => {
   const [qaType, setQaType] = useState<'1' | '2' | 'both'>('both');
+  const [qaNamespace, setQaNamespace] = useState('');
   const [running, setRunning] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
@@ -63,9 +65,13 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
   const handleRun = async () => {
     setRunning(true);
     try {
-      const data = await api.runQA({ type: qaType });
+      const targetNamespace = qaNamespace.trim();
+      const data = await api.runQA({ type: qaType, namespace: targetNamespace || undefined });
       setQAResults(data.results);
-      showToast(`QA complete: ${data.count} result(s)`, 'success');
+      showToast(
+        `QA complete: ${data.count} result(s)${targetNamespace ? ` for namespace ${targetNamespace}` : ''}`,
+        'success',
+      );
     } catch (e) {
       showToast(`QA failed: ${e}`, 'danger');
     } finally {
@@ -101,6 +107,7 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
       filtered = filtered.filter(r =>
         r.ci_name.toLowerCase().includes(q) ||
         r.ci.toLowerCase().includes(q) ||
+        (r.namespace || '').toLowerCase().includes(q) ||
         (r.status || '').toLowerCase().includes(q)
       );
     }
@@ -113,9 +120,9 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
     : `QA Results (${qaResults.length})`;
 
   const handleDownloadFilteredCSV = () => {
-    const headers = ['CI Name', 'CI', 'Status', 'Deployed', 'Healthy', 'Expected Seats', 'Actual Seats', 'Landing Page URL'];
+    const headers = ['CI Name', 'Namespace', 'CI', 'Status', 'Deployed', 'Healthy', 'Expected Seats', 'Actual Seats', 'Landing Page URL'];
     const rows = filteredQAResults.map(r => [
-      r.ci_name, r.ci, r.status, r.deployed,
+      r.ci_name, r.namespace || '', r.ci, r.status, r.deployed,
       String(r.healthy ?? ''), String(r.expected_users ?? ''),
       String(r.actual_count ?? ''), r.landing_page_url || '',
     ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
@@ -146,6 +153,7 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
               value={qaType}
               onChange={(_e, val) => setQaType(val as '1' | '2' | 'both')}
               aria-label="QA type"
+              className="qa-type-select"
               style={{ width: 220 }}
             >
               <FormSelectOption value="1" label="QA1 - Verify Setup" />
@@ -156,6 +164,21 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
               {qaType === '1' && 'Compares live workshops against your CSV schedule — checks dates, user counts, and configuration match what you uploaded.'}
               {qaType === '2' && 'Checks that workshops are actually provisioned and healthy, verifies seat counts, and retrieves student landing page URLs.'}
               {qaType === 'both' && 'Runs setup verification first, then checks deployment health and collects landing page URLs.'}
+            </p>
+          </div>
+        </SplitItem>
+        <SplitItem>
+          <div>
+            <TextInput
+              id="qa-namespace"
+              aria-label="QA namespace override"
+              value={qaNamespace}
+              onChange={(_e, value) => setQaNamespace(value)}
+              placeholder="Namespace override (optional)"
+              style={{ width: 240 }}
+            />
+            <p className="qa-type-hint">
+              Leave blank to use the namespace from the loaded CSV, or enter a namespace to run QA only for that namespace.
             </p>
           </div>
         </SplitItem>
@@ -195,7 +218,7 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
           <SplitItem isFilled />
           <SplitItem>
             <SearchInput
-              placeholder="Search CI name, CI..."
+              placeholder="Search workshop, CI, namespace..."
               value={qaSearch}
               onChange={(_e, val) => { setQaSearch(val); setPage(1); }}
               onClear={() => { setQaSearch(''); setPage(1); }}

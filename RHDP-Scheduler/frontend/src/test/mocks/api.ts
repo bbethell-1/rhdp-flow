@@ -86,6 +86,7 @@ export const mockFailedResult: DeploymentResult = {
 export const mockQAResult: QAResult = {
   ci_name: 'Test Workshop',
   ci: 'vendor.test.prod',
+  namespace: 'test-ns',
   status: 'verified',
   deployed: 'Yes',
   healthy: true,

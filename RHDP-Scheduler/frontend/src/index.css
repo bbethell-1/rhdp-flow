@@ -303,6 +303,29 @@ html, body, #root {
   font-weight: 500;
 }
 
+.qa-type-select {
+  background-color: var(--glass-bg-input);
+  color: var(--glass-text-primary);
+  border-color: var(--glass-border);
+}
+
+.qa-type-select option {
+  background-color: #151515;
+  color: var(--rh-white);
+}
+
+:root:not(.pf-v6-theme-dark) .qa-type-select option {
+  background-color: var(--rh-white);
+  color: var(--rh-dark);
+}
+
+.qa-ci-meta {
+  color: var(--glass-text-secondary);
+  font-size: 0.8rem;
+  margin-top: 2px;
+  word-break: break-all;
+}
+
 /* ── Tab badge spacing ── */
 .tab-badge {
   margin-left: 6px;
