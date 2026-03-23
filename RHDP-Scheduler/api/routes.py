@@ -226,6 +226,7 @@ def _result_to_response(r: DeploymentResult) -> DeploymentResultResponse:
 def _ingest_schedule_csv_text(text: str, filename: str) -> UploadResponse:
     """Parse CSV text, replace in-memory schedules, return upload response."""
     global _schedules, _csv_filepath, _current_filename
+    text = text.lstrip("\ufeff")
     if len(text.encode("utf-8")) > MAX_UPLOAD_SIZE_BYTES:
         raise HTTPException(413, "File exceeds 10 MB size limit")
     tmp = tempfile.NamedTemporaryFile(

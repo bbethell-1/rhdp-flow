@@ -373,7 +373,7 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
         if hasattr(filepath, 'read'):
             f_ctx = contextlib.nullcontext(filepath)
         else:
-            f_ctx = open(filepath, 'r', encoding='utf-8')
+            f_ctx = open(filepath, 'r', encoding='utf-8-sig')
         with f_ctx as f:
             reader = csv.DictReader(f)
 
