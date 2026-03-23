@@ -48,10 +48,21 @@ class TestCSVParsing:
         s = schedules[0]
         assert s.ci_name == "Experience OpenShift Virtualization Roadshow"
         assert s.ci == "openshift-cnv.ocp-virt-roadshow-multi-user.prod"
+        assert s.white_glove is True  # default when White_Glove column omitted
         assert s.namespace == "user-bbethell-redhat-com"
         assert s.users == 20
         assert s.enable_workshop_interface is True
         assert s.password == "Workshop1"
+
+    def test_white_glove_column_false(self):
+        csv_text = """\
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),White_Glove
+WG Off,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,20,True,Pass1,Admin,QA,WG Test,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,False
+"""
+        path = self._write(csv_text)
+        schedules = read_csv_input(path)
+        assert len(schedules) == 1
+        assert schedules[0].white_glove is False
 
     def test_multi_asset_old_format(self):
         path = self._write(MULTI_ASSET_OLD_CSV)

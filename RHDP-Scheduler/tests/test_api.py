@@ -147,6 +147,37 @@ def test_upload_invalid_csv(client):
     assert resp.status_code == 400
 
 
+@patch("api.routes.list_catalog_items")
+@patch("api.routes._get_config")
+def test_get_catalog_items(mock_get_config, mock_list, client):
+    cfg = MagicMock()
+    cfg.validate.return_value = True
+    mock_get_config.return_value = cfg
+    mock_list.return_value = [
+        {
+            "id": "vendor.item.prod",
+            "display_name": "Test Lab",
+            "catalog_namespace": "babylon-catalog-prod",
+        },
+    ]
+    resp = client.get("/api/catalog/items")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["id"] == "vendor.item.prod"
+    assert data[0]["display_name"] == "Test Lab"
+    assert data[0]["catalog_namespace"] == "babylon-catalog-prod"
+
+
+@patch("api.routes._get_config")
+def test_get_catalog_items_oc_unavailable(mock_get_config, client):
+    cfg = MagicMock()
+    cfg.validate.return_value = False
+    mock_get_config.return_value = cfg
+    resp = client.get("/api/catalog/items")
+    assert resp.status_code == 503
+
+
 def test_list_schedule_examples(client):
     resp = client.get("/api/schedules/examples")
     assert resp.status_code == 200

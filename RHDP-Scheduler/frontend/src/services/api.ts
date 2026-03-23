@@ -20,6 +20,7 @@ import type {
   SessionSummary,
   SessionDetail,
   ScheduleExampleMeta,
+  CatalogItemEntry,
 } from '../types';
 
 const API = '/api';
@@ -71,6 +72,9 @@ export function clearApiCache() {
 
 export const api = {
   health: () => cachedRequest<HealthResponse>('/health'),
+
+  /** Cluster catalog items (prod + event namespaces). */
+  listCatalogItems: () => request<CatalogItemEntry[]>('/catalog/items'),
 
   // Schedules
   uploadCSV: async (file: File): Promise<UploadResponse> => {
