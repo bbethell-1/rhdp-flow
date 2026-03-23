@@ -42,6 +42,12 @@ export interface UploadResponse {
   schedules: WorkshopSchedule[];
 }
 
+/** Built-in example schedule (GET /api/schedules/examples). */
+export interface ScheduleExampleMeta {
+  slug: string;
+  label: string;
+}
+
 export interface DeploymentResult {
   ci_name: string;
   ci: string;

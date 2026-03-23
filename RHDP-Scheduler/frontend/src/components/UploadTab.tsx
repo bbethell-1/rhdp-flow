@@ -28,7 +28,7 @@ import TrashIcon from '@patternfly/react-icons/dist/esm/icons/trash-icon';
 
 import { api } from '../services/api';
 import { DiffView } from './DiffView';
-import type { WorkshopSchedule, DeploymentResult, NumUsersViolation } from '../types';
+import type { WorkshopSchedule, DeploymentResult, NumUsersViolation, ScheduleExampleMeta } from '../types';
 
 /* ── Schedule date validation helpers ── */
 
@@ -72,9 +72,18 @@ export const UploadTab: React.FC<Props> = ({
     return () => { esRef.current?.close(); esRef.current = null; };
   }, []);
 
+  useEffect(() => {
+    api.listScheduleExamples()
+      .then(setScheduleExamples)
+      .catch(() => setScheduleExamples([]));
+  }, []);
+
   const [deploying, setDeploying] = useState(false);
   const [validating, setValidating] = useState(false);
   const [yamlDownloading, setYamlDownloading] = useState(false);
+  const [rowEditsLocked, setRowEditsLocked] = useState(false);
+  const [scheduleExamples, setScheduleExamples] = useState<ScheduleExampleMeta[]>([]);
+  const [loadingExampleSlug, setLoadingExampleSlug] = useState<string | null>(null);
   const [passwordCount, setPasswordCount] = useState<number | null>(null);
   const [progress, setProgress] = useState(0);
   const [progressMsg, setProgressMsg] = useState('');
@@ -308,6 +317,29 @@ export const UploadTab: React.FC<Props> = ({
     }
   };
 
+  const handleLoadExample = async (slug: string) => {
+    setLoadingExampleSlug(slug);
+    try {
+      const data = await api.loadScheduleExample(slug);
+      setSchedules(data.schedules);
+      setSkippedRows(data.skipped_rows ?? 0);
+      setTotalRows(data.total_rows ?? 0);
+      const msg = data.skipped_rows
+        ? `Loaded example ${data.count} of ${data.total_rows} row(s) — ${data.skipped_rows} skipped`
+        : `Loaded example: ${data.count} schedule(s)`;
+      showToast(msg, data.skipped_rows ? 'danger' : 'success');
+      try {
+        await refreshClusterValidation();
+      } catch (e) {
+        console.warn('Post-example cluster validation failed', e);
+      }
+    } catch (e) {
+      showToast(`Example load failed: ${e}`, 'danger');
+    } finally {
+      setLoadingExampleSlug(null);
+    }
+  };
+
   const handleUploadPasswords = async () => {
     if (!passwordFile) { showToast('Please select a passwords CSV file', 'danger'); return; }
     try {
@@ -506,13 +538,24 @@ export const UploadTab: React.FC<Props> = ({
       {/* Schedule preview */}
       {schedules.length > 0 ? (
         <>
-          <Split hasGutter style={{ marginBottom: 8, alignItems: 'center' }}>
+          <Split hasGutter style={{ marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <SplitItem>
               <Title headingLevel="h3">
                 Schedule Preview ({previewSearch ? `${filteredSchedules.length} of ${schedules.length}` : schedules.length})
               </Title>
             </SplitItem>
             <SplitItem isFilled />
+            <SplitItem>
+              <Tooltip content="When on, row dates, per-row redirect, and delete are disabled. Expand rows still works.">
+                <Switch
+                  id="schedule-row-edits-lock"
+                  label="Lock row edits"
+                  isChecked={rowEditsLocked}
+                  onChange={(_e, c) => setRowEditsLocked(c)}
+                  isReversed
+                />
+              </Tooltip>
+            </SplitItem>
             <SplitItem>
               <SearchInput
                 placeholder="Search schedules..."
@@ -528,6 +571,23 @@ export const UploadTab: React.FC<Props> = ({
               </Button>
             </SplitItem>
           </Split>
+          {scheduleExamples.length > 0 && (
+            <div style={{ marginBottom: 10, fontSize: '0.875rem', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px 8px' }}>
+              <span style={{ color: 'var(--pf-v6-global--Color--200)' }}>Load example:</span>
+              {scheduleExamples.map((ex) => (
+                <Button
+                  key={ex.slug}
+                  variant="link"
+                  isInline
+                  isDisabled={!!loadingExampleSlug || deploying || validating || yamlDownloading}
+                  isLoading={loadingExampleSlug === ex.slug}
+                  onClick={() => handleLoadExample(ex.slug)}
+                >
+                  {ex.label}
+                </Button>
+              ))}
+            </div>
+          )}
 
           {/* Skipped rows warning */}
           {skippedRows > 0 && (
@@ -626,6 +686,7 @@ export const UploadTab: React.FC<Props> = ({
                             setSchedules(schedules.map((sc, idx) => idx === i ? { ...sc, redirect: !sc.redirect } : sc));
                           }}
                           isReversed
+                          isDisabled={rowEditsLocked}
                         />
                       </Td>
                       <Td dataLabel="Prov. Date (UTC)" className="date-cell">
@@ -640,6 +701,7 @@ export const UploadTab: React.FC<Props> = ({
                           }}
                           placeholder="DD/MM/YYYY HH:MM"
                           style={{ minWidth: '140px' }}
+                          readOnly={rowEditsLocked}
                         />
                       </Td>
                       <Td dataLabel="Auto-Stop (UTC)" className="date-cell">
@@ -654,6 +716,7 @@ export const UploadTab: React.FC<Props> = ({
                           }}
                           placeholder="DD/MM/YYYY HH:MM"
                           style={{ minWidth: '140px' }}
+                          readOnly={rowEditsLocked}
                         />
                       </Td>
                       <Td dataLabel="Auto-Destroy (UTC)" className="date-cell">
@@ -668,6 +731,7 @@ export const UploadTab: React.FC<Props> = ({
                           }}
                           placeholder="DD/MM/YYYY HH:MM"
                           style={{ minWidth: '140px' }}
+                          readOnly={rowEditsLocked}
                         />
                       </Td>
                       <Td dataLabel="Actions">
@@ -675,6 +739,7 @@ export const UploadTab: React.FC<Props> = ({
                           <Button
                             variant="plain"
                             aria-label={`Delete ${s.ci_name}`}
+                            isDisabled={rowEditsLocked}
                             onClick={async () => {
                               try {
                                 await api.deleteSchedule(i);
