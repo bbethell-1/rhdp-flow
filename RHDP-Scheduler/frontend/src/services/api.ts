@@ -104,6 +104,29 @@ export const api = {
     request<JobResponse>('/deploy', { method: 'POST', body: JSON.stringify(body) }),
   dryRun: (body: DeployRequest) =>
     request<DeploymentResult[]>('/deploy/dry-run', { method: 'POST', body: JSON.stringify(body) }),
+
+  /** POST dry-run with YAML export; triggers browser download of combined manifests. */
+  downloadDryRunYaml: async (body: DeployRequest): Promise<void> => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const apiKey = getApiKey();
+    if (apiKey) headers['X-API-Key'] = apiKey;
+    const res = await fetch(`${API}/deploy/dry-run-yaml`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const blob = await res.blob();
+    const cd = res.headers.get('Content-Disposition');
+    const m = cd?.match(/filename="([^"]+)"/);
+    const filename = m?.[1] ?? 'rhdp-dry-run-manifests.yaml';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
   deployStatus: (jobId: string) => request<JobResponse>(`/deploy/status/${jobId}`),
   deployResults: () => cachedRequest<DeploymentResult[]>('/deploy/results'),
   deployStream: (jobId: string) => new EventSource(`${API}/deploy/stream/${jobId}`),

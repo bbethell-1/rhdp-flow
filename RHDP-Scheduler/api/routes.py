@@ -7,13 +7,16 @@ import csv
 import io
 import logging
 import re
+import shutil
 import subprocess
+import tempfile
 import threading
 from dataclasses import asdict
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 
 from api.auth import verify_api_key
@@ -841,6 +844,69 @@ def deploy_dry_run(request: Request, body: DeployRequest = DeployRequest(), _key
         return [_result_to_response(r) for r in results]
     finally:
         stop_log_capture(handler)
+
+
+@router.post("/deploy/dry-run-yaml")
+@_rate_limit("10/minute")
+def deploy_dry_run_yaml(request: Request, body: DeployRequest = DeployRequest(), _key=Depends(verify_api_key)):
+    """Run the same dry-run deploy path and return concatenated manifest YAML (download).
+
+    Writes ResourceClaim / Workshop / WorkshopProvision YAMLs to a temp directory during
+    dry-run, then returns them as one file separated by ``---``. Requires schedules loaded.
+    """
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded. Upload a CSV first.")
+
+    schedules = _filter_schedules(body.ci_filter)
+    tmpdir = tempfile.mkdtemp(prefix="rhdp-dryrun-yaml-")
+    try:
+        config = _get_config(
+            dry_run=True,
+            resource_lock=body.resource_lock,
+            enable_resource_pools=body.enable_resource_pools,
+            white_glove=body.white_glove,
+            redirect=body.redirect,
+        )
+        config.dry_run_export_yaml_dir = tmpdir
+        config.dry_run_yaml_export_seq = 0
+        for s in schedules:
+            if s.showroom_repo:
+                s.showroom_novnc = body.showroom_novnc
+                s.showroom_zerotouch = body.showroom_zerotouch
+
+        grouped_multi: Dict[str, List[WorkshopSchedule]] = {}
+        regular_schedules: List[WorkshopSchedule] = []
+        for s in schedules:
+            if s.multi_workshop_name and s.is_multi_asset:
+                grouped_multi.setdefault(s.multi_workshop_name, []).append(s)
+            else:
+                regular_schedules.append(s)
+
+        for _group_name, group_scheds in grouped_multi.items():
+            create_multi_workshop_from_group(group_scheds, config)
+
+        for s in regular_schedules:
+            process_schedule(s, config, asset_passwords=_asset_passwords)
+
+        yaml_paths = sorted(Path(tmpdir).glob("*.yaml"))
+        if not yaml_paths:
+            raise HTTPException(
+                400,
+                "No manifest YAML was generated. YAML export applies to dry-run paths that "
+                "emit ResourceClaim, Workshop, or WorkshopProvision (e.g. standard single-workshop flows).",
+            )
+        parts = [p.read_text(encoding="utf-8").strip() for p in yaml_paths]
+        combined = "\n---\n".join(parts)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    return Response(
+        content=combined,
+        media_type="text/yaml; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="rhdp-dry-run-manifests.yaml"',
+        },
+    )
 
 
 @router.get("/deploy/status/{job_id}", response_model=JobResponse)

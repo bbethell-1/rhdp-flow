@@ -214,6 +214,22 @@ def test_dry_run_deploy(uploaded_client):
     assert data[0]["status"] in ("verified", "deployed_unverified", "deployed_no_url")
 
 
+def test_dry_run_yaml_download(uploaded_client):
+    """Combined dry-run manifest YAML download (ResourceClaim / Workshop / WorkshopProvision)."""
+    resp = uploaded_client.post("/api/deploy/dry-run-yaml", json={})
+    assert resp.status_code == 200
+    assert "yaml" in resp.headers.get("content-type", "")
+    text = resp.text
+    assert "apiVersion:" in text
+    assert "kind:" in text
+    assert "---" in text or "ResourceClaim" in text or "Workshop" in text
+
+
+def test_dry_run_yaml_no_schedules(client):
+    resp = client.post("/api/deploy/dry-run-yaml", json={})
+    assert resp.status_code == 400
+
+
 def test_get_results_empty(client):
     resp = client.get("/api/deploy/results")
     assert resp.status_code == 200
