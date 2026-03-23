@@ -232,7 +232,7 @@ All columns below are **optional**. If a header is **missing**, the behavior is 
 | `Asset_CIs` | — | Comma-separated catalog item IDs (legacy multi-asset) |
 | `Multi_Workshop_Name` | — | Same value on multiple rows groups **new-style** multi-asset (one row per asset, each with its own password) |
 | `Concurrency` | `1` when creating provisions | `WorkshopProvision` concurrency |
-| `Instances` | `None` in schedule object | Seat / **numberSeats** when `Users` is not set; not the same as `Count`. Only **`Instances`** is read (no `Workshop_instance_count`). If blank or column missing, **`WorkshopProvision.spec.count` still becomes `1`** when we create the provision (see `build_workshop_provision_dict`). **MultiWorkshop** `numberSeats` is only set from `Users` or `Instances`. |
+| `Instances` | `None` in schedule object | Seat count for **WorkshopProvision** / **MultiWorkshop** paths when **`Users`** does not supply seats; not the same as `Count`. Only **`Instances`** is read (no `Workshop_instance_count`). See **Instances when workshop UI is off** below. If a WorkshopProvision is created and Instances is blank, **`spec.count` defaults to `1`** (`build_workshop_provision_dict`). **MultiWorkshop** `numberSeats` is only set from `Users` or `Instances`. |
 | `Salesforce IDs` | — | Chargeback IDs. Semicolon-separated; entries may be `type:id` or plain id (see `Salesforce_Type`). **Alias header:** `campaign_id` |
 | `Salesforce_Type` | `opportunity` | Default type for IDs without a prefix: `opportunity`, `campaign`, `project`, or `cdh`. **Alias headers:** `Salesforce_Type`, `Salesforce Type` |
 | `Count` | unset | **Deployment replication**: values **> 1** expand one logical row into that many identical schedules. Distinct from **Instances** (seats) and **Users**. |
@@ -243,12 +243,18 @@ All columns below are **optional**. If a header is **missing**, the behavior is 
 | `Showroom_NoVNC` | `False` | `True` / `Yes` / `1` enables noVNC in Showroom |
 | `Showroom_Zerotouch` | `False` | `True` / `Yes` / `1` selects zerotouch chart variant |
 
+### Instances when workshop UI is off (`Enable_workshop_interface` = False)
+
+For a **single** workshop in the normal deploy path, the tool creates only a **ResourceClaim** (no Workshop or WorkshopProvision from this flow). **`Instances` is not written into that claim** — set seat count with **`Users`** (maps to **`num_users`** in `parameterValues`), or rely on **catalog defaults** merged into parameters. This matches the historical “backend only” behavior.
+
+**`Instances` still applies** when the flow creates **WorkshopProvision** resources: **`Enable_workshop_interface` = True** (single workshop with UI), **multi-asset** (per-asset provisions), and **MultiWorkshop** **`numberSeats`** when **`Users`** is not used.
+
 ### Users vs Instances vs Count
 
 | Concept | CSV column | Meaning |
 |---------|------------|--------|
 | **Catalog `num_users`** | `Users` | Maps to `num_users` when set. Empty = no CSV override (catalog defaults may still apply). |
-| **Seat / numberSeats** | `Instances` | Drives **WorkshopProvision** **`spec.count`** (with **Users** unset or zero). Empty cell → `schedule.instances` is `None` and the code still sets **`spec.count` = `1`**. **`Users`** is separate: it sets **`num_users`** on the ResourceClaim when positive, not `spec.count`. |
+| **Seat / numberSeats** | `Instances` | When a **WorkshopProvision** is created, drives **`spec.count`** if **Users** does not define seats for that path. Empty cell → `schedule.instances` is `None` → **`spec.count` = `1`**. **`Users`** sets **`num_users`** on the **ResourceClaim** and is the seat knob when **workshop UI is disabled** (no provision from this tool). |
 | **Duplicate deployments** | `Count` | **> 1** creates multiple copies of the same schedule row. Does **not** set `numberSeats` by itself. |
 
 ### Not controlled by the schedule CSV

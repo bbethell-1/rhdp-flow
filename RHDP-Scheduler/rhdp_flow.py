@@ -145,7 +145,7 @@ class WorkshopSchedule:
     asset_cis: str = ""  # Comma-separated list of catalog items for multi-asset workshops (e.g., "ci1,ci2,ci3")
     multi_workshop_name: str = ""  # Optional custom name for multi-asset workshop (e.g., "automation-test" or "test-qvvdw")
     users: Optional[int] = None  # Optional; when omitted/empty we don't set num_users
-    instances: Optional[int] = None  # Optional; workshop instance/seat count for multi-asset (e.g. 30); used for numberSeats when users not set
+    instances: Optional[int] = None  # Optional; WorkshopProvision spec.count / MultiWorkshop numberSeats when Users unset; not sent on ResourceClaim-only deploy (Enable_workshop_interface False)
     concurrency: Optional[int] = None  # Optional; WorkshopProvision concurrency (default 1)
     salesforce_ids: str = ""  # Semicolon-separated salesforce items, e.g. "opportunity:71456169;campaign:701Pe;project:P144" or plain ID
     salesforce_type: str = "opportunity"  # Default type when salesforce_ids has no type prefix (opportunity, campaign, project, cdh)
@@ -430,9 +430,10 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                     is_multi_asset_str = row.get(header_map.get('multi_asset', 'Multi_Asset'), '').strip()
                     asset_cis = row.get(header_map.get('asset_cis', 'Asset_CIs'), '').strip()
                     multi_workshop_name = row.get(header_map.get('multi_workshop_name', 'Multi_Workshop_Name'), '').strip()
-                    # Optional Instances column → schedule.instances (passed as WorkshopProvision spec.count). No CSV default:
-                    # blank or missing column leaves schedule.instances None; create_workshop_provision / build_workshop_provision_dict
-                    # then use spec.count = 1 when count is None or not positive.
+                    # Optional Instances column → schedule.instances. No CSV default: blank/missing → None.
+                    # Used when WorkshopProvision is created (workshop UI enabled) or multi-asset provisions / MultiWorkshop numberSeats.
+                    # ResourceClaim-only deploy (Enable_workshop_interface False) does not pass Instances into the claim; use Users → num_users.
+                    # build_workshop_provision_dict uses spec.count = 1 when count is None or not positive.
                     instances_key = header_map.get("instances")
                     instances_str = row.get(instances_key, "").strip() if instances_key else ""
                     concurrency_str = row.get(header_map.get('concurrency', 'Concurrency'), '').strip()
