@@ -4924,6 +4924,65 @@ def check_showroom_health(schedule, config):
     return result
 
 
+def run_demolition_preflight(urls: list, demolition_path: str = None, password: str = None) -> list:
+    """Run demolition preflight checks against a list of workshop URLs.
+
+    Args:
+        urls: List of dicts with 'ci_name', 'url', and optionally 'password'.
+        demolition_path: Path to demolition.py. Falls back to DEMOLITION_PATH env var,
+                         then tries ~/demolition/demolition.py and ../demolition/demolition.py.
+        password: Default password if individual entries don't have one.
+
+    Returns:
+        List of dicts with ci_name, url, status ('pass', 'fail', 'error', 'skipped'), message.
+    """
+    import shutil
+
+    if not demolition_path:
+        demolition_path = os.environ.get("DEMOLITION_PATH", "")
+    if not demolition_path:
+        candidates = [
+            os.path.expanduser("~/demolition/demolition.py"),
+            os.path.join(os.path.dirname(__file__), "..", "..", "demolition", "demolition.py"),
+        ]
+        for c in candidates:
+            if os.path.isfile(c):
+                demolition_path = c
+                break
+    if not demolition_path or not os.path.isfile(demolition_path):
+        npx_demolition = shutil.which("demolition.py") or shutil.which("demolition")
+        if npx_demolition:
+            demolition_path = npx_demolition
+        else:
+            return [{"ci_name": "(all)", "url": "", "status": "error",
+                     "message": "Demolition not found. Set DEMOLITION_PATH env var or clone rhpds/demolition alongside this repo."}]
+
+    results = []
+    for entry in urls:
+        ci_name = entry.get("ci_name", "unknown")
+        url = entry.get("url", "")
+        pw = entry.get("password") or password
+        if not url:
+            results.append({"ci_name": ci_name, "url": url, "status": "skipped", "message": "No URL available"})
+            continue
+        cmd = [demolition_path, "preflight", url, "--no-register"]
+        if pw:
+            cmd.extend(["--password", pw])
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            output = (proc.stdout + proc.stderr).strip()
+            if proc.returncode == 0:
+                results.append({"ci_name": ci_name, "url": url, "status": "pass", "message": output or "Preflight passed"})
+            else:
+                results.append({"ci_name": ci_name, "url": url, "status": "fail", "message": output or f"Exit code {proc.returncode}"})
+        except subprocess.TimeoutExpired:
+            results.append({"ci_name": ci_name, "url": url, "status": "error", "message": "Preflight timed out (60s)"})
+        except Exception as e:
+            results.append({"ci_name": ci_name, "url": url, "status": "error", "message": str(e)})
+
+    return results
+
+
 def generate_showroom_applicationset(schedule, config, seat_count=None):
     """Generate an ArgoCD ApplicationSet YAML for multi-user Showroom deployment.
 

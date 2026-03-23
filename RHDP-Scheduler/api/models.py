@@ -141,6 +141,12 @@ class ShowroomHealthRequest(BaseModel):
     ci_filter: Optional[str] = None
 
 
+class ShowroomPreflightRequest(BaseModel):
+    """Body for POST /api/operations/showroom-preflight (Demolition browser check)."""
+
+    ci_filter: Optional[str] = None
+
+
 class ShowroomAppSetRequest(BaseModel):
     """Body for POST /api/operations/showroom-applicationset."""
 

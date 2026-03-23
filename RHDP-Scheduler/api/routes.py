@@ -48,6 +48,7 @@ from rhdp_flow import (
     deploy_showroom,
     teardown_showroom,
     check_showroom_health,
+    run_demolition_preflight,
     generate_showroom_applicationset,
     update_passwords,
     import_namespace_to_csv,
@@ -83,6 +84,7 @@ from api.models import (
     ShowroomAppSetRequest,
     ShowroomCleanupRequest,
     ShowroomHealthRequest,
+    ShowroomPreflightRequest,
     UploadResponse,
     WorkshopScheduleResponse,
 )
@@ -1209,6 +1211,45 @@ def op_showroom_health(request: Request, body: ShowroomHealthRequest = ShowroomH
         success=True,
         message=f"Showroom health: {healthy_count}/{len(schedules)} healthy",
         details=results,
+    )
+
+
+@router.post("/operations/showroom-preflight", response_model=OperationResponse)
+@_rate_limit("5/minute")
+def op_showroom_preflight(request: Request, body: ShowroomPreflightRequest = ShowroomPreflightRequest(), _key=Depends(verify_api_key)):
+    """Run Demolition preflight checks against deployed workshop URLs.
+
+    Uses deployment results' landing page URLs to verify workshops are browser-accessible.
+    Falls back to the url field when no landing page URL is available.
+    """
+    if not _deployment_results:
+        raise HTTPException(400, "No deployment results available. Deploy first, then run preflight.")
+    results_to_check = _deployment_results
+    if body.ci_filter:
+        results_to_check = [r for r in results_to_check if r.ci == body.ci_filter or r.ci_name == body.ci_filter]
+    if not results_to_check:
+        raise HTTPException(400, f"No deployment results match filter '{body.ci_filter}'.")
+
+    urls = []
+    for r in results_to_check:
+        target_url = r.url
+        urls.append({"ci_name": r.ci_name, "url": target_url, "password": r.password})
+
+    preflight_results = run_demolition_preflight(urls)
+    details = []
+    pass_count = 0
+    for pr in preflight_results:
+        status_label = pr["status"].upper()
+        details.append(f"{pr['ci_name']}: {status_label} — {pr['message'][:200]}")
+        if pr["status"] == "pass":
+            pass_count += 1
+
+    total = len(preflight_results)
+    all_ok = all(pr["status"] in ("pass", "skipped") for pr in preflight_results)
+    return OperationResponse(
+        success=all_ok,
+        message=f"Demolition preflight: {pass_count}/{total} passed",
+        details=details,
     )
 
 

@@ -161,6 +161,8 @@ export const api = {
     request<OperationResponse>('/operations/showroom-cleanup', { method: 'POST', body: JSON.stringify(body) }),
   showroomHealth: (body: ShowroomHealthRequest) =>
     request<OperationResponse>('/operations/showroom-health', { method: 'POST', body: JSON.stringify(body) }),
+  showroomPreflight: (body: { ci_filter?: string }) =>
+    request<OperationResponse>('/operations/showroom-preflight', { method: 'POST', body: JSON.stringify(body) }),
   // QA
   runQA: (body: QARequest) =>
     request<QAResponse>('/qa/run', { method: 'POST', body: JSON.stringify(body) }),

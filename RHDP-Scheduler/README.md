@@ -47,7 +47,7 @@ Open **http://localhost:8000** in your browser.
 - **Security** — Optional API key auth, CORS restrictions, CSP headers, rate limiting. See [docs/SECURITY.md](docs/SECURITY.md)
 - **CLI** — Direct command-line deployment and an interactive wizard (`--wizard`)
 - **Risk Prevention** — 13 built-in safeguards (confirmation modals, date validation, live-mode warnings). See [docs/RISK-PREVENTION.md](docs/RISK-PREVENTION.md) for details and screenshots
-- **Test Suite** — 169 backend tests (pytest) + 47 frontend tests (Vitest + React Testing Library)
+- **Test Suite** — 173 backend tests (pytest) + 47 frontend tests (Vitest + React Testing Library)
 
 ## Requirements
 
