@@ -41,6 +41,7 @@ import SaveIcon from '@patternfly/react-icons/dist/esm/icons/save-icon';
 import CheckCircleIcon from '@patternfly/react-icons/dist/esm/icons/check-circle-icon';
 import ArrowUpIcon from '@patternfly/react-icons/dist/esm/icons/arrow-up-icon';
 import ArrowDownIcon from '@patternfly/react-icons/dist/esm/icons/arrow-down-icon';
+import KeyIcon from '@patternfly/react-icons/dist/esm/icons/key-icon';
 
 import { api, clearApiCache } from '../services/api';
 import type { WorkshopSchedule, CatalogItemEntry, CatalogItemParameter } from '../types';
@@ -63,6 +64,29 @@ function isValidDateStr(v: string): boolean {
   return v.trim() === '' || DATE_RE.test(v.trim());
 }
 
+function parseDateStr(v: string): Date | null {
+  const m = v.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const yr = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+  return new Date(Date.UTC(yr, Number(m[2]) - 1, Number(m[1]), Number(m[4]), Number(m[5])));
+}
+
+function fmtDateUTC(d: Date): string {
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const yyyy = d.getUTCFullYear();
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mi = String(d.getUTCMinutes()).padStart(2, '0');
+  return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
+}
+
+function generatePassword(len = 12): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  const arr = new Uint8Array(len);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, (b) => chars[b % chars.length]).join('');
+}
+
 function findParam(params: CatalogItemParameter[], name: string): CatalogItemParameter | undefined {
   return params.find((p) => p.name === name);
 }
@@ -74,6 +98,14 @@ function paramSummary(p: CatalogItemParameter): string {
   else if (p.maximum != null) parts.push(`max: ${p.maximum}`);
   if (p.enum) parts.push(`options: ${p.enum.join(', ')}`);
   return parts.join(' · ');
+}
+
+function rowIsValid(r: WorkshopSchedule): boolean {
+  if (!r.ci.trim() || !r.namespace.trim() || !r.password.trim() || !r.provisioning_date.trim() || !r.auto_destroy.trim()) return false;
+  const prov = parseDateStr(r.provisioning_date);
+  const dest = parseDateStr(r.auto_destroy);
+  if (prov && dest && dest <= prov) return false;
+  return true;
 }
 
 type Props = {
@@ -159,7 +191,6 @@ export function ScheduleEditPage({ showToast }: Props) {
     load();
   }, [load]);
 
-  // Auto-load catalog once when component first renders with rows
   useEffect(() => {
     if (catalogLoadedOnce.current || drafts.length === 0 || loading) return;
     catalogLoadedOnce.current = true;
@@ -175,6 +206,33 @@ export function ScheduleEditPage({ showToast }: Props) {
       }
     })();
   }, [drafts.length, loading]);
+
+  // Keyboard nav: Alt+Up/Down for prev/next row, Ctrl+S to save
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) {
+        if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          if (isDirty && !saving) handleSave();
+          return;
+        }
+        if (!e.altKey) return;
+      }
+      if (e.altKey && e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedIdx((i) => Math.max(0, i - 1));
+      } else if (e.altKey && e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedIdx((i) => Math.min(drafts.length - 1, i + 1));
+      } else if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        if (isDirty && !saving) handleSave();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drafts.length, isDirty, saving]);
 
   const patch = useCallback((i: number, partial: Partial<WorkshopSchedule>) => {
     setDrafts((prev) => prev.map((row, j) => (j === i ? { ...row, ...partial } : row)));
@@ -248,6 +306,18 @@ export function ScheduleEditPage({ showToast }: Props) {
       setSelectedIdx(Math.min(selectedIdx, next.length - 1));
     }
     setConfirmRemoveOpen(false);
+  };
+
+  const setQuickDates = (hoursFromNow: number, lifespanHours: number) => {
+    const now = new Date();
+    const provision = new Date(now.getTime() + hoursFromNow * 3600_000);
+    const destroy = new Date(provision.getTime() + lifespanHours * 3600_000);
+    const stop = lifespanHours > 12 ? new Date(destroy.getTime() - 2 * 3600_000) : undefined;
+    patch(selectedIdx, {
+      provisioning_date: fmtDateUTC(provision),
+      auto_destroy: fmtDateUTC(destroy),
+      auto_stop: stop ? fmtDateUTC(stop) : '',
+    });
   };
 
   const applyCatalogItem = (item: CatalogItemEntry) => {
@@ -399,10 +469,23 @@ export function ScheduleEditPage({ showToast }: Props) {
     if (s.auto_stop && !isValidDateStr(s.auto_stop)) rowErrors.push('Auto-stop date format: DD/MM/YYYY HH:MM');
   }
 
-  const dateValidated = (v: string, required: boolean) => {
+  const provDate = s ? parseDateStr(s.provisioning_date) : null;
+  const destroyDate = s ? parseDateStr(s.auto_destroy) : null;
+  const stopDate = s ? parseDateStr(s.auto_stop) : null;
+  if (provDate && destroyDate && destroyDate <= provDate) rowErrors.push('Auto-destroy must be after the provisioning date');
+  if (provDate && stopDate && stopDate <= provDate) rowErrors.push('Auto-stop must be after the provisioning date');
+  if (stopDate && destroyDate && destroyDate < stopDate) rowErrors.push('Auto-destroy should not be before auto-stop');
+
+  const dateValidated = (v: string, required: boolean, field?: 'stop' | 'destroy') => {
     if (!v.trim()) return required ? 'error' as const : 'default' as const;
-    return isValidDateStr(v) ? 'default' as const : 'warning' as const;
+    if (!isValidDateStr(v)) return 'warning' as const;
+    if (field === 'destroy' && provDate && destroyDate && destroyDate <= provDate) return 'warning' as const;
+    if (field === 'destroy' && stopDate && destroyDate && destroyDate < stopDate) return 'warning' as const;
+    if (field === 'stop' && provDate && stopDate && stopDate <= provDate) return 'warning' as const;
+    return 'default' as const;
   };
+
+  const validCount = drafts.filter(rowIsValid).length;
 
   return (
     <PageSection>
@@ -418,10 +501,17 @@ export function ScheduleEditPage({ showToast }: Props) {
             <Label color="green" icon={<CheckCircleIcon />}>Saved</Label>
           )}
         </SplitItem>
+        <SplitItem>
+          <Tooltip content={`${validCount} of ${drafts.length} rows have all required fields filled`}>
+            <Label color={validCount === drafts.length ? 'green' : 'orange'}>
+              {validCount}/{drafts.length} ready
+            </Label>
+          </Tooltip>
+        </SplitItem>
         {globalRowErrors.length > 0 && (
           <SplitItem>
             <Tooltip content={globalRowErrors.join('\n')}>
-              <Label color="red">{globalRowErrors.length} row error{globalRowErrors.length !== 1 ? 's' : ''}</Label>
+              <Label color="red">{globalRowErrors.length} error{globalRowErrors.length !== 1 ? 's' : ''}</Label>
             </Tooltip>
           </SplitItem>
         )}
@@ -432,7 +522,7 @@ export function ScheduleEditPage({ showToast }: Props) {
         <SplitItem>
           <Tooltip content="Download current rows as a CSV you can re-upload later">
             <Button variant="secondary" icon={<DownloadIcon />} onClick={handleDownloadCsv} isDisabled={saving}>
-              Download CSV
+              CSV
             </Button>
           </Tooltip>
         </SplitItem>
@@ -444,13 +534,41 @@ export function ScheduleEditPage({ showToast }: Props) {
           </Tooltip>
         </SplitItem>
         <SplitItem>
-          <Button variant="primary" icon={<SaveIcon />} onClick={handleSave} isLoading={saving} isDisabled={saving || !isDirty}>
-            Save all
-          </Button>
+          <Tooltip content="Ctrl+S to save">
+            <Button variant="primary" icon={<SaveIcon />} onClick={handleSave} isLoading={saving} isDisabled={saving || !isDirty}>
+              Save all
+            </Button>
+          </Tooltip>
         </SplitItem>
       </Split>
 
-      <Alert variant="info" isInline isPlain title="Edits are local drafts until you Save. Use Download CSV to back up your work." style={{ marginBottom: 12 }} />
+      <Alert variant="info" isInline isPlain title="Edits are local until you Save. Alt+↑↓ to switch rows. Ctrl+S to save." style={{ marginBottom: 12 }} />
+
+      {/* Row summary strip */}
+      {drafts.length > 1 && (
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 12 }}>
+          {drafts.map((row, i) => {
+            const ok = rowIsValid(row);
+            const active = i === selectedIdx;
+            return (
+              <Tooltip key={i} content={`${i + 1}. ${row.ci_name || row.ci || '(new row)'}${ok ? '' : ' — incomplete'}`}>
+                <button
+                  onClick={() => setSelectedIdx(i)}
+                  aria-label={`Row ${i + 1}`}
+                  style={{
+                    width: 28, height: 28, borderRadius: 4, border: active ? '2px solid var(--pf-v6-global--primary-color--100)' : '1px solid var(--pf-v6-global--BorderColor--100)',
+                    background: ok ? 'var(--pf-v6-global--success-color--100)' : 'var(--pf-v6-global--warning-color--100)',
+                    color: '#fff', fontWeight: 600, fontSize: '0.75rem', cursor: 'pointer',
+                    opacity: active ? 1 : 0.7, transform: active ? 'scale(1.15)' : 'none', transition: 'all 0.15s',
+                  }}
+                >
+                  {i + 1}
+                </button>
+              </Tooltip>
+            );
+          })}
+        </div>
+      )}
 
       {/* Row selector */}
       <Card isCompact style={{ marginBottom: 12 }}>
@@ -469,7 +587,7 @@ export function ScheduleEditPage({ showToast }: Props) {
                     <FormSelectOption
                       key={i}
                       value={String(i)}
-                      label={`${i + 1}. ${row.ci_name || row.ci || '(new row)'}${!row.ci.trim() || !row.namespace.trim() ? ' ⚠' : ''}`}
+                      label={`${i + 1}. ${row.ci_name || row.ci || '(new row)'}${rowIsValid(row) ? '' : ' ⚠'}`}
                     />
                   ))}
                 </FormSelect>
@@ -480,25 +598,19 @@ export function ScheduleEditPage({ showToast }: Props) {
             </SplitItem>
             <SplitItem isFilled />
             <SplitItem>
-              <Tooltip content="Move row up"><Button variant="plain" icon={<ArrowUpIcon />} onClick={() => moveRow(-1)} isDisabled={saving || selectedIdx === 0} aria-label="Move row up" /></Tooltip>
+              <Tooltip content="Move row up (Alt+↑)"><Button variant="plain" icon={<ArrowUpIcon />} onClick={() => moveRow(-1)} isDisabled={saving || selectedIdx === 0} aria-label="Move row up" /></Tooltip>
             </SplitItem>
             <SplitItem>
-              <Tooltip content="Move row down"><Button variant="plain" icon={<ArrowDownIcon />} onClick={() => moveRow(1)} isDisabled={saving || selectedIdx >= drafts.length - 1} aria-label="Move row down" /></Tooltip>
+              <Tooltip content="Move row down (Alt+↓)"><Button variant="plain" icon={<ArrowDownIcon />} onClick={() => moveRow(1)} isDisabled={saving || selectedIdx >= drafts.length - 1} aria-label="Move row down" /></Tooltip>
             </SplitItem>
             <SplitItem>
-              <Button variant="secondary" icon={<PlusCircleIcon />} onClick={addRow} isDisabled={saving}>
-                Add
-              </Button>
+              <Button variant="secondary" icon={<PlusCircleIcon />} onClick={addRow} isDisabled={saving}>Add</Button>
             </SplitItem>
             <SplitItem>
-              <Button variant="secondary" icon={<CopyIcon />} onClick={duplicateRow} isDisabled={saving || !s}>
-                Duplicate
-              </Button>
+              <Button variant="secondary" icon={<CopyIcon />} onClick={duplicateRow} isDisabled={saving || !s}>Duplicate</Button>
             </SplitItem>
             <SplitItem>
-              <Button variant="danger" icon={<TrashIcon />} onClick={() => setConfirmRemoveOpen(true)} isDisabled={saving || drafts.length === 0}>
-                Remove
-              </Button>
+              <Button variant="danger" icon={<TrashIcon />} onClick={() => setConfirmRemoveOpen(true)} isDisabled={saving || drafts.length === 0}>Remove</Button>
             </SplitItem>
           </Split>
         </CardBody>
@@ -520,9 +632,7 @@ export function ScheduleEditPage({ showToast }: Props) {
       <Card isCompact style={{ marginBottom: 12 }}>
         <CardTitle>
           Catalog Item Picker
-          {catalogItems.length > 0 && (
-            <Badge isRead style={{ marginLeft: 8 }}>{catalogItems.length} items</Badge>
-          )}
+          {catalogItems.length > 0 && <Badge isRead style={{ marginLeft: 8 }}>{catalogItems.length} items</Badge>}
         </CardTitle>
         <CardBody>
           <Split hasGutter style={{ flexWrap: 'wrap', alignItems: 'center' }}>
@@ -548,9 +658,7 @@ export function ScheduleEditPage({ showToast }: Props) {
             <>
               <div style={catalogListStyle}>
                 {catalogSlice.length === 0 ? (
-                  <div style={{ padding: 16, color: 'var(--pf-v6-global--Color--200)' }}>
-                    No matches. Try a different search term.
-                  </div>
+                  <div style={{ padding: 16, color: 'var(--pf-v6-global--Color--200)' }}>No matches.</div>
                 ) : (
                   catalogSlice.map((it) => {
                     const isActive = s && s.ci === it.id;
@@ -596,15 +704,9 @@ export function ScheduleEditPage({ showToast }: Props) {
               </div>
               {catalogTotalPages > 1 && (
                 <Split hasGutter style={{ marginTop: 6, alignItems: 'center', justifyContent: 'center' }}>
-                  <SplitItem>
-                    <Button variant="plain" size="sm" isDisabled={catalogPage === 0} onClick={() => setCatalogPage((p) => p - 1)}>← Prev</Button>
-                  </SplitItem>
-                  <SplitItem>
-                    <span style={{ fontSize: '0.85rem' }}>Page {catalogPage + 1} of {catalogTotalPages} ({filteredCatalog.length} matches)</span>
-                  </SplitItem>
-                  <SplitItem>
-                    <Button variant="plain" size="sm" isDisabled={catalogPage >= catalogTotalPages - 1} onClick={() => setCatalogPage((p) => p + 1)}>Next →</Button>
-                  </SplitItem>
+                  <SplitItem><Button variant="plain" size="sm" isDisabled={catalogPage === 0} onClick={() => setCatalogPage((p) => p - 1)}>← Prev</Button></SplitItem>
+                  <SplitItem><span style={{ fontSize: '0.85rem' }}>Page {catalogPage + 1} of {catalogTotalPages} ({filteredCatalog.length} matches)</span></SplitItem>
+                  <SplitItem><Button variant="plain" size="sm" isDisabled={catalogPage >= catalogTotalPages - 1} onClick={() => setCatalogPage((p) => p + 1)}>Next →</Button></SplitItem>
                 </Split>
               )}
             </>
@@ -620,18 +722,10 @@ export function ScheduleEditPage({ showToast }: Props) {
               <SplitItem>Row {selectedIdx + 1} of {drafts.length}</SplitItem>
               <SplitItem isFilled />
               {rowErrors.length > 0 && (
-                <SplitItem>
-                  <Label color="orange">{rowErrors.length} issue{rowErrors.length !== 1 ? 's' : ''}</Label>
-                </SplitItem>
+                <SplitItem><Label color="orange">{rowErrors.length} issue{rowErrors.length !== 1 ? 's' : ''}</Label></SplitItem>
               )}
               <SplitItem>
-                <Switch
-                  id="show-password-global"
-                  label="Show passwords"
-                  isChecked={showPassword}
-                  onChange={(_e, c) => setShowPassword(c)}
-                  isReversed
-                />
+                <Switch id="show-password-global" label="Show passwords" isChecked={showPassword} onChange={(_e, c) => setShowPassword(c)} isReversed />
               </SplitItem>
             </Split>
           </CardTitle>
@@ -645,9 +739,7 @@ export function ScheduleEditPage({ showToast }: Props) {
                 <div style={sectionTitle}>Identity</div>
                 <FormGroup label="CI Name" fieldId="ci_name" isRequired>
                   <TextInput id="ci_name" value={s.ci_name} onChange={(_e, v) => patch(selectedIdx, { ci_name: v })} placeholder="Display name for this workshop" />
-                  <FormHelperText>
-                    <HelperText><HelperTextItem variant="indeterminate">Pick from the catalog above or type manually</HelperTextItem></HelperText>
-                  </FormHelperText>
+                  <FormHelperText><HelperText><HelperTextItem variant="indeterminate">Pick from the catalog above or type manually</HelperTextItem></HelperText></FormHelperText>
                 </FormGroup>
                 <FormGroup label="CI (Catalog Item ID)" fieldId="ci" isRequired>
                   <TextInput id="ci" value={s.ci} onChange={(_e, v) => patch(selectedIdx, { ci: v })} validated={!s.ci.trim() ? 'error' : 'default'} placeholder="vendor.item.env" />
@@ -672,13 +764,14 @@ export function ScheduleEditPage({ showToast }: Props) {
                       />
                     </SplitItem>
                     <SplitItem>
-                      <Button
-                        variant="control"
-                        aria-label={showPassword ? 'Mask password' : 'Reveal password'}
-                        onClick={() => setShowPassword((p) => !p)}
-                      >
+                      <Button variant="control" aria-label={showPassword ? 'Mask password' : 'Reveal password'} onClick={() => setShowPassword((p) => !p)}>
                         {showPassword ? <EyeSlashIcon /> : <EyeIcon />}
                       </Button>
+                    </SplitItem>
+                    <SplitItem>
+                      <Tooltip content="Generate random 12-character password">
+                        <Button variant="control" aria-label="Generate password" icon={<KeyIcon />} onClick={() => { patch(selectedIdx, { password: generatePassword() }); setShowPassword(true); }} />
+                      </Tooltip>
                     </SplitItem>
                   </Split>
                 </FormGroup>
@@ -695,16 +788,14 @@ export function ScheduleEditPage({ showToast }: Props) {
                     validated={dateValidated(s.provisioning_date, true)}
                     placeholder="DD/MM/YYYY HH:MM"
                   />
-                  <FormHelperText>
-                    <HelperText><HelperTextItem variant="indeterminate">Example: 25/03/2026 14:00</HelperTextItem></HelperText>
-                  </FormHelperText>
+                  <FormHelperText><HelperText><HelperTextItem variant="indeterminate">Example: 25/03/2026 14:00</HelperTextItem></HelperText></FormHelperText>
                 </FormGroup>
                 <FormGroup label="Auto-stop" fieldId="auto_stop">
                   <TextInput
                     id="auto_stop"
                     value={s.auto_stop}
                     onChange={(_e, v) => patch(selectedIdx, { auto_stop: v })}
-                    validated={dateValidated(s.auto_stop, false)}
+                    validated={dateValidated(s.auto_stop, false, 'stop')}
                     placeholder="DD/MM/YYYY HH:MM (optional)"
                   />
                 </FormGroup>
@@ -713,9 +804,18 @@ export function ScheduleEditPage({ showToast }: Props) {
                     id="auto_destroy"
                     value={s.auto_destroy}
                     onChange={(_e, v) => patch(selectedIdx, { auto_destroy: v })}
-                    validated={dateValidated(s.auto_destroy, true)}
+                    validated={dateValidated(s.auto_destroy, true, 'destroy')}
                     placeholder="DD/MM/YYYY HH:MM"
                   />
+                </FormGroup>
+                <FormGroup label="Quick dates" fieldId="quick-dates">
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <Tooltip content="Provision now, destroy in 4 hours"><Button variant="tertiary" size="sm" onClick={() => setQuickDates(0, 4)}>Now + 4h</Button></Tooltip>
+                    <Tooltip content="Provision now, destroy in 8 hours"><Button variant="tertiary" size="sm" onClick={() => setQuickDates(0, 8)}>Now + 8h</Button></Tooltip>
+                    <Tooltip content="Provision in 1 hour, destroy 24h later"><Button variant="tertiary" size="sm" onClick={() => setQuickDates(1, 24)}>+1h, 1 day</Button></Tooltip>
+                    <Tooltip content="Provision in 1 hour, destroy 3 days later"><Button variant="tertiary" size="sm" onClick={() => setQuickDates(1, 72)}>+1h, 3 days</Button></Tooltip>
+                    <Tooltip content="Provision in 24 hours, destroy 7 days later"><Button variant="tertiary" size="sm" onClick={() => setQuickDates(24, 168)}>Tomorrow, 1 week</Button></Tooltip>
+                  </div>
                 </FormGroup>
               </div>
 
@@ -724,27 +824,19 @@ export function ScheduleEditPage({ showToast }: Props) {
                 <div style={sectionTitle}>Capacity & Purpose</div>
                 <FormGroup label="Users (num_users)" fieldId="users">
                   <TextInput id="users" type="number" value={s.users == null ? '' : String(s.users)} onChange={(_e, v) => patch(selectedIdx, { users: parseOptInt(v) })} placeholder="Empty = catalog default" />
-                  <FormHelperText>
-                    <HelperText><HelperTextItem variant="indeterminate">How many concurrent users the lab environment supports (passed as num_users to the catalog item)</HelperTextItem></HelperText>
-                  </FormHelperText>
+                  <FormHelperText><HelperText><HelperTextItem variant="indeterminate">Concurrent users the lab supports (passed as num_users to the catalog item)</HelperTextItem></HelperText></FormHelperText>
                 </FormGroup>
                 <FormGroup label="Instances (seat count)" fieldId="instances">
                   <TextInput id="instances" type="number" value={s.instances == null ? '' : String(s.instances)} onChange={(_e, v) => patch(selectedIdx, { instances: parseOptInt(v) })} placeholder="Empty = uses Users value" />
-                  <FormHelperText>
-                    <HelperText><HelperTextItem variant="indeterminate">Replica count for WorkshopProvision (spec.count) and MultiWorkshop (numberSeats). Use when the catalog item has no num_users parameter.</HelperTextItem></HelperText>
-                  </FormHelperText>
+                  <FormHelperText><HelperText><HelperTextItem variant="indeterminate">Replica count for WorkshopProvision (spec.count) / MultiWorkshop (numberSeats)</HelperTextItem></HelperText></FormHelperText>
                 </FormGroup>
                 <FormGroup label="Count (repeat deploy)" fieldId="count">
                   <TextInput id="count" type="number" value={s.count == null ? '' : String(s.count)} onChange={(_e, v) => patch(selectedIdx, { count: parseOptInt(v) })} placeholder="Empty = 1 deployment" />
-                  <FormHelperText>
-                    <HelperText><HelperTextItem variant="indeterminate">Creates N independent deployments of this row (e.g. Count=2 deploys two separate clusters with the same config)</HelperTextItem></HelperText>
-                  </FormHelperText>
+                  <FormHelperText><HelperText><HelperTextItem variant="indeterminate">Creates N independent deployments of this row</HelperTextItem></HelperText></FormHelperText>
                 </FormGroup>
                 <FormGroup label="Concurrency" fieldId="concurrency">
                   <TextInput id="concurrency" type="number" value={s.concurrency == null ? '' : String(s.concurrency)} onChange={(_e, v) => patch(selectedIdx, { concurrency: parseOptInt(v) })} placeholder="Default: 1" />
-                  <FormHelperText>
-                    <HelperText><HelperTextItem variant="indeterminate">WorkshopProvision concurrency — how many provisions can run in parallel</HelperTextItem></HelperText>
-                  </FormHelperText>
+                  <FormHelperText><HelperText><HelperTextItem variant="indeterminate">How many provisions can run in parallel</HelperTextItem></HelperText></FormHelperText>
                 </FormGroup>
                 <FormGroup label="Activity" fieldId="activity">
                   <TextInput id="activity" value={s.activity} onChange={(_e, v) => patch(selectedIdx, { activity: v })} placeholder="Admin" />

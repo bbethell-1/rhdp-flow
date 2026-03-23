@@ -138,6 +138,19 @@ def test_upload_csv(client):
     assert data["schedules"][0]["ci_name"] == "Experience OpenShift Virtualization Roadshow"
 
 
+def test_upload_csv_with_bom(client):
+    """CSV with UTF-8 BOM (downloaded from the schedule builder) should parse correctly."""
+    bom_csv = "\ufeff" + BASIC_WORKSHOP_CSV
+    resp = client.post(
+        "/api/schedules/upload",
+        files={"file": ("bom.csv", bom_csv.encode("utf-8-sig"), "text/csv")},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["count"] == 1
+    assert data["schedules"][0]["ci_name"] == "Experience OpenShift Virtualization Roadshow"
+
+
 def test_upload_invalid_csv(client):
     bad_csv = "Name,Value\nfoo,bar\n"
     resp = client.post(
