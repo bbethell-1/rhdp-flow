@@ -147,6 +147,29 @@ def test_upload_invalid_csv(client):
     assert resp.status_code == 400
 
 
+def test_list_schedule_examples(client):
+    resp = client.get("/api/schedules/examples")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    slugs = {x["slug"] for x in data}
+    assert "basic" in slugs and "full" in slugs
+    assert all("label" in x for x in data)
+
+
+def test_load_schedule_example_basic(client):
+    resp = client.post("/api/schedules/load-example/basic")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["count"] >= 1
+    assert len(data["schedules"]) == data["count"]
+
+
+def test_load_schedule_example_unknown(client):
+    resp = client.post("/api/schedules/load-example/nonexistent-slug")
+    assert resp.status_code == 404
+
+
 def test_get_schedules_empty(client):
     resp = client.get("/api/schedules")
     assert resp.status_code == 200

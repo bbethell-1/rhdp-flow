@@ -108,6 +108,18 @@ _session_counter: int = 0
 MAX_SESSIONS = 50
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
 
+# Built-in schedule examples (files under docs/examples/)
+_SCHEDULE_EXAMPLES: Dict[str, tuple[str, str]] = {
+    "basic": ("basic_workshop.csv", "Basic workshop"),
+    "full": ("full_featured.csv", "Full featured"),
+    "minimal": ("minimal_workshop.csv", "Minimal"),
+}
+
+
+def _schedule_examples_dir() -> Path:
+    return Path(__file__).resolve().parent.parent / "docs" / "examples"
+
+
 # Cached base domain derived from the connected cluster
 _cached_base_domain: Optional[str] = None
 
@@ -198,6 +210,37 @@ def _schedule_to_response(s: WorkshopSchedule) -> WorkshopScheduleResponse:
 
 def _result_to_response(r: DeploymentResult) -> DeploymentResultResponse:
     return DeploymentResultResponse(**asdict(r))
+
+
+def _ingest_schedule_csv_text(text: str, filename: str) -> UploadResponse:
+    """Parse CSV text, replace in-memory schedules, return upload response."""
+    global _schedules, _csv_filepath, _current_filename
+    if len(text.encode("utf-8")) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(413, "File exceeds 10 MB size limit")
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".csv", delete=False, encoding="utf-8"
+    )
+    tmp.write(text)
+    tmp.close()
+    reader = csv.reader(io.StringIO(text))
+    all_rows = [row for row in reader if any(cell.strip() for cell in row)]
+    total_rows = max(0, len(all_rows) - 1)
+    try:
+        schedules = read_csv_input(tmp.name)
+    except ValueError as e:
+        os.unlink(tmp.name)
+        raise HTTPException(400, str(e))
+    with _state_lock:
+        _schedules = schedules
+        _current_filename = filename
+        _csv_filepath = tmp.name
+    skipped = total_rows - len(schedules)
+    return UploadResponse(
+        count=len(schedules),
+        total_rows=total_rows,
+        skipped_rows=max(0, skipped),
+        schedules=[_schedule_to_response(s) for s in schedules],
+    )
 
 
 def _filter_schedules(ci_filter: Optional[str]) -> List[WorkshopSchedule]:
@@ -428,7 +471,6 @@ async def health():
 @router.post("/schedules/upload", response_model=UploadResponse)
 @_rate_limit("10/minute")
 async def upload_csv(request: Request, file: UploadFile = File(...)):
-    global _schedules, _csv_filepath, _current_filename
     content = await file.read()
     if len(content) > MAX_UPLOAD_SIZE_BYTES:
         raise HTTPException(413, "File exceeds 10 MB size limit")
@@ -436,39 +478,28 @@ async def upload_csv(request: Request, file: UploadFile = File(...)):
         text = content.decode("utf-8")
     except UnicodeDecodeError:
         raise HTTPException(400, "File must be UTF-8 encoded CSV")
+    return _ingest_schedule_csv_text(text, file.filename or "unknown.csv")
 
-    # Write to temp file — read_csv_input requires a file path
-    import tempfile
-    tmp = tempfile.NamedTemporaryFile(
-        mode="w", suffix=".csv", delete=False, encoding="utf-8"
-    )
-    tmp.write(text)
-    tmp.close()
 
-    # Count total data rows (non-empty, excluding header)
-    reader = csv.reader(io.StringIO(text))
-    all_rows = [row for row in reader if any(cell.strip() for cell in row)]
-    total_rows = max(0, len(all_rows) - 1)  # subtract header row
+@router.get("/schedules/examples")
+def list_schedule_examples():
+    """Short labels for built-in schedule CSVs (see docs/examples/)."""
+    return [{"slug": slug, "label": label} for slug, (_, label) in _SCHEDULE_EXAMPLES.items()]
 
-    try:
-        schedules = read_csv_input(tmp.name)
-    except ValueError as e:
-        os.unlink(tmp.name)
-        raise HTTPException(400, str(e))
 
-    with _state_lock:
-        _schedules = schedules
-        _current_filename = file.filename or "unknown.csv"
-        _csv_filepath = tmp.name
-
-    skipped = total_rows - len(schedules)
-
-    return UploadResponse(
-        count=len(schedules),
-        total_rows=total_rows,
-        skipped_rows=max(0, skipped),
-        schedules=[_schedule_to_response(s) for s in schedules],
-    )
+@router.post("/schedules/load-example/{slug}", response_model=UploadResponse)
+@_rate_limit("10/minute")
+def load_schedule_example(request: Request, slug: str):
+    """Load a whitelisted example CSV from docs/examples/ (same effect as upload)."""
+    if slug not in _SCHEDULE_EXAMPLES:
+        raise HTTPException(404, f"Unknown example: {slug}")
+    filename, _label = _SCHEDULE_EXAMPLES[slug]
+    path = _schedule_examples_dir() / filename
+    if not path.is_file():
+        logger.error("Example CSV missing: %s", path)
+        raise HTTPException(500, "Example file not available")
+    text = path.read_text(encoding="utf-8")
+    return _ingest_schedule_csv_text(text, f"example-{slug}.csv")
 
 
 @router.post("/schedules/upload-passwords")

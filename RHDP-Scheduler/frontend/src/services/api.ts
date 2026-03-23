@@ -19,6 +19,7 @@ import type {
   NumUsersValidationResponse,
   SessionSummary,
   SessionDetail,
+  ScheduleExampleMeta,
 } from '../types';
 
 const API = '/api';
@@ -86,6 +87,12 @@ export const api = {
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
+  listScheduleExamples: () => cachedRequest<ScheduleExampleMeta[]>('/schedules/examples'),
+  loadScheduleExample: (slug: string) =>
+    request<UploadResponse>(
+      `/schedules/load-example/${encodeURIComponent(slug)}`,
+      { method: 'POST', body: '{}' },
+    ),
   getSchedules: () => cachedRequest<WorkshopSchedule[]>('/schedules'),
   validateNamespaces: () =>
     request<{ namespaces: Record<string, boolean>; missing: string[] }>('/schedules/validate-namespaces', { method: 'POST', body: '{}' }),
