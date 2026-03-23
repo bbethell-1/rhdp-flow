@@ -43,6 +43,16 @@ class TestDeriveBaseDomain:
         assert derive_base_domain("") == "integration.demo.redhat.com"
         assert derive_base_domain(None) == "integration.demo.redhat.com"
 
+    def test_production_domain(self):
+        """Production cluster returns demo.redhat.com."""
+        url = "https://api.demo.redhat.com:6443"
+        assert derive_base_domain(url) == "demo.redhat.com"
+
+    def test_ocp4_infra_pattern(self):
+        """ocp4-*.infra.open.redhat.com is converted to *.demo.redhat.com."""
+        url = "https://api.ocp4-staging.infra.open.redhat.com:6443"
+        assert derive_base_domain(url) == "staging.demo.redhat.com"
+
     def test_unknown_host_returns_host_without_api_prefix(self):
         """Unknown host without api. prefix is returned as-is (or fallback if empty)."""
         url = "https://api.custom.openshift.com:6443"

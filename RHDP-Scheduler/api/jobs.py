@@ -33,12 +33,14 @@ class Job:
     _events: asyncio.Queue = field(default_factory=asyncio.Queue, repr=False)
 
 
-MAX_JOBS = 100
+MAX_JOBS = int(os.environ.get("RHDP_MAX_JOBS", "100"))
 _jobs: Dict[str, Job] = {}
+_jobs_truncated: int = 0
 
 
 def _cleanup_old_jobs() -> None:
     """Remove oldest completed/failed jobs when store exceeds MAX_JOBS."""
+    global _jobs_truncated
     if len(_jobs) <= MAX_JOBS:
         return
     terminal = [(jid, j) for jid, j in _jobs.items()
@@ -47,6 +49,7 @@ def _cleanup_old_jobs() -> None:
     to_remove = len(_jobs) - MAX_JOBS
     for jid, _ in terminal[:to_remove]:
         del _jobs[jid]
+        _jobs_truncated += 1
 
 
 def create_job() -> Job:
@@ -61,6 +64,15 @@ def create_job() -> Job:
 def get_job(job_id: str) -> Optional[Job]:
     """Return job by id, or None."""
     return _jobs.get(job_id)
+
+
+def get_stats() -> dict:
+    """Return job store statistics including truncation info."""
+    return {
+        "total": len(_jobs),
+        "max": MAX_JOBS,
+        "truncated": _jobs_truncated,
+    }
 
 
 def update_job(

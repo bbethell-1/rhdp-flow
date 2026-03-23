@@ -16,7 +16,7 @@ from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
 from api.server import app
-from api import routes
+from api import routes, jobs
 from api.limiter import limiter as _test_limiter
 from rhdp_flow import read_csv_input
 from tests.conftest import BASIC_WORKSHOP_CSV, SHOWROOM_CSV, make_oc_dispatcher
@@ -37,6 +37,8 @@ def reset_state():
     routes._deploy_log_path = None
     routes._qa_log_path = None
     routes._destroy_check_results = []
+    jobs._jobs.clear()
+    jobs._jobs_truncated = 0
     # Reset rate limiter storage so per-route limits don't bleed across tests
     if _test_limiter:
         _test_limiter.reset()
@@ -1238,3 +1240,72 @@ def test_destroy_check_in_session(mock_run, uploaded_client):
     data = resp.json()
     assert "destroy_check_results" in data
     assert len(data["destroy_check_results"]) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Auth enforcement — mutation endpoints require API key when configured
+# ---------------------------------------------------------------------------
+
+class TestAuthEnforcement:
+    """Verify all mutation POST endpoints enforce API key when RHDP_API_KEY is set."""
+
+    @pytest.fixture(autouse=True)
+    def _set_api_key(self, monkeypatch):
+        monkeypatch.setenv("RHDP_API_KEY", "test-secret-key")
+
+    @pytest.fixture
+    def auth_client(self):
+        return TestClient(app)
+
+    def test_upload_requires_key(self, auth_client):
+        resp = auth_client.post(
+            "/api/schedules/upload",
+            files={"file": ("t.csv", BASIC_WORKSHOP_CSV.encode(), "text/csv")},
+        )
+        assert resp.status_code == 403
+
+    def test_upload_with_key_succeeds(self, auth_client):
+        resp = auth_client.post(
+            "/api/schedules/upload",
+            files={"file": ("t.csv", BASIC_WORKSHOP_CSV.encode(), "text/csv")},
+            headers={"X-API-Key": "test-secret-key"},
+        )
+        assert resp.status_code == 200
+
+    def test_session_clear_requires_key(self, auth_client):
+        resp = auth_client.post("/api/sessions/clear", json={})
+        assert resp.status_code == 403
+
+    def test_load_example_requires_key(self, auth_client):
+        resp = auth_client.post("/api/schedules/load-example/basic")
+        assert resp.status_code == 403
+
+    def test_qa_run_requires_key(self, auth_client):
+        resp = auth_client.post("/api/qa/run", json={"type": "1"})
+        assert resp.status_code == 403
+
+    def test_qa_destroy_check_requires_key(self, auth_client):
+        resp = auth_client.post("/api/qa/destroy-check")
+        assert resp.status_code == 403
+
+    def test_upload_passwords_requires_key(self, auth_client):
+        resp = auth_client.post(
+            "/api/schedules/upload-passwords",
+            files={"file": ("pw.csv", b"CI,Password\nfoo,bar", "text/csv")},
+        )
+        assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Job store stats
+# ---------------------------------------------------------------------------
+
+def test_debug_config_includes_job_stats(client):
+    """GET /debug/config includes job store statistics."""
+    resp = client.get("/api/debug/config", headers={"X-API-Key": ""})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "jobs" in data
+    assert data["jobs"]["total"] >= 0
+    assert data["jobs"]["max"] > 0
+    assert "truncated" in data["jobs"]

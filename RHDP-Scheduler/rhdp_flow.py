@@ -222,10 +222,12 @@ class RHDPConfig:
 
 def derive_base_domain(cluster_url: str) -> str:
     """
-    Derive the web domain from an OpenShift API server URL.
+    Derive the RHDP web domain from an OpenShift API server URL.
 
-    Example: 'https://api.integration.demo.redhat.com:6443'
-          -> 'integration.demo.redhat.com'
+    Handles production, integration, dev and infra cluster patterns:
+      https://api.demo.redhat.com:6443           -> demo.redhat.com
+      https://api.integration.demo.redhat.com:6443 -> integration.demo.redhat.com
+      https://api.ocp-X.infra.open.redhat.com:6443 -> X.demo.redhat.com
     """
     fallback = "integration.demo.redhat.com"
     if not cluster_url:
@@ -236,9 +238,14 @@ def derive_base_domain(cluster_url: str) -> str:
         host = host.rstrip("/")
         if host.startswith("api."):
             host = host[4:]
+        # ocp-<env>.infra.open.redhat.com → <env>.demo.redhat.com
         m = re.match(r'^ocp-(.+?)\.infra\.open\.redhat\.com$', host)
         if m:
             host = f"{m.group(1)}.demo.redhat.com"
+        # ocp4-<env>.infra.open.redhat.com (alternate naming)
+        m2 = re.match(r'^ocp4?-(.+?)\.infra\.open\.redhat\.com$', host)
+        if m2:
+            host = f"{m2.group(1)}.demo.redhat.com"
         return host or fallback
     except Exception:
         return fallback

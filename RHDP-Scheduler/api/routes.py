@@ -294,7 +294,7 @@ def _archive_current_session():
 # ---------------------------------------------------------------------------
 
 @router.post("/sessions/clear")
-def clear_session():
+def clear_session(_key=Depends(verify_api_key)):
     """Archive current session and reset state for a new upload."""
     global _schedules, _deployment_results, _qa_results, _csv_filepath, _current_filename, _asset_passwords, _deploy_log_path, _qa_log_path, _destroy_check_results
     with _state_lock:
@@ -391,6 +391,7 @@ def debug_config(_key=Depends(verify_api_key)):
         "kubeconfig_path": config.kubeconfig_path,
         "schedules_count": len(_schedules),
         "results_count": len(_deployment_results),
+        "jobs": jobs.get_stats(),
     }
 
 
@@ -508,7 +509,7 @@ def get_catalog_items_list(request: Request):
 
 @router.post("/schedules/upload", response_model=UploadResponse)
 @_rate_limit("10/minute")
-async def upload_csv(request: Request, file: UploadFile = File(...)):
+async def upload_csv(request: Request, file: UploadFile = File(...), _key=Depends(verify_api_key)):
     content = await file.read()
     if len(content) > MAX_UPLOAD_SIZE_BYTES:
         raise HTTPException(413, "File exceeds 10 MB size limit")
@@ -527,7 +528,7 @@ def list_schedule_examples():
 
 @router.post("/schedules/load-example/{slug}", response_model=UploadResponse)
 @_rate_limit("10/minute")
-def load_schedule_example(request: Request, slug: str):
+def load_schedule_example(request: Request, slug: str, _key=Depends(verify_api_key)):
     """Load a whitelisted example CSV from docs/examples/ (same effect as upload)."""
     if slug not in _SCHEDULE_EXAMPLES:
         raise HTTPException(404, f"Unknown example: {slug}")
@@ -541,7 +542,7 @@ def load_schedule_example(request: Request, slug: str):
 
 
 @router.post("/schedules/upload-passwords")
-async def upload_passwords(file: UploadFile = File(...)):
+async def upload_passwords(file: UploadFile = File(...), _key=Depends(verify_api_key)):
     """Upload a per-asset passwords CSV (columns: CI, Password)."""
     global _asset_passwords
     content = await file.read()
@@ -1322,7 +1323,7 @@ def op_import_namespace(request: Request, namespace: str, _key=Depends(verify_ap
 
 @router.post("/qa/run")
 @_rate_limit("10/minute")
-def qa_run(request: Request, body: QARequest = QARequest()):
+def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_api_key)):
     global _qa_results, _qa_log_path
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
@@ -1362,7 +1363,7 @@ def qa_get_results():
 
 @router.post("/qa/destroy-check", response_model=DestroyCheckResponse)
 @_rate_limit("10/minute")
-def qa_destroy_check_endpoint(request: Request):
+def qa_destroy_check_endpoint(request: Request, _key=Depends(verify_api_key)):
     """Read-only check whether deployments have been properly destroyed/stopped."""
     global _destroy_check_results
     if not _schedules:
