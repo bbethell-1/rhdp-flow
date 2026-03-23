@@ -12,7 +12,7 @@ import type {
   DisableAutostopRequest,
   ShowroomCleanupRequest,
   ShowroomHealthRequest,
-  ShowroomAppSetRequest,
+
   QARequest,
   QAResponse,
   RetryRequest,
@@ -161,9 +161,6 @@ export const api = {
     request<OperationResponse>('/operations/showroom-cleanup', { method: 'POST', body: JSON.stringify(body) }),
   showroomHealth: (body: ShowroomHealthRequest) =>
     request<OperationResponse>('/operations/showroom-health', { method: 'POST', body: JSON.stringify(body) }),
-  showroomAppSet: (body: ShowroomAppSetRequest) =>
-    request<OperationResponse>('/operations/showroom-applicationset', { method: 'POST', body: JSON.stringify(body) }),
-
   // QA
   runQA: (body: QARequest) =>
     request<QAResponse>('/qa/run', { method: 'POST', body: JSON.stringify(body) }),

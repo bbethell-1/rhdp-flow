@@ -10,8 +10,11 @@ import {
   EmptyStateBody,
   Form,
   FormGroup,
+  FormHelperText,
   FormSelect,
   FormSelectOption,
+  HelperText,
+  HelperTextItem,
   Label,
   Modal,
   ModalBody,
@@ -36,17 +39,28 @@ import DownloadIcon from '@patternfly/react-icons/dist/esm/icons/download-icon';
 import UndoIcon from '@patternfly/react-icons/dist/esm/icons/undo-icon';
 import SaveIcon from '@patternfly/react-icons/dist/esm/icons/save-icon';
 import CheckCircleIcon from '@patternfly/react-icons/dist/esm/icons/check-circle-icon';
+import ArrowUpIcon from '@patternfly/react-icons/dist/esm/icons/arrow-up-icon';
+import ArrowDownIcon from '@patternfly/react-icons/dist/esm/icons/arrow-down-icon';
 
 import { api, clearApiCache } from '../services/api';
 import type { WorkshopSchedule, CatalogItemEntry, CatalogItemParameter } from '../types';
 import { createBlankWorkshopSchedule } from '../utils/scheduleDefaults';
 import { workshopSchedulesToCsv, downloadTextFile } from '../utils/scheduleCsv';
 
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
 function parseOptInt(s: string): number | null {
   const t = s.trim();
   if (t === '') return null;
   const n = parseInt(t, 10);
   return Number.isNaN(n) ? null : n;
+}
+
+const DATE_RE = /^\d{1,2}\/\d{1,2}\/\d{2,4}\s+\d{1,2}:\d{2}$/;
+function isValidDateStr(v: string): boolean {
+  return v.trim() === '' || DATE_RE.test(v.trim());
 }
 
 function findParam(params: CatalogItemParameter[], name: string): CatalogItemParameter | undefined {
@@ -116,6 +130,7 @@ export function ScheduleEditPage({ showToast }: Props) {
   const [catalogPage, setCatalogPage] = useState(0);
   const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false);
   const fieldsRef = useRef<HTMLDivElement>(null);
+  const catalogLoadedOnce = useRef(false);
 
   const isDirty = useMemo(
     () => JSON.stringify(drafts) !== serverSnapshot,
@@ -132,7 +147,7 @@ export function ScheduleEditPage({ showToast }: Props) {
       setServerSnapshot(JSON.stringify(cloned));
       setSelectedIdx(0);
     } catch (e) {
-      showToast(`Failed to load schedules: ${e}`, 'danger');
+      showToast(`Failed to load schedules: ${errMsg(e)}`, 'danger');
       setDrafts([]);
       setServerSnapshot('[]');
     } finally {
@@ -144,14 +159,39 @@ export function ScheduleEditPage({ showToast }: Props) {
     load();
   }, [load]);
 
+  // Auto-load catalog once when component first renders with rows
+  useEffect(() => {
+    if (catalogLoadedOnce.current || drafts.length === 0 || loading) return;
+    catalogLoadedOnce.current = true;
+    (async () => {
+      setCatalogLoading(true);
+      try {
+        const items = await api.listCatalogItems();
+        setCatalogItems(items);
+      } catch {
+        // Silent — user can click "Load catalog" manually
+      } finally {
+        setCatalogLoading(false);
+      }
+    })();
+  }, [drafts.length, loading]);
+
   const patch = useCallback((i: number, partial: Partial<WorkshopSchedule>) => {
     setDrafts((prev) => prev.map((row, j) => (j === i ? { ...row, ...partial } : row)));
   }, []);
 
+  const globalRowErrors = useMemo(() => {
+    const issues: string[] = [];
+    drafts.forEach((r, i) => {
+      if (!r.ci.trim()) issues.push(`Row ${i + 1}: CI missing`);
+      if (!r.namespace.trim()) issues.push(`Row ${i + 1}: Namespace missing`);
+    });
+    return issues;
+  }, [drafts]);
+
   const handleSave = async () => {
-    const missing = drafts.some((r) => !r.ci.trim() || !r.namespace.trim());
-    if (missing) {
-      showToast('Every row needs at least a CI and Namespace before saving', 'danger');
+    if (globalRowErrors.length > 0) {
+      showToast(`Cannot save: ${globalRowErrors[0]}${globalRowErrors.length > 1 ? ` (+${globalRowErrors.length - 1} more)` : ''}`, 'danger');
       return;
     }
     setSaving(true);
@@ -161,7 +201,7 @@ export function ScheduleEditPage({ showToast }: Props) {
       setServerSnapshot(JSON.stringify(drafts));
       showToast(`Saved ${drafts.length} schedule(s) to the server`, 'success');
     } catch (e) {
-      showToast(`Save failed: ${e}`, 'danger');
+      showToast(`Save failed: ${errMsg(e)}`, 'danger');
     } finally {
       setSaving(false);
     }
@@ -176,7 +216,6 @@ export function ScheduleEditPage({ showToast }: Props) {
     const blank = createBlankWorkshopSchedule();
     setDrafts((prev) => [...prev, blank]);
     setSelectedIdx(drafts.length);
-    showToast('New row added — fill in the required fields', 'info');
     setTimeout(() => fieldsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
   };
 
@@ -188,7 +227,15 @@ export function ScheduleEditPage({ showToast }: Props) {
     const next = [...drafts.slice(0, selectedIdx + 1), copy, ...drafts.slice(selectedIdx + 1)];
     setDrafts(next);
     setSelectedIdx(selectedIdx + 1);
-    showToast('Duplicated row', 'info');
+  };
+
+  const moveRow = (dir: -1 | 1) => {
+    const target = selectedIdx + dir;
+    if (target < 0 || target >= drafts.length) return;
+    const next = [...drafts];
+    [next[selectedIdx], next[target]] = [next[target], next[selectedIdx]];
+    setDrafts(next);
+    setSelectedIdx(target);
   };
 
   const removeRow = () => {
@@ -201,7 +248,6 @@ export function ScheduleEditPage({ showToast }: Props) {
       setSelectedIdx(Math.min(selectedIdx, next.length - 1));
     }
     setConfirmRemoveOpen(false);
-    showToast('Row removed (unsaved)', 'info');
   };
 
   const applyCatalogItem = (item: CatalogItemEntry) => {
@@ -235,7 +281,7 @@ export function ScheduleEditPage({ showToast }: Props) {
       showToast(`Loaded ${items.length} catalog item(s) from cluster`, 'success');
     } catch (e) {
       setCatalogItems([]);
-      showToast(`Catalog fetch failed — is the API connected to a cluster? ${e}`, 'danger');
+      showToast(`Catalog fetch failed: ${errMsg(e)}`, 'danger');
     } finally {
       setCatalogLoading(false);
     }
@@ -271,7 +317,7 @@ export function ScheduleEditPage({ showToast }: Props) {
     const text = workshopSchedulesToCsv(drafts);
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
     downloadTextFile(`schedules-${stamp}.csv`, text);
-    showToast('CSV downloaded — re-upload on the Upload tab any time', 'success');
+    showToast('CSV downloaded', 'success');
   };
 
   const startBlank = () => {
@@ -281,13 +327,26 @@ export function ScheduleEditPage({ showToast }: Props) {
     setLoading(false);
   };
 
+  const loadExample = async (slug: string) => {
+    try {
+      const resp = await api.loadScheduleExample(slug);
+      const cloned = resp.schedules.map((r) => ({ ...r }));
+      setDrafts(cloned);
+      setServerSnapshot('[]');
+      setSelectedIdx(0);
+      setLoading(false);
+      showToast(`Loaded "${slug}" example (${cloned.length} row${cloned.length !== 1 ? 's' : ''})`, 'success');
+    } catch (e) {
+      showToast(`Failed to load example: ${errMsg(e)}`, 'danger');
+    }
+  };
+
   const goBack = () => {
     window.location.hash = 'upload';
   };
 
   const s = drafts[selectedIdx];
 
-  // ── Loading state ──
   if (loading) {
     return (
       <PageSection>
@@ -296,7 +355,6 @@ export function ScheduleEditPage({ showToast }: Props) {
     );
   }
 
-  // ── Empty state ──
   if (drafts.length === 0) {
     return (
       <PageSection>
@@ -305,11 +363,17 @@ export function ScheduleEditPage({ showToast }: Props) {
         </Title>
         <EmptyState titleText="No schedules loaded" headingLevel="h2" icon={PlusCircleIcon}>
           <EmptyStateBody>
-            Start a blank schedule from scratch, or go back to the Upload tab, load a CSV, then open the editor again.
+            Start a blank schedule, load a built-in example, or go back to the Upload tab to import a CSV first.
           </EmptyStateBody>
-          <Split hasGutter style={{ justifyContent: 'center' }}>
+          <Split hasGutter style={{ justifyContent: 'center', flexWrap: 'wrap' }}>
             <SplitItem>
               <Button variant="primary" onClick={startBlank}>Start blank schedule</Button>
+            </SplitItem>
+            <SplitItem>
+              <Button variant="secondary" onClick={() => loadExample('basic')}>Load "basic" example</Button>
+            </SplitItem>
+            <SplitItem>
+              <Button variant="secondary" onClick={() => loadExample('full')}>Load "full" example</Button>
             </SplitItem>
             <SplitItem>
               <Button variant="secondary" onClick={load}>Reload from server</Button>
@@ -323,19 +387,26 @@ export function ScheduleEditPage({ showToast }: Props) {
     );
   }
 
-  // ── Row validation ──
   const rowErrors: string[] = [];
   if (s) {
     if (!s.ci.trim()) rowErrors.push('CI is required');
     if (!s.namespace.trim()) rowErrors.push('Namespace is required');
     if (!s.password.trim()) rowErrors.push('Password is required');
     if (!s.provisioning_date.trim()) rowErrors.push('Provisioning date is required');
+    else if (!isValidDateStr(s.provisioning_date)) rowErrors.push('Provisioning date format: DD/MM/YYYY HH:MM');
     if (!s.auto_destroy.trim()) rowErrors.push('Auto-destroy date is required');
+    else if (!isValidDateStr(s.auto_destroy)) rowErrors.push('Auto-destroy date format: DD/MM/YYYY HH:MM');
+    if (s.auto_stop && !isValidDateStr(s.auto_stop)) rowErrors.push('Auto-stop date format: DD/MM/YYYY HH:MM');
   }
+
+  const dateValidated = (v: string, required: boolean) => {
+    if (!v.trim()) return required ? 'error' as const : 'default' as const;
+    return isValidDateStr(v) ? 'default' as const : 'warning' as const;
+  };
 
   return (
     <PageSection>
-      {/* ── Toolbar ── */}
+      {/* Toolbar */}
       <Split hasGutter style={{ marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         <SplitItem>
           <Title headingLevel="h1" size="xl">Schedule Builder</Title>
@@ -347,6 +418,13 @@ export function ScheduleEditPage({ showToast }: Props) {
             <Label color="green" icon={<CheckCircleIcon />}>Saved</Label>
           )}
         </SplitItem>
+        {globalRowErrors.length > 0 && (
+          <SplitItem>
+            <Tooltip content={globalRowErrors.join('\n')}>
+              <Label color="red">{globalRowErrors.length} row error{globalRowErrors.length !== 1 ? 's' : ''}</Label>
+            </Tooltip>
+          </SplitItem>
+        )}
         <SplitItem isFilled />
         <SplitItem>
           <Button variant="link" onClick={goBack}>← Back to app</Button>
@@ -372,10 +450,9 @@ export function ScheduleEditPage({ showToast }: Props) {
         </SplitItem>
       </Split>
 
-      {/* ── Info alert ── */}
       <Alert variant="info" isInline isPlain title="Edits are local drafts until you Save. Use Download CSV to back up your work." style={{ marginBottom: 12 }} />
 
-      {/* ── Row selector ── */}
+      {/* Row selector */}
       <Card isCompact style={{ marginBottom: 12 }}>
         <CardBody>
           <Split hasGutter style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
@@ -386,13 +463,13 @@ export function ScheduleEditPage({ showToast }: Props) {
                   value={String(selectedIdx)}
                   onChange={(_e, val) => setSelectedIdx(Number(val))}
                   aria-label="Select schedule row"
-                  style={{ minWidth: 260 }}
+                  style={{ minWidth: 280 }}
                 >
                   {drafts.map((row, i) => (
                     <FormSelectOption
                       key={i}
                       value={String(i)}
-                      label={`${i + 1}. ${row.ci_name || row.ci || '(new row)'}`}
+                      label={`${i + 1}. ${row.ci_name || row.ci || '(new row)'}${!row.ci.trim() || !row.namespace.trim() ? ' ⚠' : ''}`}
                     />
                   ))}
                 </FormSelect>
@@ -403,8 +480,14 @@ export function ScheduleEditPage({ showToast }: Props) {
             </SplitItem>
             <SplitItem isFilled />
             <SplitItem>
+              <Tooltip content="Move row up"><Button variant="plain" icon={<ArrowUpIcon />} onClick={() => moveRow(-1)} isDisabled={saving || selectedIdx === 0} aria-label="Move row up" /></Tooltip>
+            </SplitItem>
+            <SplitItem>
+              <Tooltip content="Move row down"><Button variant="plain" icon={<ArrowDownIcon />} onClick={() => moveRow(1)} isDisabled={saving || selectedIdx >= drafts.length - 1} aria-label="Move row down" /></Tooltip>
+            </SplitItem>
+            <SplitItem>
               <Button variant="secondary" icon={<PlusCircleIcon />} onClick={addRow} isDisabled={saving}>
-                Add row
+                Add
               </Button>
             </SplitItem>
             <SplitItem>
@@ -421,13 +504,8 @@ export function ScheduleEditPage({ showToast }: Props) {
         </CardBody>
       </Card>
 
-      {/* ── Remove confirmation modal ── */}
-      <Modal
-        variant="small"
-        isOpen={confirmRemoveOpen}
-        onClose={() => setConfirmRemoveOpen(false)}
-        aria-label="Confirm remove"
-      >
+      {/* Remove confirmation */}
+      <Modal variant="small" isOpen={confirmRemoveOpen} onClose={() => setConfirmRemoveOpen(false)} aria-label="Confirm remove">
         <ModalHeader title="Remove row?" />
         <ModalBody>
           Remove row {selectedIdx + 1} ({s?.ci_name || s?.ci || 'unnamed'})? This is a local change — click Save to persist it.
@@ -438,7 +516,7 @@ export function ScheduleEditPage({ showToast }: Props) {
         </ModalFooter>
       </Modal>
 
-      {/* ── Catalog picker ── */}
+      {/* Catalog picker */}
       <Card isCompact style={{ marginBottom: 12 }}>
         <CardTitle>
           Catalog Item Picker
@@ -449,7 +527,7 @@ export function ScheduleEditPage({ showToast }: Props) {
         <CardBody>
           <Split hasGutter style={{ flexWrap: 'wrap', alignItems: 'center' }}>
             <SplitItem>
-              <Button variant="primary" onClick={fetchCatalog} isLoading={catalogLoading} isDisabled={catalogLoading}>
+              <Button variant={catalogItems.length ? 'secondary' : 'primary'} onClick={fetchCatalog} isLoading={catalogLoading} isDisabled={catalogLoading}>
                 {catalogItems.length ? 'Refresh catalog' : 'Load catalog from cluster'}
               </Button>
             </SplitItem>
@@ -499,9 +577,7 @@ export function ScheduleEditPage({ showToast }: Props) {
                         <Label isCompact color={it.catalog_namespace.includes('event') ? 'orange' : 'blue'}>
                           {it.catalog_namespace.includes('event') ? 'event' : 'prod'}
                         </Label>
-                        {it.category && (
-                          <Label isCompact color="grey">{it.category}</Label>
-                        )}
+                        {it.category && <Label isCompact color="grey">{it.category}</Label>}
                         {isActive && <CheckCircleIcon style={{ color: 'var(--pf-v6-global--success-color--100)' }} />}
                         {(it.description || keyParams.length > 0) && (
                           <div style={{ width: '100%', fontSize: '0.78rem', color: 'var(--pf-v6-global--Color--200)', marginTop: 2 }}>
@@ -536,7 +612,7 @@ export function ScheduleEditPage({ showToast }: Props) {
         </CardBody>
       </Card>
 
-      {/* ── Row fields ── */}
+      {/* Row fields */}
       {s && (
         <Card isCompact ref={fieldsRef}>
           <CardTitle>
@@ -545,7 +621,7 @@ export function ScheduleEditPage({ showToast }: Props) {
               <SplitItem isFilled />
               {rowErrors.length > 0 && (
                 <SplitItem>
-                  <Label color="orange">{rowErrors.length} missing field{rowErrors.length !== 1 ? 's' : ''}</Label>
+                  <Label color="orange">{rowErrors.length} issue{rowErrors.length !== 1 ? 's' : ''}</Label>
                 </SplitItem>
               )}
               <SplitItem>
@@ -569,6 +645,9 @@ export function ScheduleEditPage({ showToast }: Props) {
                 <div style={sectionTitle}>Identity</div>
                 <FormGroup label="CI Name" fieldId="ci_name" isRequired>
                   <TextInput id="ci_name" value={s.ci_name} onChange={(_e, v) => patch(selectedIdx, { ci_name: v })} placeholder="Display name for this workshop" />
+                  <FormHelperText>
+                    <HelperText><HelperTextItem variant="indeterminate">Pick from the catalog above or type manually</HelperTextItem></HelperText>
+                  </FormHelperText>
                 </FormGroup>
                 <FormGroup label="CI (Catalog Item ID)" fieldId="ci" isRequired>
                   <TextInput id="ci" value={s.ci} onChange={(_e, v) => patch(selectedIdx, { ci: v })} validated={!s.ci.trim() ? 'error' : 'default'} placeholder="vendor.item.env" />
@@ -577,7 +656,7 @@ export function ScheduleEditPage({ showToast }: Props) {
                   <TextInput id="namespace" value={s.namespace} onChange={(_e, v) => patch(selectedIdx, { namespace: v })} validated={!s.namespace.trim() ? 'error' : 'default'} placeholder="user-you-redhat-com" />
                 </FormGroup>
                 <FormGroup label="Workshop Name" fieldId="workshop_name">
-                  <TextInput id="workshop_name" value={s.workshop_name} onChange={(_e, v) => patch(selectedIdx, { workshop_name: v })} placeholder="Falls back to CI Name" />
+                  <TextInput id="workshop_name" value={s.workshop_name} onChange={(_e, v) => patch(selectedIdx, { workshop_name: v })} placeholder="Falls back to CI Name if empty" />
                 </FormGroup>
                 <FormGroup label="Password" fieldId="password" isRequired>
                   <Split hasGutter>
@@ -613,15 +692,19 @@ export function ScheduleEditPage({ showToast }: Props) {
                     id="provisioning_date"
                     value={s.provisioning_date}
                     onChange={(_e, v) => patch(selectedIdx, { provisioning_date: v })}
-                    validated={!s.provisioning_date.trim() ? 'error' : 'default'}
+                    validated={dateValidated(s.provisioning_date, true)}
                     placeholder="DD/MM/YYYY HH:MM"
                   />
+                  <FormHelperText>
+                    <HelperText><HelperTextItem variant="indeterminate">Example: 25/03/2026 14:00</HelperTextItem></HelperText>
+                  </FormHelperText>
                 </FormGroup>
                 <FormGroup label="Auto-stop" fieldId="auto_stop">
                   <TextInput
                     id="auto_stop"
                     value={s.auto_stop}
                     onChange={(_e, v) => patch(selectedIdx, { auto_stop: v })}
+                    validated={dateValidated(s.auto_stop, false)}
                     placeholder="DD/MM/YYYY HH:MM (optional)"
                   />
                 </FormGroup>
@@ -630,7 +713,7 @@ export function ScheduleEditPage({ showToast }: Props) {
                     id="auto_destroy"
                     value={s.auto_destroy}
                     onChange={(_e, v) => patch(selectedIdx, { auto_destroy: v })}
-                    validated={!s.auto_destroy.trim() ? 'error' : 'default'}
+                    validated={dateValidated(s.auto_destroy, true)}
                     placeholder="DD/MM/YYYY HH:MM"
                   />
                 </FormGroup>
@@ -638,42 +721,30 @@ export function ScheduleEditPage({ showToast }: Props) {
 
               {/* Capacity */}
               <div style={formGrid}>
-                <div style={sectionTitle}>Capacity &amp; Purpose</div>
-                <FormGroup label="Users" fieldId="users">
-                  <TextInput
-                    id="users"
-                    type="number"
-                    value={s.users == null ? '' : String(s.users)}
-                    onChange={(_e, v) => patch(selectedIdx, { users: parseOptInt(v) })}
-                    placeholder="Empty = catalog default"
-                  />
+                <div style={sectionTitle}>Capacity & Purpose</div>
+                <FormGroup label="Users (num_users)" fieldId="users">
+                  <TextInput id="users" type="number" value={s.users == null ? '' : String(s.users)} onChange={(_e, v) => patch(selectedIdx, { users: parseOptInt(v) })} placeholder="Empty = catalog default" />
+                  <FormHelperText>
+                    <HelperText><HelperTextItem variant="indeterminate">How many concurrent users the lab environment supports (passed as num_users to the catalog item)</HelperTextItem></HelperText>
+                  </FormHelperText>
                 </FormGroup>
-                <FormGroup label="Instances" fieldId="instances">
-                  <TextInput
-                    id="instances"
-                    type="number"
-                    value={s.instances == null ? '' : String(s.instances)}
-                    onChange={(_e, v) => patch(selectedIdx, { instances: parseOptInt(v) })}
-                    placeholder="Seat count for multi-asset"
-                  />
+                <FormGroup label="Instances (seat count)" fieldId="instances">
+                  <TextInput id="instances" type="number" value={s.instances == null ? '' : String(s.instances)} onChange={(_e, v) => patch(selectedIdx, { instances: parseOptInt(v) })} placeholder="Empty = uses Users value" />
+                  <FormHelperText>
+                    <HelperText><HelperTextItem variant="indeterminate">Replica count for WorkshopProvision (spec.count) and MultiWorkshop (numberSeats). Use when the catalog item has no num_users parameter.</HelperTextItem></HelperText>
+                  </FormHelperText>
+                </FormGroup>
+                <FormGroup label="Count (repeat deploy)" fieldId="count">
+                  <TextInput id="count" type="number" value={s.count == null ? '' : String(s.count)} onChange={(_e, v) => patch(selectedIdx, { count: parseOptInt(v) })} placeholder="Empty = 1 deployment" />
+                  <FormHelperText>
+                    <HelperText><HelperTextItem variant="indeterminate">Creates N independent deployments of this row (e.g. Count=2 deploys two separate clusters with the same config)</HelperTextItem></HelperText>
+                  </FormHelperText>
                 </FormGroup>
                 <FormGroup label="Concurrency" fieldId="concurrency">
-                  <TextInput
-                    id="concurrency"
-                    type="number"
-                    value={s.concurrency == null ? '' : String(s.concurrency)}
-                    onChange={(_e, v) => patch(selectedIdx, { concurrency: parseOptInt(v) })}
-                    placeholder="Default: 1"
-                  />
-                </FormGroup>
-                <FormGroup label="Count" fieldId="count">
-                  <TextInput
-                    id="count"
-                    type="number"
-                    value={s.count == null ? '' : String(s.count)}
-                    onChange={(_e, v) => patch(selectedIdx, { count: parseOptInt(v) })}
-                    placeholder="Deployment count"
-                  />
+                  <TextInput id="concurrency" type="number" value={s.concurrency == null ? '' : String(s.concurrency)} onChange={(_e, v) => patch(selectedIdx, { concurrency: parseOptInt(v) })} placeholder="Default: 1" />
+                  <FormHelperText>
+                    <HelperText><HelperTextItem variant="indeterminate">WorkshopProvision concurrency — how many provisions can run in parallel</HelperTextItem></HelperText>
+                  </FormHelperText>
                 </FormGroup>
                 <FormGroup label="Activity" fieldId="activity">
                   <TextInput id="activity" value={s.activity} onChange={(_e, v) => patch(selectedIdx, { activity: v })} placeholder="Admin" />
@@ -687,12 +758,7 @@ export function ScheduleEditPage({ showToast }: Props) {
               <div style={formGrid}>
                 <div style={sectionTitle}>Options</div>
                 <FormGroup label="Workshop UI" fieldId="enable_workshop_interface">
-                  <Switch
-                    id="enable_workshop_interface"
-                    label="Workshop interface"
-                    isChecked={s.enable_workshop_interface}
-                    onChange={(_e, c) => patch(selectedIdx, { enable_workshop_interface: c })}
-                  />
+                  <Switch id="enable_workshop_interface" label="Workshop interface" isChecked={s.enable_workshop_interface} onChange={(_e, c) => patch(selectedIdx, { enable_workshop_interface: c })} />
                 </FormGroup>
                 <FormGroup label="Redirect" fieldId="redirect">
                   <Switch id="redirect" label="Lab redirect" isChecked={s.redirect} onChange={(_e, c) => patch(selectedIdx, { redirect: c })} />
@@ -718,7 +784,7 @@ export function ScheduleEditPage({ showToast }: Props) {
 
               {/* Salesforce & regions */}
               <div style={formGrid}>
-                <div style={sectionTitle}>Salesforce &amp; Regions</div>
+                <div style={sectionTitle}>Salesforce & Regions</div>
                 <FormGroup label="Salesforce IDs" fieldId="salesforce_ids">
                   <TextInput id="salesforce_ids" value={s.salesforce_ids} onChange={(_e, v) => patch(selectedIdx, { salesforce_ids: v })} placeholder="type:id;type:id or plain IDs" />
                 </FormGroup>
@@ -742,7 +808,7 @@ export function ScheduleEditPage({ showToast }: Props) {
                   <TextInput id="showroom_repo" value={s.showroom_repo} onChange={(_e, v) => patch(selectedIdx, { showroom_repo: v })} placeholder="https://github.com/rhpds/showroom-*.git" />
                 </FormGroup>
                 <FormGroup label="Ref (branch/tag)" fieldId="showroom_ref">
-                  <TextInput id="showroom_ref" value={s.showroom_ref} onChange={(_e, v) => patch(selectedIdx, { showroom_ref: v })} placeholder="main" />
+                  <TextInput id="showroom_ref" value={s.showroom_ref} onChange={(_e, v) => patch(selectedIdx, { showroom_ref: v })} placeholder="main (leave blank unless needed)" />
                 </FormGroup>
                 <FormGroup label="noVNC Desktop" fieldId="showroom_novnc">
                   <Switch id="showroom_novnc" label="noVNC desktop" isChecked={s.showroom_novnc} onChange={(_e, c) => patch(selectedIdx, { showroom_novnc: c })} />
