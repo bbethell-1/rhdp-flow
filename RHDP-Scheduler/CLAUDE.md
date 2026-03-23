@@ -157,35 +157,15 @@ done
 
 ## CSV Column Reference
 
-**Rules:** Case-insensitive headers; column order free. **`Archive`** column ignored if present. **Dates:** either all three of `Provisioning Date` / `Auto-stop` / `Auto-destroy` **or** all three `… (UTC)` variants — `DD/MM/YYYY HH:MM`. **Full detail:** [README.md — CSV Format](README.md#csv-format).
+Human-readable spec: [README.md — CSV Format](README.md#csv-format).
 
-### Required headers
+**Mechanics:** Case-insensitive headers; any column order; optional `Archive` ignored. Dates: `DD/MM/YYYY HH:MM`; either legacy three date columns or all three `… (UTC)`.
 
-`CI Name`, `CI`, `Namespace`, `Users` (header required; cell may be empty), `Enable_workshop_interface`, `Password`, `Activity`, `Purpose`, plus the three date headers in one style (legacy or UTC).
+**Seats:** `Users` → `num_users` when >0; catalog max enforced on deploy (UI alert + API 400 + CLI fail). `Enable_workshop_interface` False → ResourceClaim only → **`Instances` unused**; use `Users`. UI True or multi-asset → `Instances` → WorkshopProvision `spec.count` (default 1 if unset). `Count` >1 → N replicated schedules—not seat count. Only `Instances` column (no `Workshop_instance_count`).
 
-### Optional headers (parser-complete)
+**Optional (all):** `Workshop Name`, `Multi_Asset`, `Asset_CIs`, `Multi_Workshop_Name`, `Concurrency`, `Instances`, `Salesforce IDs` (`campaign_id`), `Salesforce_Type`, `Count`, `AWS_Region`, `Redirect`, `Showroom_*`.
 
-| Column | Default / empty | Notes |
-|--------|-----------------|-------|
-| `Workshop Name` | CI Name | |
-| `Multi_Asset` | False | |
-| `Asset_CIs` | — | Legacy multi-asset CIs |
-| `Multi_Workshop_Name` | — | New-style grouped rows |
-| `Concurrency` | 1 at provision | |
-| `Instances` | unset (`None` in schedule) | **Not** used on ResourceClaim-only deploy (`Enable_workshop_interface` False); use **Users** → `num_users`. Used for **WorkshopProvision** `spec.count` (UI on), multi-asset provisions, MultiWorkshop `numberSeats`. No `Workshop_instance_count`. Blank → `spec.count` **1** when provision is created. |
-| `Salesforce IDs` | — | Alias: `campaign_id`; `;`-separated, optional `type:id` |
-| `Salesforce_Type` | opportunity | Aliases: `Salesforce Type` |
-| `Count` | unset | **>1** expands row into N schedules; not seat count |
-| `AWS_Region` | — | Comma-separated regions |
-| `Redirect` | True | False/0/No/N disables |
-| `Showroom_Repo` / `Showroom_Ref` | ref→main | |
-| `Showroom_NoVNC` / `Showroom_Zerotouch` | False | True/Yes/1 |
-
-### Not in CSV
-
-**White Glove** — UI Deploy Settings / API / `RHDPConfig`, not `read_csv_input`.
-
-The `Redirect` column is per-schedule. The global "Redirect (all)" toggle in Deploy Settings sets the default for new uploads and flips all loaded rows. Per-row toggles in the schedule table override individual rows.
+**Not CSV:** White Glove (Deploy Settings / config). **Redirect:** per-row CSV column; global "Redirect (all)" in Deploy Settings sets defaults for new uploads and can flip all rows—per-row table toggles still win.
 
 ## Sample Data for Demos
 
