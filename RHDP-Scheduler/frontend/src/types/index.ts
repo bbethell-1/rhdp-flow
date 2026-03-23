@@ -267,3 +267,24 @@ export interface SessionDetail {
   deploy_log_file: string | null;
   qa_log_file: string | null;
 }
+
+export interface RegionPlan {
+  region: string;
+  users: number;
+}
+
+export interface DeployPreviewItem {
+  ci_name: string;
+  ci: string;
+  namespace: string;
+  users: number | null;
+  instances: number | null;
+  count: number | null;
+  is_multi_asset: boolean;
+  multi_region: boolean;
+  regions: RegionPlan[];
+}
+
+export interface DeployPreviewResponse {
+  schedules: DeployPreviewItem[];
+}

@@ -21,6 +21,7 @@ import type {
   SessionDetail,
   ScheduleExampleMeta,
   CatalogItemEntry,
+  DeployPreviewResponse,
 } from '../types';
 
 const API = '/api';
@@ -141,6 +142,18 @@ export const api = {
   deployStatus: (jobId: string) => request<JobResponse>(`/deploy/status/${jobId}`),
   deployResults: () => cachedRequest<DeploymentResult[]>('/deploy/results'),
   deployStream: (jobId: string) => new EventSource(`${API}/deploy/stream/${jobId}`),
+  deployWebSocket: (jobId: string) => {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return new WebSocket(`${proto}//${location.host}${API}/deploy/ws/${jobId}`);
+  },
+  deployCancel: (jobId: string) =>
+    request<{ message: string }>(`/deploy/cancel/${jobId}`, { method: 'POST', body: '{}' }),
+  deployPause: (jobId: string) =>
+    request<{ message: string }>(`/deploy/pause/${jobId}`, { method: 'POST', body: '{}' }),
+  deployResume: (jobId: string) =>
+    request<{ message: string }>(`/deploy/resume/${jobId}`, { method: 'POST', body: '{}' }),
+  deployPreview: (body: DeployRequest) =>
+    request<DeployPreviewResponse>('/deploy/preview', { method: 'POST', body: JSON.stringify(body) }),
   retry: (body: RetryRequest) =>
     request<JobResponse>('/deploy/retry', { method: 'POST', body: JSON.stringify(body) }),
 

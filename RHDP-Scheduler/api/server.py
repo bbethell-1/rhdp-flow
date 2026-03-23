@@ -104,7 +104,7 @@ class CSPMiddleware(BaseHTTPMiddleware):
             "script-src 'self'; "
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data:; "
-            "connect-src 'self'; "
+            "connect-src 'self' ws: wss:; "
             "font-src 'self'"
         )
         response.headers["X-Content-Type-Options"] = "nosniff"

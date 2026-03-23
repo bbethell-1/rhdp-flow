@@ -13,11 +13,19 @@ from typing import Any, Dict, List, Optional
 from sse_starlette import ServerSentEvent
 
 
+def _make_set_event() -> asyncio.Event:
+    e = asyncio.Event()
+    e.set()
+    return e
+
+
 class Status(str, Enum):
     pending = "pending"
     running = "running"
     completed = "completed"
     failed = "failed"
+    cancelled = "cancelled"
+    paused = "paused"
 
 
 @dataclass
@@ -31,6 +39,8 @@ class Job:
     log_path: Optional[str] = None
     created_at: float = field(default_factory=time.time)
     _events: asyncio.Queue = field(default_factory=asyncio.Queue, repr=False)
+    _cancel_requested: bool = field(default=False, repr=False)
+    _pause_event: asyncio.Event = field(default_factory=lambda: _make_set_event(), repr=False)
 
 
 MAX_JOBS = int(os.environ.get("RHDP_MAX_JOBS", "100"))
@@ -73,6 +83,58 @@ def get_stats() -> dict:
         "max": MAX_JOBS,
         "truncated": _jobs_truncated,
     }
+
+
+def request_cancel(job_id: str) -> bool:
+    """Request cancellation of a running job. Returns True if the job was found and running."""
+    job = _jobs.get(job_id)
+    if job is None or job.status not in (Status.pending, Status.running, Status.paused):
+        return False
+    job._cancel_requested = True
+    job._pause_event.set()  # unpause if paused so loop can exit
+    return True
+
+
+def request_pause(job_id: str) -> bool:
+    """Request pause of a running job."""
+    job = _jobs.get(job_id)
+    if job is None or job.status != Status.running:
+        return False
+    job._pause_event.clear()
+    job.status = Status.paused
+    try:
+        job._events.put_nowait(_job_to_dict(job))
+    except asyncio.QueueFull:
+        pass
+    return True
+
+
+def request_resume(job_id: str) -> bool:
+    """Resume a paused job."""
+    job = _jobs.get(job_id)
+    if job is None or job.status != Status.paused:
+        return False
+    job._pause_event.set()
+    job.status = Status.running
+    try:
+        job._events.put_nowait(_job_to_dict(job))
+    except asyncio.QueueFull:
+        pass
+    return True
+
+
+def is_cancel_requested(job_id: str) -> bool:
+    """Check if cancel has been requested for this job."""
+    job = _jobs.get(job_id)
+    return job is not None and job._cancel_requested
+
+
+async def wait_if_paused(job_id: str) -> None:
+    """Block until the job is unpaused (or cancelled). Call between deploy steps."""
+    job = _jobs.get(job_id)
+    if job is None:
+        return
+    await job._pause_event.wait()
 
 
 def update_job(
@@ -119,7 +181,7 @@ async def event_generator(job_id: str):
         return
     # Send current state immediately
     yield ServerSentEvent(data=_serialize(job), event="status")
-    while job.status in (Status.pending, Status.running):
+    while job.status in (Status.pending, Status.running, Status.paused):
         if is_shutting_down():
             yield ServerSentEvent(data='{"message": "server shutting down"}', event="closing")
             return
@@ -143,6 +205,7 @@ def _job_to_dict(job: Job) -> dict:
         "message": job.message,
         "error": job.error,
         "log_file": os.path.basename(job.log_path) if job.log_path else None,
+        "cancel_requested": job._cancel_requested,
     }
 
 

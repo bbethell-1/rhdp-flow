@@ -15,7 +15,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 
@@ -790,6 +790,9 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
 
             # Grouped multi-asset
             for group_name, group_scheds in grouped_multi.items():
+                await jobs.wait_if_paused(job.job_id)
+                if jobs.is_cancel_requested(job.job_id):
+                    break
                 mw_name = create_multi_workshop_from_group(group_scheds, config)
                 first = group_scheds[0]
                 if mw_name:
@@ -817,6 +820,9 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                 jobs.update_job(job.job_id, progress=pct, message=f"Processed group: {group_name}")
 
             for s in regular_schedules:
+                await jobs.wait_if_paused(job.job_id)
+                if jobs.is_cancel_requested(job.job_id):
+                    break
                 result = process_schedule(s, config, asset_passwords=_asset_passwords)
                 results.append(result)
                 done += 1
@@ -832,14 +838,24 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
             with _state_lock:
                 _deployment_results = results
                 _deploy_log_path = log_path
-            jobs.update_job(
-                job.job_id,
-                status=jobs.Status.completed,
-                progress=100,
-                message=f"Completed: {len(results)} deployment(s)",
-                results=[asdict(r) for r in results],
-                log_path=log_path,
-            )
+
+            if jobs.is_cancel_requested(job.job_id):
+                jobs.update_job(
+                    job.job_id,
+                    status=jobs.Status.cancelled,
+                    message=f"Cancelled after {len(results)} of {total} deployment(s)",
+                    results=[asdict(r) for r in results],
+                    log_path=log_path,
+                )
+            else:
+                jobs.update_job(
+                    job.job_id,
+                    status=jobs.Status.completed,
+                    progress=100,
+                    message=f"Completed: {len(results)} deployment(s)",
+                    results=[asdict(r) for r in results],
+                    log_path=log_path,
+                )
         except Exception as exc:
             with _state_lock:
                 _deploy_log_path = log_path
@@ -1017,9 +1033,135 @@ async def deploy_stream(job_id: str, _key=Depends(verify_api_key)):
     return EventSourceResponse(jobs.event_generator(job_id))
 
 
+@router.websocket("/deploy/ws/{job_id}")
+async def deploy_ws(websocket: WebSocket, job_id: str):
+    """WebSocket endpoint for bidirectional deploy progress.
+
+    Server sends JSON status updates. Client can send:
+      {"command": "cancel"}
+      {"command": "pause"}
+      {"command": "resume"}
+    """
+    import json as _json
+    job = jobs.get_job(job_id)
+    if not job:
+        await websocket.close(code=4004, reason="Job not found")
+        return
+    await websocket.accept()
+
+    async def _send_updates():
+        await websocket.send_json(jobs._job_to_dict(job))
+        while job.status in (jobs.Status.pending, jobs.Status.running, jobs.Status.paused):
+            try:
+                data = await asyncio.wait_for(job._events.get(), timeout=30)
+                await websocket.send_json(data)
+                if data.get("status") in (jobs.Status.completed.value, jobs.Status.failed.value, jobs.Status.cancelled.value):
+                    return
+            except asyncio.TimeoutError:
+                await websocket.send_json({"keepalive": True})
+        await websocket.send_json(jobs._job_to_dict(job))
+
+    async def _recv_commands():
+        try:
+            while True:
+                raw = await websocket.receive_text()
+                try:
+                    msg = _json.loads(raw)
+                except _json.JSONDecodeError:
+                    continue
+                cmd = msg.get("command")
+                if cmd == "cancel":
+                    jobs.request_cancel(job_id)
+                elif cmd == "pause":
+                    jobs.request_pause(job_id)
+                elif cmd == "resume":
+                    jobs.request_resume(job_id)
+        except WebSocketDisconnect:
+            pass
+
+    send_task = asyncio.create_task(_send_updates())
+    recv_task = asyncio.create_task(_recv_commands())
+    done, pending = await asyncio.wait(
+        {send_task, recv_task}, return_when=asyncio.FIRST_COMPLETED,
+    )
+    for t in pending:
+        t.cancel()
+    try:
+        await websocket.close()
+    except Exception:
+        pass
+
+
+@router.post("/deploy/cancel/{job_id}")
+def deploy_cancel(job_id: str, _key=Depends(verify_api_key)):
+    """Cancel a running deployment."""
+    if jobs.request_cancel(job_id):
+        return {"message": f"Cancel requested for job {job_id}"}
+    raise HTTPException(404, "Job not found or not cancellable")
+
+
+@router.post("/deploy/pause/{job_id}")
+def deploy_pause(job_id: str, _key=Depends(verify_api_key)):
+    """Pause a running deployment."""
+    if jobs.request_pause(job_id):
+        return {"message": f"Paused job {job_id}"}
+    raise HTTPException(404, "Job not found or not running")
+
+
+@router.post("/deploy/resume/{job_id}")
+def deploy_resume(job_id: str, _key=Depends(verify_api_key)):
+    """Resume a paused deployment."""
+    if jobs.request_resume(job_id):
+        return {"message": f"Resumed job {job_id}"}
+    raise HTTPException(404, "Job not found or not paused")
+
+
 @router.get("/deploy/results", response_model=List[DeploymentResultResponse])
 def get_deploy_results():
     return [_result_to_response(r) for r in _deployment_results]
+
+
+@router.post("/deploy/preview")
+def deploy_preview(body: DeployRequest = DeployRequest()):
+    """Preview the deployment plan, including multi-region user splits.
+
+    Returns a plan without deploying anything. Useful for reviewing
+    how users will be distributed across AWS regions before committing.
+    """
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded. Upload a CSV first.")
+    schedules = _filter_schedules(body.ci_filter)
+
+    items = []
+    for s in schedules:
+        regions = [r.strip().replace("_", "-") for r in s.aws_regions.split(",") if r.strip()]
+        total_users = s.users or 0
+        item: dict = {
+            "ci_name": s.ci_name,
+            "ci": s.ci,
+            "namespace": s.namespace,
+            "users": s.users,
+            "instances": s.instances,
+            "count": s.count,
+            "is_multi_asset": s.is_multi_asset,
+        }
+        if len(regions) >= 2:
+            base_count = total_users // len(regions) if total_users else 0
+            remainder = total_users % len(regions) if total_users else 0
+            region_plan = []
+            for idx, region in enumerate(regions):
+                region_count = base_count + (1 if idx < remainder else 0)
+                region_plan.append({"region": region, "users": region_count})
+            item["multi_region"] = True
+            item["regions"] = region_plan
+        elif len(regions) == 1:
+            item["multi_region"] = False
+            item["regions"] = [{"region": regions[0], "users": total_users}]
+        else:
+            item["multi_region"] = False
+            item["regions"] = []
+        items.append(item)
+    return {"schedules": items}
 
 
 @router.post("/deploy/retry", response_model=JobResponse)
