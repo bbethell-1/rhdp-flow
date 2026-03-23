@@ -701,6 +701,53 @@ def test_qa_run_with_namespace_override_filters_csv(mock_qa1, client):
     assert data["results"][0]["ci_name"] == "Workshop B"
 
 
+@patch("api.routes.qa2_verify_deployment_status")
+@patch("api.routes.qa1_verify_setup")
+def test_qa_run_both_merges_one_row_per_workshop(mock_qa1, mock_qa2, client):
+    """Running both QA types must not duplicate rows; QA2 row wins for the same workshop."""
+    csv_single = """CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC)
+W1,vendor.w.prod,ns1,10,True,pw,Adm,QA,W1,01/01/2026 09:00,01/01/2026 17:00,02/01/2026 09:00
+"""
+    upload = client.post(
+        "/api/schedules/upload",
+        files={"file": ("q.csv", csv_single.encode(), "text/csv")},
+    )
+    assert upload.status_code == 200
+
+    mock_qa1.return_value = [{
+        "ci_name": "W1",
+        "ci": "vendor.w.prod",
+        "namespace": "ns1",
+        "deployed": "Yes",
+        "status": "qa1-row",
+        "expected_users": 10,
+        "actual_count": 10,
+        "landing_page_url": "",
+        "healthy": True,
+    }]
+    mock_qa2.return_value = [{
+        "ci_name": "W1",
+        "ci": "vendor.w.prod",
+        "namespace": "ns1",
+        "scheduled": "Yes",
+        "deployed": "Yes",
+        "provisioned": True,
+        "status": "✅ DEPLOYED & READY",
+        "expected_seats": 10,
+        "actual_seats": 10,
+        "landing_page_url": "",
+        "healthy": True,
+        "ready": True,
+    }]
+
+    resp = client.post("/api/qa/run", json={"type": "both"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["count"] == 1
+    assert data["results"][0]["status"] == "✅ DEPLOYED & READY"
+    assert data["results"][0]["actual_count"] == 10
+
+
 # ---------------------------------------------------------------------------
 # Export
 # ---------------------------------------------------------------------------

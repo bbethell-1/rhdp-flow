@@ -18,7 +18,6 @@ import {
   SplitItem,
   ToggleGroup,
   ToggleGroupItem,
-  TextInput,
   Tooltip,
 } from '@patternfly/react-core';
 import SearchIcon from '@patternfly/react-icons/dist/esm/icons/search-icon';
@@ -42,13 +41,12 @@ type QAStatusFilter = 'all' | 'verified' | 'failed';
 
 export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) => {
   const [qaType, setQaType] = useState<'1' | '2' | 'both'>('both');
-  const [qaNamespace, setQaNamespace] = useState('');
   const [running, setRunning] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
-  const [sortBy, setSortBy] = useState<SortableQAColumn | null>(null);
+  const [sortBy, setSortBy] = useState<SortableQAColumn | null>('ci_name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [qaSearch, setQaSearch] = useState('');
   const [qaStatusFilter, setQaStatusFilter] = useState<QAStatusFilter>('all');
@@ -65,13 +63,9 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
   const handleRun = async () => {
     setRunning(true);
     try {
-      const targetNamespace = qaNamespace.trim();
-      const data = await api.runQA({ type: qaType, namespace: targetNamespace || undefined });
+      const data = await api.runQA({ type: qaType });
       setQAResults(data.results);
-      showToast(
-        `QA complete: ${data.count} result(s)${targetNamespace ? ` for namespace ${targetNamespace}` : ''}`,
-        'success',
-      );
+      showToast(`QA complete: ${data.count} result(s)`, 'success');
     } catch (e) {
       showToast(`QA failed: ${e}`, 'danger');
     } finally {
@@ -121,11 +115,21 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
 
   const handleDownloadFilteredCSV = () => {
     const headers = ['CI Name', 'Namespace', 'CI', 'Status', 'Deployed', 'Healthy', 'Expected Seats', 'Actual Seats', 'Landing Page URL'];
-    const rows = filteredQAResults.map(r => [
-      r.ci_name, r.namespace || '', r.ci, r.status, r.deployed,
-      String(r.healthy ?? ''), String(r.expected_users ?? ''),
-      String(r.actual_count ?? ''), r.landing_page_url || '',
-    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','));
+    const rows = filteredQAResults.map(r => {
+      const rec = r as QAResult & { expected_seats?: unknown; actual_seats?: unknown; actual_users?: unknown };
+      const deployedYes = String(r.deployed || '').trim().toLowerCase() === 'yes';
+      const expRaw = rec.expected_users ?? rec.expected_seats;
+      const expCsv = expRaw === null || expRaw === undefined || expRaw === '' ? '' : String(expRaw);
+      let actCsv = '';
+      if (deployedYes) {
+        const a = rec.actual_count ?? rec.actual_seats ?? rec.actual_users;
+        actCsv = a === null || a === undefined || a === '' ? '' : String(a);
+      }
+      return [
+        r.ci_name, r.namespace || '', r.ci, r.status, r.deployed,
+        String(r.healthy ?? ''), expCsv, actCsv, r.landing_page_url || '',
+      ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
+    });
     const csv = [headers.join(','), ...rows].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -163,22 +167,7 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
             <p className="qa-type-hint">
               {qaType === '1' && 'Compares live workshops against your CSV schedule — checks dates, user counts, and configuration match what you uploaded.'}
               {qaType === '2' && 'Checks that workshops are actually provisioned and healthy, verifies seat counts, and retrieves student landing page URLs.'}
-              {qaType === 'both' && 'Runs setup verification first, then checks deployment health and collects landing page URLs.'}
-            </p>
-          </div>
-        </SplitItem>
-        <SplitItem>
-          <div>
-            <TextInput
-              id="qa-namespace"
-              aria-label="QA namespace override"
-              value={qaNamespace}
-              onChange={(_e, value) => setQaNamespace(value)}
-              placeholder="Namespace override (optional)"
-              style={{ width: 240 }}
-            />
-            <p className="qa-type-hint">
-              Leave blank to use the namespace from the loaded CSV, or enter a namespace to run QA only for that namespace.
+              {qaType === 'both' && 'Runs setup verification and deployment checks; the table shows one row per workshop (deployment results when both apply).'}
             </p>
           </div>
         </SplitItem>

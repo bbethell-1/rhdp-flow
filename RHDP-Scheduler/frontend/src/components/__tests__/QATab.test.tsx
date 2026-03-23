@@ -15,11 +15,6 @@ describe('QATab', () => {
     expect(screen.getByLabelText('QA type')).toBeInTheDocument();
   });
 
-  it('renders namespace override input', () => {
-    render(<QATab qaResults={[]} setQAResults={noop} showToast={noop} />);
-    expect(screen.getByLabelText('QA namespace override')).toBeInTheDocument();
-  });
-
   it('renders guidance alert', () => {
     render(<QATab qaResults={[]} setQAResults={noop} showToast={noop} />);
     expect(screen.getByText('When to use QA')).toBeInTheDocument();

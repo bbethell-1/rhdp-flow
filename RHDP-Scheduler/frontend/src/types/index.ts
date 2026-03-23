@@ -169,12 +169,12 @@ export interface QAResult {
   namespace?: string;
   status: string;
   deployed: string;
-  healthy: boolean | string;
-  expected_users: number;
-  actual_count: number;
-  landing_page_url: string;
-  showroom_status: string;
-  showroom_url: string;
+  healthy?: boolean | string | null;
+  expected_users?: number | string | null;
+  actual_count?: number | string | null;
+  landing_page_url?: string;
+  showroom_status?: string;
+  showroom_url?: string;
   [key: string]: unknown;
 }
 
