@@ -68,6 +68,7 @@ describe('UploadTab', () => {
     expect(screen.getByText('Deploy Settings')).toBeInTheDocument();
     expect(screen.getByText('Lock UI Admin Settings')).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: 'Lock row edits' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Full editor \(new tab\)/ })).toBeInTheDocument();
     expect(screen.getByText('Enable Resource Pools')).toBeInTheDocument();
     expect(screen.getByText('White Glove')).toBeInTheDocument();
   });

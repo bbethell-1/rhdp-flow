@@ -37,6 +37,9 @@ import { HealthBadge } from './components/HealthBadge';
 import { SessionHistory } from './components/SessionHistory';
 
 const UploadTab = lazy(() => import('./components/UploadTab').then(m => ({ default: m.UploadTab })));
+const ScheduleEditPage = lazy(() =>
+  import('./components/ScheduleEditPage').then(m => ({ default: m.ScheduleEditPage })),
+);
 const DeploymentsTab = lazy(() => import('./components/DeploymentsTab').then(m => ({ default: m.DeploymentsTab })));
 const OperationsTab = lazy(() => import('./components/OperationsTab').then(m => ({ default: m.OperationsTab })));
 const QATab = lazy(() => import('./components/QATab').then(m => ({ default: m.QATab })));
@@ -51,6 +54,7 @@ function getTabFromHash(): string {
 
 const App: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
+  const [locationHash, setLocationHash] = useState(() => window.location.hash);
   const [activeTab, setActiveTab] = useState<string | number>(getTabFromHash);
   const [dryRun, setDryRun] = useState(true);
   const [schedules, setSchedules] = useState<WorkshopSchedule[]>([]);
@@ -106,8 +110,14 @@ const App: React.FC = () => {
 
   const studentsCount = qaResults.filter(r => r.landing_page_url).length;
 
-  // Update document title and URL hash based on active tab
+  const editView = locationHash === '#edit';
+
+  // Update document title and URL hash based on active tab (skip when full editor is open)
   useEffect(() => {
+    if (editView) {
+      document.title = 'RHDP-Flow | Edit schedules';
+      return;
+    }
     const tabNames: Record<string, string> = {
       upload: 'Upload & Deploy',
       deployments: 'Deployments',
@@ -118,11 +128,17 @@ const App: React.FC = () => {
     const name = tabNames[String(activeTab)] || 'Upload & Deploy';
     document.title = `RHDP-Flow | ${name}`;
     window.history.replaceState(null, '', `#${activeTab}`);
-  }, [activeTab]);
+  }, [activeTab, editView]);
 
-  // Listen for browser back/forward to update active tab
+  // Sync tab + hash state on browser navigation; #edit is a separate full-page view
   useEffect(() => {
-    const handler = () => setActiveTab(getTabFromHash());
+    const handler = () => {
+      const h = window.location.hash;
+      setLocationHash(h);
+      const key = h.replace(/^#/, '') || 'upload';
+      if (key === 'edit') return;
+      if (VALID_TABS.includes(key)) setActiveTab(key);
+    };
     window.addEventListener('hashchange', handler);
     return () => window.removeEventListener('hashchange', handler);
   }, []);
@@ -130,7 +146,7 @@ const App: React.FC = () => {
   // Keyboard shortcuts
   const handleTabShortcut = useCallback((tab: string) => setActiveTab(tab), []);
   const handleHelpToggle = useCallback(() => setShowHelp(prev => !prev), []);
-  useKeyboardShortcuts(handleTabShortcut, handleHelpToggle);
+  useKeyboardShortcuts(handleTabShortcut, handleHelpToggle, !editView);
 
   const masthead = (
     <Masthead className={dryRun ? undefined : 'live-mode'}>
@@ -190,77 +206,85 @@ const App: React.FC = () => {
         )}
       </div>
 
-      <PageSection padding={{ default: 'noPadding' }} style={{ padding: '0 24px' }}>
-        <SessionHistory
-          onView={handleSessionView}
-          onBack={handleBackToCurrent}
-          viewingSession={viewingSession}
-          showToast={showToast}
-        />
-      </PageSection>
+      {!editView && (
+        <PageSection padding={{ default: 'noPadding' }} style={{ padding: '0 24px' }}>
+          <SessionHistory
+            onView={handleSessionView}
+            onBack={handleBackToCurrent}
+            viewingSession={viewingSession}
+            showToast={showToast}
+          />
+        </PageSection>
+      )}
 
       <PageSection isFilled>
-        <Tabs
-          activeKey={activeTab}
-          onSelect={(_e, key) => setActiveTab(key)}
-          aria-label="RHDP-Flow tabs"
-        >
-          <Tab
-            eventKey="upload"
-            title={<TabTitleText>Upload &amp; Deploy{schedules.length > 0 && <Badge className="tab-badge" isRead>{schedules.length}</Badge>}</TabTitleText>}
+        {editView ? (
+          <Suspense fallback={<Spinner />}>
+            <ScheduleEditPage showToast={showToast} />
+          </Suspense>
+        ) : (
+          <Tabs
+            activeKey={activeTab}
+            onSelect={(_e, key) => setActiveTab(key)}
+            aria-label="RHDP-Flow tabs"
           >
-            <Suspense fallback={<Spinner />}>
-              <UploadTab
-                dryRun={dryRun}
-                schedules={schedules}
-                setSchedules={setSchedules}
-                results={results}
-                setResults={setResults}
-                showToast={showToast}
-                onClear={handleClear}
-                setDeployLogFile={setDeployLogFile}
-              />
-            </Suspense>
-          </Tab>
-          <Tab
-            eventKey="deployments"
-            title={<TabTitleText>Deployments{results.length > 0 && <Badge className="tab-badge" isRead>{results.length}</Badge>}</TabTitleText>}
-          >
-            <Suspense fallback={<Spinner />}>
-              <DeploymentsTab
-                results={results}
-                setResults={setResults}
-                showToast={showToast}
-                deployLogFile={deployLogFile}
-              />
-            </Suspense>
-          </Tab>
-          <Tab eventKey="operations" title={<TabTitleText>Operations</TabTitleText>}>
-            <Suspense fallback={<Spinner />}>
-              <OperationsTab showToast={showToast} schedules={schedules} />
-            </Suspense>
-          </Tab>
-          <Tab
-            eventKey="qa"
-            title={<TabTitleText>QA{qaResults.length > 0 && <Badge className="tab-badge" isRead>{qaResults.length}</Badge>}</TabTitleText>}
-          >
-            <Suspense fallback={<Spinner />}>
-              <QATab
-                qaResults={qaResults}
-                setQAResults={setQAResults}
-                showToast={showToast}
-              />
-            </Suspense>
-          </Tab>
-          <Tab
-            eventKey="students"
-            title={<TabTitleText>Students{studentsCount > 0 && <Badge className="tab-badge" isRead>{studentsCount}</Badge>}</TabTitleText>}
-          >
-            <Suspense fallback={<Spinner />}>
-              <StudentsTab qaResults={qaResults} showToast={showToast} />
-            </Suspense>
-          </Tab>
-        </Tabs>
+            <Tab
+              eventKey="upload"
+              title={<TabTitleText>Upload &amp; Deploy{schedules.length > 0 && <Badge className="tab-badge" isRead>{schedules.length}</Badge>}</TabTitleText>}
+            >
+              <Suspense fallback={<Spinner />}>
+                <UploadTab
+                  dryRun={dryRun}
+                  schedules={schedules}
+                  setSchedules={setSchedules}
+                  results={results}
+                  setResults={setResults}
+                  showToast={showToast}
+                  onClear={handleClear}
+                  setDeployLogFile={setDeployLogFile}
+                />
+              </Suspense>
+            </Tab>
+            <Tab
+              eventKey="deployments"
+              title={<TabTitleText>Deployments{results.length > 0 && <Badge className="tab-badge" isRead>{results.length}</Badge>}</TabTitleText>}
+            >
+              <Suspense fallback={<Spinner />}>
+                <DeploymentsTab
+                  results={results}
+                  setResults={setResults}
+                  showToast={showToast}
+                  deployLogFile={deployLogFile}
+                />
+              </Suspense>
+            </Tab>
+            <Tab eventKey="operations" title={<TabTitleText>Operations</TabTitleText>}>
+              <Suspense fallback={<Spinner />}>
+                <OperationsTab showToast={showToast} schedules={schedules} />
+              </Suspense>
+            </Tab>
+            <Tab
+              eventKey="qa"
+              title={<TabTitleText>QA{qaResults.length > 0 && <Badge className="tab-badge" isRead>{qaResults.length}</Badge>}</TabTitleText>}
+            >
+              <Suspense fallback={<Spinner />}>
+                <QATab
+                  qaResults={qaResults}
+                  setQAResults={setQAResults}
+                  showToast={showToast}
+                />
+              </Suspense>
+            </Tab>
+            <Tab
+              eventKey="students"
+              title={<TabTitleText>Students{studentsCount > 0 && <Badge className="tab-badge" isRead>{studentsCount}</Badge>}</TabTitleText>}
+            >
+              <Suspense fallback={<Spinner />}>
+                <StudentsTab qaResults={qaResults} showToast={showToast} />
+              </Suspense>
+            </Tab>
+          </Tabs>
+        )}
       </PageSection>
 
       {/* Keyboard shortcuts help modal */}
