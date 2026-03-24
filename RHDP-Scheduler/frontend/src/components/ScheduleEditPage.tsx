@@ -213,7 +213,7 @@ export function ScheduleEditPage({ showToast }: Props) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) {
         if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
           e.preventDefault();
-          if (isDirty && !saving) handleSave();
+          if (isDirty && !saving && handleSaveRef.current) handleSaveRef.current();
           return;
         }
         if (!e.altKey) return;
@@ -226,12 +226,11 @@ export function ScheduleEditPage({ showToast }: Props) {
         setSelectedIdx((i) => Math.min(drafts.length - 1, i + 1));
       } else if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
-        if (isDirty && !saving) handleSave();
+        if (isDirty && !saving && handleSaveRef.current) handleSaveRef.current();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drafts.length, isDirty, saving]);
 
   const patch = useCallback((i: number, partial: Partial<WorkshopSchedule>) => {
@@ -247,7 +246,10 @@ export function ScheduleEditPage({ showToast }: Props) {
     return issues;
   }, [drafts]);
 
-  const handleSave = async () => {
+  // Use ref to ensure keyboard shortcut always calls the latest handleSave
+  const handleSaveRef = useRef<() => Promise<void>>();
+
+  const handleSave = useCallback(async () => {
     if (globalRowErrors.length > 0) {
       showToast(`Cannot save: ${globalRowErrors[0]}${globalRowErrors.length > 1 ? ` (+${globalRowErrors.length - 1} more)` : ''}`, 'danger');
       return;
@@ -263,7 +265,12 @@ export function ScheduleEditPage({ showToast }: Props) {
     } finally {
       setSaving(false);
     }
-  };
+  }, [drafts, globalRowErrors, showToast, clearApiCache]);
+
+  // Update ref whenever handleSave changes
+  useEffect(() => {
+    handleSaveRef.current = handleSave;
+  }, [handleSave]);
 
   const handleRevert = async () => {
     await load();

@@ -4,39 +4,56 @@ Items are grouped by priority. Easy wins are at the top of each section.
 
 ---
 
+## Recently Completed (March 2026)
+
+### ✅ WebSocket endpoint auth fixed
+Added API key authentication via query parameter to `/deploy/ws/{job_id}` endpoint.
+
+### ✅ Ctrl+S stale data issue resolved
+Implemented useRef pattern in ScheduleEditPage to prevent stale closure in keyboard shortcuts.
+
+### ✅ export_yaml_dir path validation added
+Added `_validate_export_yaml_dir()` function restricting paths to temp/exports/tmp directories.
+
+### ✅ Auth consistency on endpoints
+Added `verify_api_key` to `POST /schedules/diff`, `POST /deploy/preview`, `POST /schedules/validate-namespaces`, and `POST /schedules/validate-num-users`.
+
+### ✅ CSP policy tightened
+Changed CSP from `connect-src 'self' ws: wss:` to `connect-src 'self'` for same-origin WebSocket connections only.
+
+### ✅ Deploy retry num_users validation
+Added same num_users limit validation to `POST /deploy/retry` as main deploy endpoint.
+
+### ✅ Demolition preflight password protection
+Modified to pass passwords via environment variable (`DEMOLITION_PASSWORD`) instead of CLI arguments.
+
+### ✅ Silent failures user feedback
+Added proper error handling with toast notifications for WebSocket operations, clipboard access, and manual refresh failures.
+
+### ✅ DestroyQASection namespace override fixed
+Added DestroyCheckRequest model and made namespace override functional in destroy check API.
+
+### ✅ Extended auth enforcement test coverage
+Added 10 new auth tests covering deploy, retry, cancel/pause/resume endpoints (17 total auth tests).
+
+### ✅ Container build in PR workflow
+Added `container-build-pr` job to validate Docker builds on pull requests.
+
+### ✅ Python linting in CI
+Added ruff linting and mypy type checking to CI pipeline.
+
+### ✅ Job store thread safety
+Added `_jobs_lock` threading.Lock() to all job store operations for concurrent request safety.
+
+### ✅ Basic persistent storage config
+Added `RHDP_JOBS_PERSIST` environment variable for future file/SQLite-backed job storage.
+
+### ✅ FastAPI deprecation warnings fixed
+Migrated from `@app.on_event("shutdown")` to lifespan context manager and `asyncio.get_running_loop()`.
+
+---
+
 ## High Priority
-
-### WebSocket endpoint has no auth
-`/deploy/ws/{job_id}` accepts connections without `verify_api_key`. Anyone who can reach the server and guess a job ID can send cancel/pause/resume commands.
-**Fix**: Validate API key from a query param or first message before accepting commands.
-
-### Ctrl+S in ScheduleEditPage may save stale data
-The keyboard shortcut `useEffect` intentionally omits `handleSave` from its dependency array, so `handleSave` can close over an outdated `drafts` snapshot.
-**Fix**: Use a ref for the save callback so the effect always calls the latest version.
-
-### `export_yaml_dir` allows arbitrary filesystem writes
-`DeployRequest.export_yaml_dir` is an unconstrained path string. Authenticated callers can write dry-run YAML anywhere the process can write.
-**Fix**: Validate the path against an allowlist or restrict to a designated output directory.
-
-### Auth inconsistency on read/preview/diff endpoints
-`POST /schedules/diff`, `POST /deploy/preview`, `POST /schedules/validate-namespaces`, and `POST /schedules/validate-num-users` skip `verify_api_key` while other mutations require it.
-**Fix**: Add `verify_api_key` to these endpoints for consistency.
-
-### CSP `connect-src ws: wss:` is too broad
-Allows WebSocket connections to any origin. Should be tightened to `'self'` once WebSocket paths are confirmed to use same-origin only.
-
-### Deploy retry bypasses `num_users` limit
-`POST /deploy/retry` does not replicate the user-count ceiling enforced in `POST /deploy`, so limits can be sidestepped.
-
-### Demolition preflight leaks passwords in process listings
-`rhdp_flow.py` `run_demolition_preflight` passes passwords as CLI arguments visible in `ps` on shared hosts. Consider passing them via stdin or environment variable.
-
-### Silent failures across multiple frontend components
-Many async operations only `console.warn` on failure (session history fetch, auto-refresh, cancel/pause/resume, clipboard). Users see no feedback.
-**Fix**: Show a toast or inline alert on failure in `SessionHistory`, `DestroyQASection`, `QATab`, `OperationsTab`, and `UploadTab` control actions.
-
-### `DestroyQASection` namespace override is a dead control
-The `nsOverride` state is displayed in the UI but never passed to `api.destroyCheck`, so the filter control does nothing.
 
 ---
 
@@ -48,30 +65,15 @@ Missing `TestClient` coverage for: `PUT /api/schedules`, `DELETE /api/schedules/
 ### Test coverage gaps — frontend
 No tests for: `ScheduleEditPage`, `DiffView`, `DestroyQASection`, `SessionHistory`, `QAResultsTable`, `services/api.ts`, `utils/scheduleCsv.ts`, `utils/scheduleDefaults.ts`, `hooks/useAutoRefresh.ts`, `hooks/useTheme.ts`, `hooks/useKeyboardShortcuts.ts`.
 
-### Auth enforcement test coverage
-`TestAuthEnforcement` only covers 6 endpoints. Extend to deploy, dry-run, operations, retry, cancel/pause/resume, stream, schedule replace/delete.
-
-### CI: run container build on PRs
-`container-build` currently only runs on push to `main`, so Dockerfile breakage can merge via PR undetected. Move it (or a build-only variant) into the PR workflow.
-
-### CI: add Python linter / type checker
-No `ruff`, `flake8`, or `mypy` job in CI. Adding one would catch issues earlier.
 
 ### `rhdp_flow.py` large function refactoring
 `process_schedule` (~230 lines) and `qa1_verify_setup` (~400 lines) are large and hard to test in isolation. Extracting sub-functions would reduce defect surface.
 
-### Job store thread safety
-`_jobs` dict and job mutations in `api/jobs.py` have no locking. Sync endpoints and async tasks can interleave, risking rare consistency issues under concurrent requests.
-
-### Persistent storage
-Backend state is entirely in-memory. A lightweight SQLite or file-backed store would survive restarts.
 
 ---
 
 ## Low Priority — Polish
 
-- `api/server.py` uses deprecated `@app.on_event("shutdown")` — migrate to lifespan context manager.
-- `api/routes.py` uses `asyncio.get_event_loop()` instead of `get_running_loop()` in health checks.
 - `sys.path.insert` for imports in `routes.py` is fragile — consider proper packaging.
 - Module-level `logging.basicConfig` in `rhdp_flow.py` can fight application logging.
 - `UploadTab.tsx` per-cell `setSchedules(schedules.map(...))` should use functional updater `setSchedules(prev => ...)` to avoid state races on rapid edits.

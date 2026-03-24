@@ -500,8 +500,15 @@ export const UploadTab: React.FC<Props> = ({
 
   const handleDeployCancel = () => {
     if (jobIdRef.current) {
-      wsRef.current?.send(JSON.stringify({ command: 'cancel' }));
-      api.deployCancel(jobIdRef.current).catch(() => {});
+      try {
+        wsRef.current?.send(JSON.stringify({ command: 'cancel' }));
+      } catch (e) {
+        console.warn('WebSocket cancel failed', e);
+      }
+      api.deployCancel(jobIdRef.current).catch((e) => {
+        console.warn('HTTP cancel failed', e);
+        showToast(`Cancel request failed: ${e}`, 'warning');
+      });
       appendLog('Cancel requested...');
     }
   };
@@ -509,12 +516,26 @@ export const UploadTab: React.FC<Props> = ({
   const handleDeployPause = () => {
     if (jobIdRef.current) {
       if (deployPaused) {
-        wsRef.current?.send(JSON.stringify({ command: 'resume' }));
-        api.deployResume(jobIdRef.current).catch(() => {});
+        try {
+          wsRef.current?.send(JSON.stringify({ command: 'resume' }));
+        } catch (e) {
+          console.warn('WebSocket resume failed', e);
+        }
+        api.deployResume(jobIdRef.current).catch((e) => {
+          console.warn('HTTP resume failed', e);
+          showToast(`Resume request failed: ${e}`, 'warning');
+        });
         appendLog('Resuming...');
       } else {
-        wsRef.current?.send(JSON.stringify({ command: 'pause' }));
-        api.deployPause(jobIdRef.current).catch(() => {});
+        try {
+          wsRef.current?.send(JSON.stringify({ command: 'pause' }));
+        } catch (e) {
+          console.warn('WebSocket pause failed', e);
+        }
+        api.deployPause(jobIdRef.current).catch((e) => {
+          console.warn('HTTP pause failed', e);
+          showToast(`Pause request failed: ${e}`, 'warning');
+        });
         appendLog('Pausing after current workshop...');
       }
     }

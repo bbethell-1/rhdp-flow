@@ -198,7 +198,8 @@
       "Bash(xargs:*)",
       "Bash(helm:*)",
       "Bash(/Users/joshuadisraeli/repos/rhpds-utils/RHDP-Scheduler/showroom_demo.csv:*)",
-      "mcp__git__git_status"
+      "mcp__git__git_status",
+      "Bash(find tests/ -name \"*.py\" -exec wc -l {} +)"
     ]
   },
   "enableAllProjectMcpServers": true,

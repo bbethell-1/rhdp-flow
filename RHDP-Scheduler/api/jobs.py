@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -46,20 +47,27 @@ class Job:
 MAX_JOBS = int(os.environ.get("RHDP_MAX_JOBS", "100"))
 _jobs: Dict[str, Job] = {}
 _jobs_truncated: int = 0
+_jobs_lock = threading.Lock()
+
+# TODO: Basic persistent storage option
+# Set RHDP_JOBS_PERSIST=file to enable file-backed storage
+# Set RHDP_JOBS_PERSIST=sqlite to enable SQLite-backed storage
+_persistence_mode = os.environ.get("RHDP_JOBS_PERSIST", "memory").lower()
 
 
 def _cleanup_old_jobs() -> None:
     """Remove oldest terminal jobs when store exceeds MAX_JOBS."""
     global _jobs_truncated
-    if len(_jobs) <= MAX_JOBS:
-        return
-    terminal = [(jid, j) for jid, j in _jobs.items()
-                 if j.status in (Status.completed, Status.failed, Status.cancelled)]
-    terminal.sort(key=lambda x: x[1].created_at)
-    to_remove = len(_jobs) - MAX_JOBS
-    for jid, _ in terminal[:to_remove]:
-        del _jobs[jid]
-        _jobs_truncated += 1
+    with _jobs_lock:
+        if len(_jobs) <= MAX_JOBS:
+            return
+        terminal = [(jid, j) for jid, j in _jobs.items()
+                     if j.status in (Status.completed, Status.failed, Status.cancelled)]
+        terminal.sort(key=lambda x: x[1].created_at)
+        to_remove = len(_jobs) - MAX_JOBS
+        for jid, _ in terminal[:to_remove]:
+            del _jobs[jid]
+            _jobs_truncated += 1
 
 
 def create_job() -> Job:
@@ -67,60 +75,66 @@ def create_job() -> Job:
     _cleanup_old_jobs()
     job_id = uuid.uuid4().hex[:12]
     job = Job(job_id=job_id)
-    _jobs[job_id] = job
+    with _jobs_lock:
+        _jobs[job_id] = job
     return job
 
 
 def get_job(job_id: str) -> Optional[Job]:
     """Return job by id, or None."""
-    return _jobs.get(job_id)
+    with _jobs_lock:
+        return _jobs.get(job_id)
 
 
 def get_stats() -> dict:
     """Return job store statistics including truncation info."""
-    return {
-        "total": len(_jobs),
-        "max": MAX_JOBS,
-        "truncated": _jobs_truncated,
-    }
+    with _jobs_lock:
+        return {
+            "total": len(_jobs),
+            "max": MAX_JOBS,
+            "truncated": _jobs_truncated,
+        }
 
 
 def request_cancel(job_id: str) -> bool:
     """Request cancellation of a running job. Returns True if the job was found and running."""
-    job = _jobs.get(job_id)
-    if job is None or job.status not in (Status.pending, Status.running, Status.paused):
-        return False
-    job._cancel_requested = True
-    job._pause_event.set()  # unpause if paused so loop can exit
-    return True
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if job is None or job.status not in (Status.pending, Status.running, Status.paused):
+            return False
+        job._cancel_requested = True
+        job._pause_event.set()  # unpause if paused so loop can exit
+        return True
 
 
 def request_pause(job_id: str) -> bool:
     """Request pause of a running job."""
-    job = _jobs.get(job_id)
-    if job is None or job.status != Status.running:
-        return False
-    job._pause_event.clear()
-    job.status = Status.paused
-    try:
-        job._events.put_nowait(_job_to_dict(job))
-    except asyncio.QueueFull:
-        pass
-    return True
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if job is None or job.status != Status.running:
+            return False
+        job._pause_event.clear()
+        job.status = Status.paused
+        try:
+            job._events.put_nowait(_job_to_dict(job))
+        except asyncio.QueueFull:
+            pass
+        return True
 
 
 def request_resume(job_id: str) -> bool:
     """Resume a paused job."""
-    job = _jobs.get(job_id)
-    if job is None or job.status != Status.paused:
-        return False
-    job._pause_event.set()
-    job.status = Status.running
-    try:
-        job._events.put_nowait(_job_to_dict(job))
-    except asyncio.QueueFull:
-        pass
-    return True
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if job is None or job.status != Status.paused:
+            return False
+        job._pause_event.set()
+        job.status = Status.running
+        try:
+            job._events.put_nowait(_job_to_dict(job))
+        except asyncio.QueueFull:
+            pass
+        return True
 
 
 def is_cancel_requested(job_id: str) -> bool:
@@ -148,27 +162,28 @@ def update_job(
     log_path: Optional[str] = None,
 ) -> Optional[Job]:
     """Update fields on an existing job. Pushes an SSE event."""
-    job = _jobs.get(job_id)
-    if job is None:
-        return None
-    if status is not None:
-        job.status = status
-    if progress is not None:
-        job.progress = progress
-    if message is not None:
-        job.message = message
-    if results is not None:
-        job.results = results
-    if error is not None:
-        job.error = error
-    if log_path is not None:
-        job.log_path = log_path
-    # Push event for SSE listeners (non-blocking)
-    try:
-        job._events.put_nowait(_job_to_dict(job))
-    except asyncio.QueueFull:
-        pass
-    return job
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+        if job is None:
+            return None
+        if status is not None:
+            job.status = status
+        if progress is not None:
+            job.progress = progress
+        if message is not None:
+            job.message = message
+        if results is not None:
+            job.results = results
+        if error is not None:
+            job.error = error
+        if log_path is not None:
+            job.log_path = log_path
+        # Push event for SSE listeners (non-blocking)
+        try:
+            job._events.put_nowait(_job_to_dict(job))
+        except asyncio.QueueFull:
+            pass
+        return job
 
 
 async def event_generator(job_id: str):

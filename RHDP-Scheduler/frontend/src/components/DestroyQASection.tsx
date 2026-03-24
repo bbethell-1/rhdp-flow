@@ -178,6 +178,7 @@ export const DestroyQASection: React.FC<{
       setResults(data.results);
     } catch (e) {
       console.warn('Auto-refresh destroy-check results failed', e);
+      // Silent auto-refresh failures are acceptable - don't spam user with errors
     }
   }, []);
 
@@ -186,7 +187,7 @@ export const DestroyQASection: React.FC<{
   const handleRun = async () => {
     setRunning(true);
     try {
-      const data = await api.destroyCheck();
+      const data = await api.destroyCheck(nsOverride.trim() || undefined);
       setResults(data.results);
       setExpanded({});
       showToast(`Destroy check complete: ${data.count} result(s)`, 'success');
@@ -203,6 +204,7 @@ export const DestroyQASection: React.FC<{
       setResults(data.results);
     } catch (e) {
       console.warn('Refresh destroy-check results failed', e);
+      showToast(`Failed to refresh destroy check results: ${e}`, 'warning');
     }
   };
 

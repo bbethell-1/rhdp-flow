@@ -195,6 +195,22 @@ class QARequest(BaseModel):
         return value or None
 
 
+class DestroyCheckRequest(BaseModel):
+    namespace: Optional[str] = Field(
+        None,
+        min_length=1,
+        description="Optional namespace override for destroy checks; defaults to the loaded schedule namespace",
+    )
+
+    @field_validator("namespace")
+    @classmethod
+    def _strip_namespace(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+
 # ---------------------------------------------------------------------------
 # Job tracking
 # ---------------------------------------------------------------------------

@@ -1397,6 +1397,49 @@ class TestAuthEnforcement:
         )
         assert resp.status_code == 403
 
+    def test_validate_namespaces_requires_key(self, auth_client):
+        resp = auth_client.post("/api/schedules/validate-namespaces")
+        assert resp.status_code == 403
+
+    def test_validate_num_users_requires_key(self, auth_client):
+        resp = auth_client.post("/api/schedules/validate-num-users")
+        assert resp.status_code == 403
+
+    def test_diff_schedules_requires_key(self, auth_client):
+        resp = auth_client.post(
+            "/api/schedules/diff",
+            files={"file": ("t.csv", BASIC_WORKSHOP_CSV.encode(), "text/csv")},
+        )
+        assert resp.status_code == 403
+
+    def test_deploy_preview_requires_key(self, auth_client):
+        resp = auth_client.post("/api/deploy/preview", json={})
+        assert resp.status_code == 403
+
+    def test_deploy_requires_key(self, auth_client):
+        resp = auth_client.post("/api/deploy", json={})
+        assert resp.status_code == 403
+
+    def test_deploy_dry_run_requires_key(self, auth_client):
+        resp = auth_client.post("/api/deploy/dry-run", json={})
+        assert resp.status_code == 403
+
+    def test_deploy_retry_requires_key(self, auth_client):
+        resp = auth_client.post("/api/deploy/retry", json={"ci_names": ["test"]})
+        assert resp.status_code == 403
+
+    def test_deploy_cancel_requires_key(self, auth_client):
+        resp = auth_client.post("/api/deploy/cancel/fake-job-id")
+        assert resp.status_code == 403
+
+    def test_deploy_pause_requires_key(self, auth_client):
+        resp = auth_client.post("/api/deploy/pause/fake-job-id")
+        assert resp.status_code == 403
+
+    def test_deploy_resume_requires_key(self, auth_client):
+        resp = auth_client.post("/api/deploy/resume/fake-job-id")
+        assert resp.status_code == 403
+
 
 # ---------------------------------------------------------------------------
 # Job store stats

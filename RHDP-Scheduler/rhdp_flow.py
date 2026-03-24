@@ -4972,10 +4972,13 @@ def run_demolition_preflight(urls: list, demolition_path: str = None, password: 
             results.append({"ci_name": ci_name, "url": url, "status": "skipped", "message": "No URL available"})
             continue
         cmd = [demolition_path, "preflight", url, "--no-register"]
+        env = os.environ.copy()
         if pw:
-            cmd.extend(["--password", pw])
+            # Pass password via environment variable instead of CLI arg to avoid process list exposure
+            env["DEMOLITION_PASSWORD"] = pw
+            cmd.append("--password-from-env")
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=env)
             output = (proc.stdout + proc.stderr).strip()
             if proc.returncode == 0:
                 results.append({"ci_name": ci_name, "url": url, "status": "pass", "message": output or "Preflight passed"})

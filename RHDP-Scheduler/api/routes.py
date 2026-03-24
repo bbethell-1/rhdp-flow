@@ -64,6 +64,7 @@ from api.models import (
     CatalogItemParameter,
     DeploymentResultResponse,
     DeployRequest,
+    DestroyCheckRequest,
     DestroyCheckResponse,
     DiffEntry,
     DiffResponse,
@@ -114,6 +115,41 @@ _sessions: List[dict] = []
 _session_counter: int = 0
 MAX_SESSIONS = 50
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+def _validate_export_yaml_dir(path: str) -> str:
+    """Validate export_yaml_dir to prevent arbitrary filesystem writes.
+
+    Returns resolved safe path or raises HTTPException if invalid.
+    """
+    import tempfile
+    from pathlib import Path
+
+    # Allow only paths under temp directory or a designated 'exports' subdirectory
+    allowed_prefixes = [
+        Path(tempfile.gettempdir()).resolve(),
+        Path.cwd() / "exports",
+        Path.cwd() / "tmp",
+    ]
+
+    try:
+        resolved_path = Path(path).expanduser().resolve()
+    except (ValueError, OSError) as e:
+        raise HTTPException(status_code=400, detail=f"Invalid path: {e}")
+
+    # Check if path is under any allowed prefix
+    for allowed in allowed_prefixes:
+        try:
+            resolved_path.relative_to(allowed)
+            return str(resolved_path)
+        except ValueError:
+            continue
+
+    raise HTTPException(
+        status_code=400,
+        detail=f"Export path must be under temp directory or exports/tmp subdirectory. Got: {resolved_path}"
+    )
+
 
 # Built-in schedule examples (files under docs/examples/)
 _SCHEDULE_EXAMPLES: Dict[str, tuple[str, str]] = {
@@ -553,7 +589,7 @@ async def health():
 
     # 2. Check cluster connectivity — run blocking subprocess calls off the
     #    event loop so we don't starve other requests while waiting on oc.
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     def _run_oc(*args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -707,7 +743,7 @@ def get_schedules():
 
 
 @router.post("/schedules/validate-namespaces")
-def validate_namespaces():
+def validate_namespaces(_key=Depends(verify_api_key)):
     """Check whether the namespaces referenced by loaded schedules exist on the cluster."""
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
@@ -735,7 +771,7 @@ def validate_namespaces():
 
 
 @router.post("/schedules/validate-num-users", response_model=NumUsersValidationResponse)
-def validate_num_users():
+def validate_num_users(_key=Depends(verify_api_key)):
     """Check whether any loaded schedules exceed the catalog item's num_users maximum."""
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
@@ -797,7 +833,7 @@ def validate_num_users():
 
 
 @router.post("/schedules/diff", response_model=DiffResponse)
-async def diff_schedules(file: UploadFile = File(...)):
+async def diff_schedules(file: UploadFile = File(...), _key=Depends(verify_api_key)):
     """Compare a new CSV against the currently loaded schedules."""
     if not _schedules:
         raise HTTPException(400, "No schedules loaded to compare against.")
@@ -1035,7 +1071,7 @@ def deploy_dry_run(request: Request, body: DeployRequest = DeployRequest(), _key
         redirect=body.redirect,
     )
     if body.export_yaml_dir:
-        config.dry_run_export_yaml_dir = body.export_yaml_dir
+        config.dry_run_export_yaml_dir = _validate_export_yaml_dir(body.export_yaml_dir)
         config.dry_run_yaml_export_seq = 0
     # U3: Propagate showroom deploy settings to schedules
     for s in schedules:
@@ -1187,8 +1223,23 @@ async def deploy_ws(websocket: WebSocket, job_id: str):
       {"command": "cancel"}
       {"command": "pause"}
       {"command": "resume"}
+
+    Requires API key authentication via query parameter when RHDP_API_KEY is set.
     """
     import json as _json
+    from api.auth import _get_required_key
+    import hmac
+
+    # Check API key auth before accepting connection
+    required_key = _get_required_key()
+    if required_key is not None:
+        # Extract API key from query parameters
+        query_params = dict(websocket.query_params)
+        provided_key = query_params.get("api_key")
+        if not provided_key or not hmac.compare_digest(provided_key, required_key):
+            await websocket.close(code=4003, reason="Invalid or missing API key")
+            return
+
     job = jobs.get_job(job_id)
     if not job:
         await websocket.close(code=4004, reason="Job not found")
@@ -1268,7 +1319,7 @@ def get_deploy_results():
 
 
 @router.post("/deploy/preview")
-def deploy_preview(body: DeployRequest = DeployRequest()):
+def deploy_preview(body: DeployRequest = DeployRequest(), _key=Depends(verify_api_key)):
     """Preview the deployment plan, including multi-region user splits.
 
     Returns a plan without deploying anything. Useful for reviewing
@@ -1321,6 +1372,26 @@ async def deploy_retry(request: Request, body: RetryRequest, _key=Depends(verify
     matching = [s for s in _schedules if s.ci_name in ci_name_set]
     if not matching:
         raise HTTPException(404, f"No schedules match the provided CI names: {body.ci_names}")
+
+    # Pre-deploy num_users limit check (live deploys only) - same as main deploy
+    if not body.dry_run:
+        config_check = _get_config()
+        ci_cache: Dict[str, Optional[Dict]] = {}
+        limit_errors = []
+        for s in matching:
+            if s.users is not None and s.users > 0:
+                if s.ci not in ci_cache:
+                    ci_cache[s.ci] = get_catalog_item_num_users_limit(s.ci, config_check)
+                info = ci_cache[s.ci]
+                if info and info.get("maximum") is not None and s.users > info["maximum"]:
+                    limit_errors.append(
+                        f"{s.ci_name} ({s.ci}): {s.users} users exceeds catalog maximum of {info['maximum']}"
+                    )
+        if limit_errors:
+            raise HTTPException(
+                400,
+                f"num_users limit exceeded: {'; '.join(limit_errors)}"
+            )
 
     job = jobs.create_job()
 
@@ -1663,7 +1734,7 @@ def qa_get_results():
 
 @router.post("/qa/destroy-check", response_model=DestroyCheckResponse)
 @_rate_limit("10/minute")
-def qa_destroy_check_endpoint(request: Request, _key=Depends(verify_api_key)):
+def qa_destroy_check_endpoint(request: Request, body: DestroyCheckRequest = DestroyCheckRequest(), _key=Depends(verify_api_key)):
     """Read-only check whether deployments have been properly destroyed/stopped."""
     global _destroy_check_results
     if not _schedules:
@@ -1676,12 +1747,18 @@ def qa_destroy_check_endpoint(request: Request, _key=Depends(verify_api_key)):
 
     handler, log_path = start_log_capture("destroy-check")
     try:
-        namespaces_seen: set = set()
-        for s in _schedules:
-            if s.namespace not in namespaces_seen:
-                namespaces_seen.add(s.namespace)
-                r = qa_destroy_check(_csv_filepath, s.namespace, config)
-                all_results.extend(r)
+        if body.namespace:
+            # Use namespace override - run for the specified namespace only
+            r = qa_destroy_check(_csv_filepath, body.namespace, config)
+            all_results.extend(r)
+        else:
+            # Use all namespaces from loaded schedules
+            namespaces_seen: set = set()
+            for s in _schedules:
+                if s.namespace not in namespaces_seen:
+                    namespaces_seen.add(s.namespace)
+                    r = qa_destroy_check(_csv_filepath, s.namespace, config)
+                    all_results.extend(r)
 
         with _state_lock:
             _destroy_check_results = all_results

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -46,10 +47,25 @@ from api.routes import router
 
 logger = logging.getLogger("rhdp_flow.api")
 
+# Graceful shutdown state
+_shutting_down = False
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    yield
+    # Shutdown
+    global _shutting_down
+    _shutting_down = True
+    logger.info("RHDP-Flow API shutting down gracefully")
+
+
 app = FastAPI(
     title="RHDP-Flow API",
     description="Web API for Red Hat Demo Platform Workshop Automation. Authors: Josh Disraeli, Billy Bethell.",
     version="1.3.5",
+    lifespan=lifespan,
 )
 
 # Auth startup check
@@ -104,7 +120,7 @@ class CSPMiddleware(BaseHTTPMiddleware):
             "script-src 'self'; "
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data:; "
-            "connect-src 'self' ws: wss:; "
+            "connect-src 'self';"
             "font-src 'self'"
         )
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -124,15 +140,6 @@ app.include_router(router, prefix="/api/v1", tags=["v1"])
 # ---------------------------------------------------------------------------
 # Graceful shutdown
 # ---------------------------------------------------------------------------
-_shutting_down = False
-
-
-@app.on_event("shutdown")
-async def _on_shutdown():
-    global _shutting_down
-    _shutting_down = True
-    logger.info("RHDP-Flow API shutting down gracefully")
-
 
 def is_shutting_down() -> bool:
     return _shutting_down

@@ -195,8 +195,11 @@ export const api = {
   runQA: (body: QARequest) =>
     request<QAResponse>('/qa/run', { method: 'POST', body: JSON.stringify(body) }),
   qaResults: () => cachedRequest<QAResponse>('/qa/results'),
-  destroyCheck: () =>
-    request<import('../types').DestroyCheckResponse>('/qa/destroy-check', { method: 'POST', body: '{}' }),
+  destroyCheck: (namespace?: string) =>
+    request<import('../types').DestroyCheckResponse>('/qa/destroy-check', {
+      method: 'POST',
+      body: JSON.stringify({ namespace: namespace || undefined }),
+    }),
   destroyCheckResults: () =>
     cachedRequest<{ count: number; results: import('../types').DestroyCheckResult[] }>('/qa/destroy-check/results'),
 

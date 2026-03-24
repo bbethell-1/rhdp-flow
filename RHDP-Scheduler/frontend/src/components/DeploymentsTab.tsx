@@ -415,7 +415,10 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
                             variant="plain"
                             size="sm"
                             style={{ padding: '2px 4px' }}
-                            onClick={() => navigator.clipboard.writeText(r.url).then(() => showToast('URL copied to clipboard', 'success'))}
+                            onClick={() => navigator.clipboard.writeText(r.url).then(
+                              () => showToast('URL copied to clipboard', 'success'),
+                              () => showToast('Clipboard access denied', 'danger')
+                            )}
                             aria-label="Copy URL"
                           >
                             <CopyIcon />
