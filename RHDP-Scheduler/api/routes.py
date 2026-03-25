@@ -1695,19 +1695,13 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
     global _qa_results, _qa_log_path
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
-    if not _csv_filepath:
-        raise HTTPException(400, "No CSV file available. Upload a CSV first.")
 
     config = _get_config()
 
-    # Determine namespaces to check
     if body.namespace:
         namespaces = [body.namespace]
     else:
         namespaces = list(dict.fromkeys(s.namespace for s in _schedules))
-
-    all_schedule_namespaces = set(s.namespace for s in _schedules)
-    needs_per_ns_csv = len(all_schedule_namespaces) > 1
 
     handler, log_path = start_log_capture("qa")
     temp_csv_paths: List[str] = []
@@ -1716,20 +1710,18 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
         all_qa2: List[dict] = []
 
         for ns in namespaces:
-            if needs_per_ns_csv:
-                temp_path = _write_qa_csv_for_namespace(ns)
-                temp_csv_paths.append(temp_path)
-                qa_csv_path = temp_path
-            else:
-                qa_csv_path = _csv_filepath
+            # Always write a fresh temp CSV from in-memory schedules so that
+            # UI edits (changed dates, users, etc.) are reflected in QA checks.
+            temp_path = _write_qa_csv_for_namespace(ns)
+            temp_csv_paths.append(temp_path)
 
             if body.type.value == "1":
-                all_qa1.extend(qa1_verify_setup(qa_csv_path, ns, config))
+                all_qa1.extend(qa1_verify_setup(temp_path, ns, config))
             elif body.type.value == "2":
-                all_qa2.extend(qa2_verify_deployment_status(qa_csv_path, ns, config))
+                all_qa2.extend(qa2_verify_deployment_status(temp_path, ns, config))
             else:
-                all_qa1.extend(qa1_verify_setup(qa_csv_path, ns, config))
-                all_qa2.extend(qa2_verify_deployment_status(qa_csv_path, ns, config))
+                all_qa1.extend(qa1_verify_setup(temp_path, ns, config))
+                all_qa2.extend(qa2_verify_deployment_status(temp_path, ns, config))
 
         if body.type.value == "1":
             all_raw = all_qa1
@@ -1766,26 +1758,23 @@ def qa_destroy_check_endpoint(request: Request, body: DestroyCheckRequest = Dest
     global _destroy_check_results
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
-    if not _csv_filepath:
-        raise HTTPException(400, "No CSV file available. Upload a CSV first.")
 
     config = _get_config()
     all_results: List[dict] = []
+    temp_csv_paths: List[str] = []
+
+    if body.namespace:
+        namespaces = [body.namespace]
+    else:
+        namespaces = list(dict.fromkeys(s.namespace for s in _schedules))
 
     handler, log_path = start_log_capture("destroy-check")
     try:
-        if body.namespace:
-            # Use namespace override - run for the specified namespace only
-            r = qa_destroy_check(_csv_filepath, body.namespace, config)
+        for ns in namespaces:
+            temp_path = _write_qa_csv_for_namespace(ns)
+            temp_csv_paths.append(temp_path)
+            r = qa_destroy_check(temp_path, ns, config)
             all_results.extend(r)
-        else:
-            # Use all namespaces from loaded schedules
-            namespaces_seen: set = set()
-            for s in _schedules:
-                if s.namespace not in namespaces_seen:
-                    namespaces_seen.add(s.namespace)
-                    r = qa_destroy_check(_csv_filepath, s.namespace, config)
-                    all_results.extend(r)
 
         with _state_lock:
             _destroy_check_results = all_results
@@ -1795,6 +1784,8 @@ def qa_destroy_check_endpoint(request: Request, body: DestroyCheckRequest = Dest
         )
     finally:
         stop_log_capture(handler)
+        for tp in temp_csv_paths:
+            Path(tp).unlink(missing_ok=True)
 
 
 @router.get("/qa/destroy-check/results")
