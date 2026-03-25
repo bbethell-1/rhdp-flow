@@ -370,6 +370,10 @@ class QAResultItem(BaseModel):
     landing_page_url: str = ""
     healthy: Optional[bool] = None
     ready: Optional[bool] = None
+    lock_status: Optional[bool] = None
+    actual_start: str = ""
+    actual_stop: str = ""
+    actual_destroy: str = ""
     showroom_status: str = ""
     showroom_url: str = ""
 

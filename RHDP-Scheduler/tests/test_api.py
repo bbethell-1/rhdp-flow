@@ -744,8 +744,43 @@ W1,vendor.w.prod,ns1,10,True,pw,Adm,QA,W1,01/01/2026 09:00,01/01/2026 17:00,02/0
     assert resp.status_code == 200
     data = resp.json()
     assert data["count"] == 1
-    assert data["results"][0]["status"] == "✅ DEPLOYED & READY"
+    assert data["results"][0]["status"] == "DEPLOYED & READY"
     assert data["results"][0]["actual_count"] == 10
+
+
+def test_qa_namespaces_empty(client):
+    """qa/namespaces returns empty list when no schedules loaded."""
+    resp = client.get("/api/qa/namespaces")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_qa_namespaces_with_schedules(uploaded_client):
+    """qa/namespaces returns unique namespaces from loaded schedules."""
+    resp = uploaded_client.get("/api/qa/namespaces")
+    assert resp.status_code == 200
+    ns_list = resp.json()
+    assert isinstance(ns_list, list)
+    assert len(ns_list) >= 1
+
+
+@patch("api.routes.qa1_verify_setup")
+def test_qa_status_emoji_stripped(mock_qa1, uploaded_client):
+    """Normalize must strip emoji from status strings."""
+    mock_qa1.return_value = [{
+        "ci_name": "WS1",
+        "ci": "vendor.ws.prod",
+        "namespace": "ns1",
+        "deployed": "Yes",
+        "status": "✅ VERIFIED",
+        "expected_users": 10,
+        "actual_count": 10,
+        "landing_page_url": "",
+        "healthy": True,
+    }]
+    resp = uploaded_client.post("/api/qa/run", json={"type": "1"})
+    assert resp.status_code == 200
+    assert resp.json()["results"][0]["status"] == "VERIFIED"
 
 
 # ---------------------------------------------------------------------------
