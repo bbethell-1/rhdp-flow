@@ -172,6 +172,10 @@ export interface QAResult {
   healthy?: boolean | string | null;
   expected_users?: number | string | null;
   actual_count?: number | string | null;
+  lock_status?: boolean | null;
+  actual_start?: string;
+  actual_stop?: string;
+  actual_destroy?: string;
   landing_page_url?: string;
   showroom_status?: string;
   showroom_url?: string;

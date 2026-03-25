@@ -7,7 +7,10 @@ import {
   DescriptionListTerm,
   DescriptionListDescription,
   Label,
+  Icon,
 } from '@patternfly/react-core';
+import LockIcon from '@patternfly/react-icons/dist/esm/icons/lock-icon';
+import LockOpenIcon from '@patternfly/react-icons/dist/esm/icons/lock-open-icon';
 import { Table, Thead, Tbody, Tr, Th, Td, ThProps, ExpandableRowContent } from '@patternfly/react-table';
 
 import { qaStatusCategory } from '../utils/statusColors';
@@ -47,6 +50,12 @@ function seatsColorClass(r: QAResult): string {
     return 'status-failed';
   }
   return '';
+}
+
+function lockDisplay(lockStatus: boolean | null | undefined): React.ReactNode {
+  if (lockStatus === true) return <Icon status="danger"><LockIcon /></Icon>;
+  if (lockStatus === false) return <Icon status="success"><LockOpenIcon /></Icon>;
+  return <span style={{ opacity: 0.4 }}>—</span>;
 }
 
 function statusLabel(status: string): React.ReactNode {
@@ -104,7 +113,7 @@ export const QAResultsTable: React.FC<{
     setExpanded(prev => ({ ...prev, [idx]: !prev[idx] }));
   };
 
-  const colSpan = 8;
+  const colSpan = 9;
 
   return (
     <>
@@ -119,6 +128,7 @@ export const QAResultsTable: React.FC<{
             <Th sort={getSortParams('status')} info={{ tooltip: 'QA verification result' }}>Status</Th>
             <Th info={{ tooltip: 'Whether the workshop was successfully deployed' }}>Deployed</Th>
             <Th info={{ tooltip: 'Whether the deployed workshop passed health checks' }}>Healthy</Th>
+            <Th info={{ tooltip: 'Resource lock status: locked resources cannot be modified by non-admin users' }}>Lock</Th>
             <Th info={{ tooltip: 'Expected / actual seats (— if not deployed)' }}>Seats</Th>
             <Th info={{ tooltip: 'Student-facing URL for the workshop' }}>Landing Page URL</Th>
           </Tr>
@@ -134,6 +144,9 @@ export const QAResultsTable: React.FC<{
             const provDate = String(rec.provisioning_date || rec.expected_provisioning || '');
             const autoStop = String(rec.auto_stop || rec.expected_stop || '');
             const autoDestroy = String(rec.auto_destroy || rec.expected_destroy || '');
+            const actualStart = String(rec.actual_start || '');
+            const actualStop = String(rec.actual_stop || '');
+            const actualDestroy = String(rec.actual_destroy || '');
             const linkToService = String(rec.link_to_service || '');
             const showroomUrl = String(rec.showroom_url || '');
             const showroomStatus = String(rec.showroom_status || '');
@@ -162,6 +175,7 @@ export const QAResultsTable: React.FC<{
                     </span>
                   </Td>
                   <Td dataLabel="Healthy"><span className={healthyColorClass(r.healthy)}>{healthyDisplay(r.healthy)}</span></Td>
+                  <Td dataLabel="Lock">{lockDisplay(r.lock_status)}</Td>
                   <Td dataLabel="Seats"><span className={seatsColorClass(r)}>{seatsDisplay(r)}</span></Td>
                   <Td dataLabel="Landing Page URL">
                     {r.landing_page_url ? (
@@ -192,20 +206,37 @@ export const QAResultsTable: React.FC<{
                           )}
                           {provDate && (
                             <DescriptionListGroup>
-                              <DescriptionListTerm>Provisioning Date</DescriptionListTerm>
-                              <DescriptionListDescription>{provDate}</DescriptionListDescription>
+                              <DescriptionListTerm>Start (scheduled)</DescriptionListTerm>
+                              <DescriptionListDescription>
+                                {provDate}
+                                {actualStart && actualStart !== provDate && <span style={{ opacity: 0.6 }}> → actual: {actualStart}</span>}
+                              </DescriptionListDescription>
                             </DescriptionListGroup>
                           )}
                           {autoStop && (
                             <DescriptionListGroup>
-                              <DescriptionListTerm>Auto-Stop</DescriptionListTerm>
-                              <DescriptionListDescription>{autoStop}</DescriptionListDescription>
+                              <DescriptionListTerm>Stop (scheduled)</DescriptionListTerm>
+                              <DescriptionListDescription>
+                                {autoStop}
+                                {actualStop && actualStop !== autoStop && <span style={{ opacity: 0.6 }}> → actual: {actualStop}</span>}
+                              </DescriptionListDescription>
                             </DescriptionListGroup>
                           )}
                           {autoDestroy && (
                             <DescriptionListGroup>
-                              <DescriptionListTerm>Auto-Destroy</DescriptionListTerm>
-                              <DescriptionListDescription>{autoDestroy}</DescriptionListDescription>
+                              <DescriptionListTerm>Destroy (scheduled)</DescriptionListTerm>
+                              <DescriptionListDescription>
+                                {autoDestroy}
+                                {actualDestroy && actualDestroy !== autoDestroy && <span style={{ opacity: 0.6 }}> → actual: {actualDestroy}</span>}
+                              </DescriptionListDescription>
+                            </DescriptionListGroup>
+                          )}
+                          {rec.lock_status != null && (
+                            <DescriptionListGroup>
+                              <DescriptionListTerm>Lock Status</DescriptionListTerm>
+                              <DescriptionListDescription>
+                                {rec.lock_status ? <><LockIcon style={{ marginRight: 4 }} /> Locked</> : <><LockOpenIcon style={{ marginRight: 4 }} /> Unlocked</>}
+                              </DescriptionListDescription>
                             </DescriptionListGroup>
                           )}
                           {workshopUsersAssigned && (

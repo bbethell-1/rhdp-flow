@@ -2909,6 +2909,96 @@ def list_scheduled_resourceclaims(
         logger.error(f"Error listing scheduled ResourceClaims: {e}")
         return []
 
+def _parse_cluster_timestamp(ts: str) -> Optional[datetime]:
+    """Parse an ISO 8601 / Zulu timestamp from the cluster into a tz-aware datetime."""
+    if not ts:
+        return None
+    try:
+        if ts.endswith("Z"):
+            return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(ts)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
+def _compare_timestamps(
+    label: str,
+    expected_raw: str,
+    actual_raw: str,
+    issues: List[str],
+    tolerance_seconds: int = 300,
+) -> bool:
+    """Compare an expected CSV timestamp against an actual cluster timestamp.
+
+    Appends to *issues* on mismatch and returns False; returns True if OK or
+    either side is missing (nothing to compare).
+    """
+    expected = parse_date_time(expected_raw, assume_utc=True) if expected_raw else None
+    actual = _parse_cluster_timestamp(actual_raw)
+    if expected is None or actual is None:
+        return True
+    diff = abs((actual - expected).total_seconds())
+    if diff > tolerance_seconds:
+        issues.append(
+            f"{label} mismatch: expected {format_iso8601(expected)} "
+            f"(from {expected_raw}), got {actual_raw}"
+        )
+        return False
+    return True
+
+
+def _get_workshop_lock_status(
+    workshop_obj: Optional[Dict],
+) -> Optional[bool]:
+    """Return True if Workshop has lock-enabled=true, False if false, None if unknown."""
+    if workshop_obj is None:
+        return None
+    val = (
+        workshop_obj
+        .get("metadata", {})
+        .get("labels", {})
+        .get("demo.redhat.com/lock-enabled")
+    )
+    if val is None:
+        return None
+    return val.lower() == "true"
+
+
+def _get_workshop_for_ci(
+    namespace: str,
+    ci: str,
+    config: "RHDPConfig",
+    rc_name: Optional[str] = None,
+) -> Optional[Dict]:
+    """Fetch the Workshop resource for a given CI. Returns the raw dict or None."""
+    try:
+        env = os.environ.copy()
+        if config.kubeconfig_path:
+            env["KUBECONFIG"] = config.kubeconfig_path
+        r = subprocess.run(
+            [config.oc_command, "get", "workshop", "-n", namespace,
+             "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}",
+             "-o", "json"],
+            capture_output=True, text=True, timeout=30, env=env,
+        )
+        if r.returncode == 0:
+            items = json.loads(r.stdout).get("items", [])
+            if not items:
+                return None
+            if rc_name:
+                for w in items:
+                    wn = w.get("metadata", {}).get("name", "")
+                    if rc_name.split("-")[-1] in wn or ci in wn:
+                        return w
+            return items[0]
+    except Exception:
+        pass
+    return None
+
+
 def qa1_verify_setup(
     csv_file: str,
     namespace: str,
@@ -3013,7 +3103,6 @@ def qa1_verify_setup(
                         # For multi-asset workshops, landing page URL is the same as the portal URL
                         landing_page_url = url
 
-                        # Check if matches schedule (expected total seats = Instances or Users)
                         matches_schedule = True
                         issues = []
                         expected_total = _expected_total_seats(schedule)
@@ -3027,7 +3116,12 @@ def qa1_verify_setup(
                         if expected_users is not None and number_seats != expected_users and expected_total is None:
                             matches_schedule = False
                             issues.append(f"User count mismatch: expected {expected_users}, got {number_seats}")
-                        
+
+                        if not _compare_timestamps("Start date", schedule.provisioning_date, start_date, issues):
+                            matches_schedule = False
+                        if not _compare_timestamps("End date", schedule.auto_destroy, end_date, issues):
+                            matches_schedule = False
+
                         result = {
                             "ci_name": schedule.ci_name,
                             "ci": schedule.ci,
@@ -3044,10 +3138,13 @@ def qa1_verify_setup(
                             "provisioning_date": schedule.provisioning_date,
                             "auto_stop": schedule.auto_stop,
                             "auto_destroy": schedule.auto_destroy,
+                            "actual_start": start_date,
+                            "actual_destroy": end_date,
+                            "lock_status": None,
                             "resourceclaim_name": mw_name,
                             "resourceclaims": [mw_name],
-                            "link_to_service": url,  # Multi-workshop portal URL
-                            "landing_page_url": landing_page_url,  # Portal URL (same as link_to_service for multi-asset)
+                            "link_to_service": url,
+                            "landing_page_url": landing_page_url,
                             "healthy": True,
                             "ready": True
                         }
@@ -3093,20 +3190,29 @@ def qa1_verify_setup(
                     data = json.loads(result.stdout)
                     workshops = data.get('items', [])
                     if workshops:
-                        # Found Workshop directly created
                         workshop = workshops[0]
                         workshop_name = workshop.get('metadata', {}).get('name', 'unknown')
                         spec = workshop.get('spec', {})
                         status_obj = workshop.get('status', {})
-                        
-                        # Get user count from status or spec
                         user_count = status_obj.get('userCount', {}).get('total', 0)
-                        # Do not substitute CSV expected users here — that made the UI show
-                        # e.g. 10/10 seats while the workshop was not yet provisioned.
-
-                        # Get both URLs
                         full_url, catalog_url = get_workshop_urls(workshop_name, namespace, schedule.ci, config)
-                        
+
+                        action_sched = spec.get('actionSchedule', {})
+                        lifespan = spec.get('lifespan', {})
+                        actual_start = action_sched.get('start', '')
+                        actual_stop = action_sched.get('stop', '')
+                        actual_destroy = lifespan.get('end', '')
+                        locked = _get_workshop_lock_status(workshop)
+
+                        matches_schedule = True
+                        issues: List[str] = []
+                        if not _compare_timestamps("Start time", schedule.provisioning_date, actual_start, issues):
+                            matches_schedule = False
+                        if not _compare_timestamps("Stop time", schedule.auto_stop, actual_stop, issues):
+                            matches_schedule = False
+                        if not _compare_timestamps("Destroy time", schedule.auto_destroy, actual_destroy, issues):
+                            matches_schedule = False
+
                         result = {
                             "ci_name": schedule.ci_name,
                             "ci": schedule.ci,
@@ -3114,13 +3220,17 @@ def qa1_verify_setup(
                             "scheduled": "Yes",
                             "deployed": "Yes",
                             "status": "✅ WORKSHOP (direct)",
-                            "matches_schedule": "Yes",
-                            "issues": "",
+                            "matches_schedule": "Yes" if matches_schedule else "No",
+                            "issues": "; ".join(issues) if issues else "",
                             "expected_users": _effective_users(schedule) if _effective_users(schedule) is not None else "",
                             "actual_count": user_count,
                             "provisioning_date": schedule.provisioning_date,
                             "auto_stop": schedule.auto_stop,
                             "auto_destroy": schedule.auto_destroy,
+                            "actual_start": actual_start,
+                            "actual_stop": actual_stop,
+                            "actual_destroy": actual_destroy,
+                            "lock_status": locked,
                             "resourceclaim_name": workshop_name,
                             "resourceclaims": [workshop_name],
                             "link_to_service": full_url,
@@ -3129,7 +3239,10 @@ def qa1_verify_setup(
                             "ready": True
                         }
                         results.append(result)
-                        logger.info(f"✅ {schedule.ci_name} ({schedule.ci}) - Workshop: {workshop_name}")
+                        logger.info(f"✅ {schedule.ci_name} ({schedule.ci}) - Workshop: {workshop_name}" + (f" [LOCKED]" if locked else ""))
+                        if issues:
+                            for i in issues:
+                                logger.warning(f"   ⚠️  {i}")
                         continue
             except Exception as e:
                 logger.debug(f"Error checking Workshop: {e}")
@@ -3156,108 +3269,61 @@ def qa1_verify_setup(
             logger.warning(f"❌ {schedule.ci_name} ({schedule.ci}) - Scheduled but NOT deployed")
             continue
         
-        # Check each matching ResourceClaim
         for rc in matching_rcs:
             metadata = rc.get('metadata', {})
             name = metadata.get('name', 'unknown')
             status = rc.get('status', {})
             healthy = status.get('healthy', False)
             ready = status.get('ready', False)
-            
-            # Get provider parameters
+
             provider = status.get('provider', {})
             param_values = provider.get('parameterValues', {})
             actual_users = param_values.get('num_users', 0)
-            
-            # Get timestamps
             start_ts = param_values.get('start_timestamp', '')
             stop_ts = param_values.get('stop_timestamp', '')
-            
-            # Get workshop name from ResourceClaim to retrieve URLs
-            # Try to find the Workshop created by this ResourceClaim
-            workshop_name = None
-            try:
-                # Check if ResourceClaim has created a Workshop
-                cmd = [
-                    config.oc_command,
-                    "get", "workshop",
-                    "-n", namespace,
-                    "-l", f"babylon.gpte.redhat.com/catalogItemName={schedule.ci}",
-                    "-o", "json"
-                ]
-                env = os.environ.copy()
-                if config.kubeconfig_path:
-                    env['KUBECONFIG'] = config.kubeconfig_path
-                
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                    env=env
-                )
-                
-                if result.returncode == 0:
-                    data = json.loads(result.stdout)
-                    workshops = data.get('items', [])
-                    # Find workshop that matches this ResourceClaim (by name pattern or labels)
-                    for w in workshops:
-                        w_name = w.get('metadata', {}).get('name', '')
-                        if name.split('-')[-1] in w_name or schedule.ci in w_name:
-                            workshop_name = w_name
-                            break
-            except Exception:
-                pass
 
-            # Get both URLs
+            ws_obj = _get_workshop_for_ci(namespace, schedule.ci, config, rc_name=name)
+            workshop_name = ws_obj.get('metadata', {}).get('name') if ws_obj else None
+            locked = _get_workshop_lock_status(ws_obj)
+
+            ws_lifespan_end = ""
+            ws_actual_stop = ""
+            if ws_obj:
+                ws_spec = ws_obj.get('spec', {})
+                ws_lifespan_end = ws_spec.get('lifespan', {}).get('end', '')
+                ws_actual_stop = ws_spec.get('actionSchedule', {}).get('stop', '')
+
             if workshop_name:
                 full_url, catalog_url = get_workshop_urls(workshop_name, namespace, schedule.ci, config)
             else:
-                # Fallback: construct URL from ResourceClaim name
                 suffix = name.split('-')[-1] if '-' in name else ""
                 full_url = construct_workshop_url(schedule.ci, namespace, suffix, base_domain=getattr(config, 'base_domain', 'integration.demo.redhat.com'))
                 catalog_url = ""
 
-            # Determine status
             if healthy and ready:
                 overall_status = "✅ VERIFIED"
             elif healthy:
                 overall_status = "⚠️  HEALTHY (not ready)"
             else:
                 overall_status = "❌ FAILED"
-            
-            # Check if matches schedule
+
             matches_schedule = True
             issues = []
-            
+
             expected_users = _effective_users(schedule)
             if expected_users is not None and actual_users != expected_users:
                 matches_schedule = False
                 issues.append(f"User count mismatch: expected {expected_users}, got {actual_users}")
-            
-            # Parse and compare dates (all in UTC)
-            expected_start = parse_date_time(schedule.provisioning_date, assume_utc=True)
-            if expected_start and start_ts:
-                try:
-                    # Parse actual start time (should be in UTC/Zulu)
-                    if start_ts.endswith('Z'):
-                        actual_start = datetime.fromisoformat(start_ts.replace('Z', '+00:00'))
-                    else:
-                        actual_start = datetime.fromisoformat(start_ts)
-                        if actual_start.tzinfo is None:
-                            actual_start = actual_start.replace(tzinfo=timezone.utc)
-                    
-                    # Compare dates (both should be in UTC)
-                    if expected_start:
-                        time_diff = abs((actual_start - expected_start).total_seconds())
-                        if time_diff > 300:  # 5 minute tolerance
-                            expected_str = format_iso8601(expected_start)
-                            matches_schedule = False
-                            issues.append(f"Start time mismatch: expected {expected_str} (from {schedule.provisioning_date}), got {start_ts}")
-                except Exception as e:
-                    logger.debug(f"Error comparing dates: {e}")
-                    pass
-            
+
+            if not _compare_timestamps("Start time", schedule.provisioning_date, start_ts, issues):
+                matches_schedule = False
+            actual_stop_for_cmp = ws_actual_stop or stop_ts
+            if not _compare_timestamps("Stop time", schedule.auto_stop, actual_stop_for_cmp, issues):
+                matches_schedule = False
+            actual_destroy_for_cmp = ws_lifespan_end
+            if not _compare_timestamps("Destroy time", schedule.auto_destroy, actual_destroy_for_cmp, issues):
+                matches_schedule = False
+
             result = {
                 "ci_name": schedule.ci_name,
                 "ci": schedule.ci,
@@ -3272,28 +3338,25 @@ def qa1_verify_setup(
                 "actual_users": actual_users,
                 "healthy": healthy,
                 "ready": ready,
+                "lock_status": locked,
                 "link_to_service": full_url,
                 "landing_page_url": catalog_url,
-                "expected_provisioning": schedule.provisioning_date,
+                "provisioning_date": schedule.provisioning_date,
+                "auto_stop": schedule.auto_stop,
+                "auto_destroy": schedule.auto_destroy,
                 "actual_start": start_ts,
-                "expected_stop": schedule.auto_stop,
-                "actual_stop": stop_ts,
-                "expected_destroy": schedule.auto_destroy,
-                "link_to_service": full_url,
-                "landing_page_url": catalog_url
+                "actual_stop": actual_stop_for_cmp,
+                "actual_destroy": actual_destroy_for_cmp,
             }
             results.append(result)
-            
-            # Log result
+
             status_icon = "✅" if matches_schedule and healthy and ready else "⚠️" if healthy else "❌"
-            logger.info(f"{status_icon} {schedule.ci_name} ({schedule.ci})")
+            lock_tag = " [LOCKED]" if locked else ""
+            logger.info(f"{status_icon} {schedule.ci_name} ({schedule.ci}){lock_tag}")
             logger.info(f"  ResourceClaim: {name}")
             logger.info(f"  Status: {overall_status}")
             exp_u = _effective_users(schedule)
             logger.info(f"  Users: {actual_users}" + (f" (expected: {exp_u})" if exp_u is not None else " (users not configured)"))
-            logger.info(f"  Link to Service: {full_url}")
-            if catalog_url:
-                logger.info(f"  Landing Page URL: {catalog_url}")
             if issues:
                 for issue in issues:
                     logger.warning(f"  ⚠️  {issue}")
@@ -3423,6 +3486,9 @@ def qa2_verify_deployment_status(
                         if number_seats == 0 and expected_seats is not None and expected_seats > 0:
                             seats_match = False
                         
+                        start_date = spec.get('startDate', '')
+                        end_date = spec.get('endDate', '')
+
                         result = {
                             "ci_name": schedule.ci_name,
                             "ci": schedule.ci,
@@ -3438,9 +3504,15 @@ def qa2_verify_deployment_status(
                             "healthy": True,
                             "ready": True,
                             "provisioned": True,
+                            "lock_status": None,
+                            "provisioning_date": schedule.provisioning_date,
+                            "auto_stop": schedule.auto_stop,
+                            "auto_destroy": schedule.auto_destroy,
+                            "actual_start": start_date,
+                            "actual_destroy": end_date,
                             "resourceclaim_name": mw_name,
-                            "link_to_service": url,  # Multi-workshop portal URL
-                            "landing_page_url": landing_page_url  # Landing page URL from first asset workshopId
+                            "link_to_service": url,
+                            "landing_page_url": landing_page_url,
                         }
                         results.append(result)
                         logger.info(f"✅ {schedule.ci_name} ({schedule.ci}) - MultiWorkshop: {mw_name}")
@@ -3448,7 +3520,6 @@ def qa2_verify_deployment_status(
                         if not seats_match and expected_seats is not None and number_seats == 0:
                             logger.warning(f"   ⚠️  Total seats is 0; UI shows 0/0. Expected x/{expected_seats} (instances).")
                         logger.info(f"   Assets: {len(assets)}")
-                        logger.info(f"   Link to Service: {url}")
                         continue
             except Exception as e:
                 logger.debug(f"Error checking MultiWorkshop: {e}")
@@ -3485,18 +3556,20 @@ def qa2_verify_deployment_status(
                     data = json.loads(result.stdout)
                     workshops = data.get('items', [])
                     if workshops:
-                        # Found Workshop directly created
                         workshop = workshops[0]
                         workshop_name = workshop.get('metadata', {}).get('name', 'unknown')
+                        ws_spec = workshop.get('spec', {})
                         status_obj = workshop.get('status', {})
                         user_count = status_obj.get('userCount', {}).get('total', 0)
-                        
-                        # Get both URLs
                         full_url, catalog_url = get_workshop_urls(workshop_name, namespace, schedule.ci, config)
-                        
+                        locked = _get_workshop_lock_status(workshop)
+
                         expected_seats = _effective_users(schedule)
                         seats_match = (expected_seats is None) or (user_count == expected_seats) if user_count > 0 else (expected_seats is None)
-                        
+
+                        action_sched = ws_spec.get('actionSchedule', {})
+                        lifespan = ws_spec.get('lifespan', {})
+
                         result = {
                             "ci_name": schedule.ci_name,
                             "ci": schedule.ci,
@@ -3510,19 +3583,26 @@ def qa2_verify_deployment_status(
                             "healthy": True,
                             "ready": True,
                             "provisioned": True,
+                            "lock_status": locked,
+                            "provisioning_date": schedule.provisioning_date,
+                            "auto_stop": schedule.auto_stop,
+                            "auto_destroy": schedule.auto_destroy,
+                            "actual_start": action_sched.get('start', ''),
+                            "actual_stop": action_sched.get('stop', ''),
+                            "actual_destroy": lifespan.get('end', ''),
                             "resourceclaim_name": workshop_name,
                             "link_to_service": full_url,
-                            "landing_page_url": catalog_url
+                            "landing_page_url": catalog_url,
                         }
                         results.append(result)
-                        logger.info(f"✅ {schedule.ci_name} ({schedule.ci}) - Workshop: {workshop_name}")
+                        lock_tag = " [LOCKED]" if locked else ""
+                        logger.info(f"✅ {schedule.ci_name} ({schedule.ci}) - Workshop: {workshop_name}{lock_tag}")
                         logger.info(f"   ✅ Seats: {user_count}" + (f" (expected: {expected_seats})" if expected_seats is not None else " (users not configured)"))
                         continue
             except Exception as e:
                 logger.debug(f"Error checking Workshop: {e}")
         
         if not matching_rcs:
-            # Scheduled but not found
             result = {
                 "ci_name": schedule.ci_name,
                 "ci": schedule.ci,
@@ -3535,6 +3615,7 @@ def qa2_verify_deployment_status(
                 "healthy": False,
                 "ready": False,
                 "provisioned": False,
+                "lock_status": None,
                 "link_to_service": "",
                 "landing_page_url": ""
             }
@@ -3542,53 +3623,21 @@ def qa2_verify_deployment_status(
             logger.warning(f"❌ {schedule.ci_name} ({schedule.ci}) - Scheduled but NOT deployed")
             continue
         
-        # Check each matching ResourceClaim
         for rc in matching_rcs:
             metadata = rc.get('metadata', {})
             name = metadata.get('name', 'unknown')
             status = rc.get('status', {})
             healthy = status.get('healthy', False)
             ready = status.get('ready', False)
-            
-            # Get provider parameters
+
             provider = status.get('provider', {})
             param_values = provider.get('parameterValues', {})
             actual_seats = param_values.get('num_users', 0)
-            
-            # Get workshop name from ResourceClaim to retrieve URLs
-            workshop_name = None
-            try:
-                cmd = [
-                    config.oc_command,
-                    "get", "workshop",
-                    "-n", namespace,
-                    "-l", f"babylon.gpte.redhat.com/catalogItemName={schedule.ci}",
-                    "-o", "json"
-                ]
-                env = os.environ.copy()
-                if config.kubeconfig_path:
-                    env['KUBECONFIG'] = config.kubeconfig_path
-                
-                result = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                    env=env
-                )
-                
-                if result.returncode == 0:
-                    data = json.loads(result.stdout)
-                    workshops = data.get('items', [])
-                    for w in workshops:
-                        w_name = w.get('metadata', {}).get('name', '')
-                        if name.split('-')[-1] in w_name or schedule.ci in w_name:
-                            workshop_name = w_name
-                            break
-            except Exception:
-                pass
 
-            # Get both URLs
+            ws_obj = _get_workshop_for_ci(namespace, schedule.ci, config, rc_name=name)
+            workshop_name = ws_obj.get('metadata', {}).get('name') if ws_obj else None
+            locked = _get_workshop_lock_status(ws_obj)
+
             if workshop_name:
                 full_url, catalog_url = get_workshop_urls(workshop_name, namespace, schedule.ci, config)
             else:
@@ -3596,7 +3645,6 @@ def qa2_verify_deployment_status(
                 full_url = construct_workshop_url(schedule.ci, namespace, suffix, base_domain=getattr(config, 'base_domain', 'integration.demo.redhat.com'))
                 catalog_url = ""
 
-            # Determine deployment status
             if healthy and ready:
                 deployment_status = "✅ DEPLOYED & READY"
                 provisioned = True
@@ -3606,12 +3654,17 @@ def qa2_verify_deployment_status(
             else:
                 deployment_status = "❌ DEPLOYMENT FAILED"
                 provisioned = False
-            
-            # Check seat count (skip when users not configured)
+
             expected_seats = _effective_users(schedule)
             seats_match = (expected_seats is None) or (actual_seats == expected_seats)
-            seat_status = "✅" if seats_match else "❌"
-            
+
+            ws_actual_stop = ""
+            ws_lifespan_end = ""
+            if ws_obj:
+                ws_spec = ws_obj.get('spec', {})
+                ws_actual_stop = ws_spec.get('actionSchedule', {}).get('stop', '')
+                ws_lifespan_end = ws_spec.get('lifespan', {}).get('end', '')
+
             result = {
                 "ci_name": schedule.ci_name,
                 "ci": schedule.ci,
@@ -3626,19 +3679,22 @@ def qa2_verify_deployment_status(
                 "seats_match": "Yes" if seats_match else "No",
                 "healthy": healthy,
                 "ready": ready,
+                "lock_status": locked,
+                "provisioning_date": schedule.provisioning_date,
+                "auto_stop": schedule.auto_stop,
+                "auto_destroy": schedule.auto_destroy,
+                "actual_stop": ws_actual_stop,
+                "actual_destroy": ws_lifespan_end,
                 "link_to_service": full_url,
-                "landing_page_url": catalog_url
+                "landing_page_url": catalog_url,
             }
             results.append(result)
-            
-            # Log result
-            logger.info(f"{deployment_status} - {schedule.ci_name} ({schedule.ci})")
+
+            lock_tag = " [LOCKED]" if locked else ""
+            logger.info(f"{deployment_status} - {schedule.ci_name} ({schedule.ci}){lock_tag}")
             logger.info(f"  ResourceClaim: {name}")
-            logger.info(f"  {seat_status} Seats: {actual_seats}" + (f" (expected: {expected_seats})" if expected_seats is not None else " (users not configured)"))
+            logger.info(f"  Seats: {actual_seats}" + (f" (expected: {expected_seats})" if expected_seats is not None else " (users not configured)"))
             logger.info(f"  Healthy: {healthy}, Ready: {ready}, Provisioned: {provisioned}")
-            logger.info(f"  Link to Service: {full_url}")
-            if catalog_url:
-                logger.info(f"  Landing Page URL: {catalog_url}")
             if not seats_match:
                 logger.warning(f"  ⚠️  Seat count mismatch!")
             logger.info("")
