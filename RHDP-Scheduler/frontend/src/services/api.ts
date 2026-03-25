@@ -192,6 +192,7 @@ export const api = {
   showroomPreflight: (body: { ci_filter?: string }) =>
     request<OperationResponse>('/operations/showroom-preflight', { method: 'POST', body: JSON.stringify(body) }),
   // QA
+  qaNamespaces: () => cachedRequest<string[]>('/qa/namespaces'),
   runQA: (body: QARequest) =>
     request<QAResponse>('/qa/run', { method: 'POST', body: JSON.stringify(body) }),
   qaResults: () => cachedRequest<QAResponse>('/qa/results'),

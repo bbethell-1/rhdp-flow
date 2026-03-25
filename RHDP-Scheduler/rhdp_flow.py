@@ -2929,19 +2929,6 @@ def qa1_verify_setup(
     logger.info("=" * 70)
     logger.info("QA1: Verify Setup - Comparing CSV Schedule vs Actual Deployments")
     logger.info("=" * 70)
-    """
-    QA function to verify deployments match the scheduled CSV.
-    Compares what's in the CSV with what's actually deployed in the namespace.
-    
-    Args:
-        csv_file: Path to input CSV file with scheduled workshops
-        namespace: Kubernetes namespace to check
-        config: RHDPConfig object
-        
-    Returns:
-        List of verification results comparing CSV schedule vs actual deployments
-    """
-    logger.info("QA1: Verify Setup - Comparing CSV Schedule vs Actual Deployments")
     
     # Read scheduled items from CSV
     try:
@@ -3859,6 +3846,26 @@ def qa_destroy_check(
     logger.info("=" * 70)
 
     return results
+
+
+def _merge_qa1_qa2(qa1: List[Dict], qa2: List[Dict]) -> List[Dict]:
+    """One row per workshop: prefer QA2 (deployment truth) when both ran."""
+    r2_by_key = {(r.get("ci_name"), r.get("ci"), r.get("namespace")): r for r in qa2}
+    merged: List[Dict] = []
+    seen_q2: set = set()
+    for r in qa1:
+        k = (r.get("ci_name"), r.get("ci"), r.get("namespace"))
+        if k in r2_by_key:
+            merged.append(r2_by_key[k])
+            seen_q2.add(k)
+        else:
+            merged.append(r)
+    for r in qa2:
+        k = (r.get("ci_name"), r.get("ci"), r.get("namespace"))
+        if k not in seen_q2:
+            merged.append(r)
+            seen_q2.add(k)
+    return merged
 
 
 def qa_export_results(
@@ -5518,63 +5525,51 @@ def main():
                 logger.error("No schedules found in CSV")
                 sys.exit(1)
             
-            namespace = schedules[0].namespace
-            logger.info(f"Checking namespace: {namespace}")
+            namespaces = list(dict.fromkeys(s.namespace for s in schedules))
+            logger.info(f"Checking namespace(s): {', '.join(namespaces)}")
             logger.info("=" * 70)
             
-            all_results = []
+            results1_all: List[Dict] = []
+            results2_all: List[Dict] = []
             
-            # Run QA1: Verify Setup
-            if args.qa in ["1", "both"]:
-                logger.info("")
-                results1 = qa1_verify_setup(
-                    args.input_csv,
-                    namespace,
-                    config
-                )
-                all_results.extend(results1)
+            for namespace in namespaces:
+                # Run QA1: Verify Setup
+                if args.qa in ["1", "both"]:
+                    logger.info("")
+                    r1 = qa1_verify_setup(args.input_csv, namespace, config)
+                    results1_all.extend(r1)
+                    
+                    qa1_output_file = f"qa1_setup_{namespace}.csv"
+                    qa_export_results(r1, qa1_output_file)
+                    logger.info(f"QA1 results exported to: {qa1_output_file}")
                 
-                # Export QA1 results
-                qa1_output_file = f"qa1_setup_{namespace}.csv"
-                qa_export_results(results1, qa1_output_file)
-                logger.info(f"QA1 results exported to: {qa1_output_file}")
-                
-                # Export student landing page CSV from QA1 results
-                student_landing_file = f"student_landing_page_{namespace}.csv"
-                export_student_landing_page_csv(results1, student_landing_file)
-                logger.info(f"Student landing page CSV exported to: {student_landing_file}")
+                # Run QA2: Verify Deployment Status
+                if args.qa in ["2", "both"]:
+                    logger.info("")
+                    r2 = qa2_verify_deployment_status(args.input_csv, namespace, config)
+                    results2_all.extend(r2)
+                    
+                    qa2_output_file = f"qa2_deployment_{namespace}.csv"
+                    qa_export_results(r2, qa2_output_file)
+                    logger.info(f"QA2 results exported to: {qa2_output_file}")
             
-            # Run QA2: Verify Deployment Status
-            if args.qa in ["2", "both"]:
-                logger.info("")
-                results2 = qa2_verify_deployment_status(
-                    args.input_csv,
-                    namespace,
-                    config
-                )
-                all_results.extend(results2)
-                
-                # Export QA2 results
-                qa2_output_file = f"qa2_deployment_{namespace}.csv"
-                qa_export_results(results2, qa2_output_file)
-                logger.info(f"QA2 results exported to: {qa2_output_file}")
-                
-                # Export student landing page CSV from QA2 results (if not already done)
-                if args.qa == "2":
-                    student_landing_file = f"student_landing_page_{namespace}.csv"
-                    export_student_landing_page_csv(results2, student_landing_file)
-                    logger.info(f"Student landing page CSV exported to: {student_landing_file}")
-            
-            # Export combined results if both
+            # Merge results: prefer QA2 when both ran (one row per workshop)
             if args.qa == "both":
-                combined_output_file = f"qa_combined_{namespace}.csv"
-                qa_export_results(all_results, combined_output_file)
-                logger.info(f"Combined QA results exported to: {combined_output_file}")
-                
-                # Export student landing page CSV from combined results
-                student_landing_file = f"student_landing_page_{namespace}.csv"
-                export_student_landing_page_csv(all_results, student_landing_file)
-                logger.info(f"Student landing page CSV exported to: {student_landing_file}")
+                all_results = _merge_qa1_qa2(results1_all, results2_all)
+            elif args.qa == "1":
+                all_results = results1_all
+            else:
+                all_results = results2_all
+            
+            # Export combined / final results
+            tag = "combined" if args.qa == "both" else f"qa{args.qa}"
+            combined_output_file = f"qa_{tag}_{'_'.join(namespaces)}.csv"
+            qa_export_results(all_results, combined_output_file)
+            logger.info(f"QA results exported to: {combined_output_file}")
+            
+            student_landing_file = f"student_landing_page_{'_'.join(namespaces)}.csv"
+            export_student_landing_page_csv(all_results, student_landing_file)
+            logger.info(f"Student landing page CSV exported to: {student_landing_file}")
             
             sys.exit(0)
         except Exception as e:
