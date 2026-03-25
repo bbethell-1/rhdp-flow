@@ -39,6 +39,7 @@ from rhdp_flow import (
     qa2_verify_deployment_status,
     qa_destroy_check,
     _merge_qa1_qa2,
+    _dedup_qa_results,
     export_student_landing_page_csv,
     lock_workshops,
     unlock_workshops,
@@ -276,20 +277,22 @@ def _normalize_qa_result_dict(r: dict) -> dict:
     eu = out.get("expected_users")
     if eu in (None, ""):
         es = out.get("expected_seats")
-        if es not in (None, ""):
-            out["expected_users"] = _coerce_optional_int(es)
-    elif eu == "":
-        out["expected_users"] = None
+        out["expected_users"] = _coerce_optional_int(es) if es not in (None, "") else None
     elif not isinstance(eu, int):
         out["expected_users"] = _coerce_optional_int(eu)
 
     # --- actual_count: QA1 uses actual_users or actual_count, QA2 uses actual_seats ---
-    if out.get("actual_count") is None:
+    ac = out.get("actual_count")
+    if ac is None or ac == "":
+        found = False
         for key in ("actual_seats", "actual_users"):
             raw = out.get(key)
             if raw is not None and raw != "":
                 out["actual_count"] = _coerce_optional_int(raw)
+                found = True
                 break
+        if not found:
+            out["actual_count"] = None
 
     # --- deployed: derive from provisioned if missing ---
     if not out.get("deployed") and out.get("provisioned") is not None:
@@ -1724,7 +1727,7 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
                 all_qa2.extend(qa2_verify_deployment_status(temp_path, ns, config))
 
         if body.type.value == "1":
-            all_raw = all_qa1
+            all_raw = _dedup_qa_results(all_qa1)
         elif body.type.value == "2":
             all_raw = all_qa2
         else:
