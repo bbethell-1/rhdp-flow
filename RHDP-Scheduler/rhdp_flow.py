@@ -3904,23 +3904,77 @@ def qa_destroy_check(
     return results
 
 
-def _merge_qa1_qa2(qa1: List[Dict], qa2: List[Dict]) -> List[Dict]:
-    """One row per workshop: prefer QA2 (deployment truth) when both ran."""
-    r2_by_key = {(r.get("ci_name"), r.get("ci"), r.get("namespace")): r for r in qa2}
-    merged: List[Dict] = []
-    seen_q2: set = set()
-    for r in qa1:
+def _dedup_qa_results(results: List[Dict]) -> List[Dict]:
+    """Collapse multiple results for the same (ci_name, ci, namespace) into one.
+
+    QA1 returns one row per ResourceClaim, which can mean 5 rows for one CI.
+    We keep the first entry as the base and aggregate issues/counts from the rest.
+    """
+    by_key: Dict[tuple, Dict] = {}
+    order: List[tuple] = []
+    for r in results:
         k = (r.get("ci_name"), r.get("ci"), r.get("namespace"))
-        if k in r2_by_key:
-            merged.append(r2_by_key[k])
-            seen_q2.add(k)
+        if k not in by_key:
+            by_key[k] = dict(r)
+            order.append(k)
         else:
-            merged.append(r)
-    for r in qa2:
+            existing = by_key[k]
+            new_issues = r.get("issues", "")
+            if new_issues:
+                prev = existing.get("issues", "")
+                combined = "; ".join(filter(None, [prev, new_issues]))
+                seen = set()
+                deduped = []
+                for part in combined.split("; "):
+                    if part not in seen:
+                        seen.add(part)
+                        deduped.append(part)
+                existing["issues"] = "; ".join(deduped)
+            if r.get("matches_schedule") == "No":
+                existing["matches_schedule"] = "No"
+    return [by_key[k] for k in order]
+
+
+def _merge_qa1_qa2(qa1: List[Dict], qa2: List[Dict]) -> List[Dict]:
+    """One row per workshop: QA2 deployment truth enriched with QA1 setup checks."""
+    deduped_qa1 = _dedup_qa_results(qa1)
+    r1_by_key = {(r.get("ci_name"), r.get("ci"), r.get("namespace")): r for r in deduped_qa1}
+    r2_by_key = {(r.get("ci_name"), r.get("ci"), r.get("namespace")): r for r in qa2}
+
+    all_keys: List[tuple] = []
+    seen: set = set()
+    for r in deduped_qa1 + qa2:
         k = (r.get("ci_name"), r.get("ci"), r.get("namespace"))
-        if k not in seen_q2:
-            merged.append(r)
-            seen_q2.add(k)
+        if k not in seen:
+            all_keys.append(k)
+            seen.add(k)
+
+    merged: List[Dict] = []
+    qa1_carry_fields = ("issues", "matches_schedule", "actual_start", "actual_stop",
+                        "actual_destroy", "lock_status")
+
+    for k in all_keys:
+        r1 = r1_by_key.get(k)
+        r2 = r2_by_key.get(k)
+        if r1 and r2:
+            row = dict(r2)
+            for field in qa1_carry_fields:
+                v1 = r1.get(field)
+                v2 = row.get(field)
+                if field == "issues":
+                    combined = "; ".join(filter(None, [str(v1 or ""), str(v2 or "")]))
+                    s = set()
+                    row["issues"] = "; ".join(p for p in combined.split("; ") if p and not (p in s or s.add(p)))
+                elif field == "matches_schedule":
+                    if v1 == "No" or v2 == "No":
+                        row["matches_schedule"] = "No"
+                elif v1 is not None and (v2 is None or v2 == ""):
+                    row[field] = v1
+            merged.append(row)
+        elif r2:
+            merged.append(dict(r2))
+        elif r1:
+            merged.append(dict(r1))
     return merged
 
 
