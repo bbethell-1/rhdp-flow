@@ -507,7 +507,7 @@ export const UploadTab: React.FC<Props> = ({
       }
       api.deployCancel(jobIdRef.current).catch((e) => {
         console.warn('HTTP cancel failed', e);
-        showToast(`Cancel request failed: ${e}`, 'warning');
+        showToast(`Cancel request failed: ${e}`, 'danger');
       });
       appendLog('Cancel requested...');
     }
@@ -523,7 +523,7 @@ export const UploadTab: React.FC<Props> = ({
         }
         api.deployResume(jobIdRef.current).catch((e) => {
           console.warn('HTTP resume failed', e);
-          showToast(`Resume request failed: ${e}`, 'warning');
+          showToast(`Resume request failed: ${e}`, 'danger');
         });
         appendLog('Resuming...');
       } else {
@@ -534,7 +534,7 @@ export const UploadTab: React.FC<Props> = ({
         }
         api.deployPause(jobIdRef.current).catch((e) => {
           console.warn('HTTP pause failed', e);
-          showToast(`Pause request failed: ${e}`, 'warning');
+          showToast(`Pause request failed: ${e}`, 'danger');
         });
         appendLog('Pausing after current workshop...');
       }
@@ -704,7 +704,7 @@ export const UploadTab: React.FC<Props> = ({
           {/* Catalog item has no num_users but CSV sets Users (e.g. use Instances for WorkshopProvision) */}
           {usersNotInCatalog.length > 0 && (
             <Alert
-              variant={usersNotInCatalog.some(a => a.severity === 'high') ? 'warning' : 'info'}
+              variant={usersNotInCatalog.some(a => a.severity === 'high') ? 'danger' : 'info'}
               isInline
               title={`${usersNotInCatalog.length} row(s): Users set but catalog item has no num_users`}
               style={{ marginBottom: 12 }}

@@ -23,10 +23,10 @@ def configure_logging() -> None:
     log_format = os.environ.get("LOG_FORMAT", "").lower()
     if log_format == "json":
         try:
-            from pythonjsonlogger import jsonlogger
+            from pythonjsonlogger.jsonlogger import JsonFormatter  # type: ignore
 
             handler = logging.StreamHandler()
-            handler.setFormatter(jsonlogger.JsonFormatter(
+            handler.setFormatter(JsonFormatter(
                 "%(asctime)s %(name)s %(levelname)s %(message)s",
                 rename_fields={"asctime": "timestamp", "levelname": "level"},
             ))

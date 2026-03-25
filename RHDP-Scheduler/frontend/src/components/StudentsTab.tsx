@@ -97,7 +97,7 @@ export const StudentsTab: React.FC<Props> = ({ qaResults, showToast }) => {
                         variant="plain"
                         size="sm"
                         style={{ padding: '2px 4px' }}
-                        onClick={() => navigator.clipboard.writeText(r.landing_page_url).then(() => showToast('URL copied to clipboard', 'success'), () => showToast('Clipboard access denied', 'danger'))}
+                        onClick={() => navigator.clipboard.writeText(r.landing_page_url || '').then(() => showToast('URL copied to clipboard', 'success'), () => showToast('Clipboard access denied', 'danger'))}
                         aria-label="Copy URL"
                       >
                         <CopyIcon />
@@ -115,7 +115,7 @@ export const StudentsTab: React.FC<Props> = ({ qaResults, showToast }) => {
                             variant="plain"
                             size="sm"
                             style={{ padding: '2px 4px' }}
-                            onClick={() => navigator.clipboard.writeText(r.showroom_url).then(() => showToast('Showroom URL copied', 'success'), () => showToast('Clipboard access denied', 'danger'))}
+                            onClick={() => navigator.clipboard.writeText(r.showroom_url || '').then(() => showToast('Showroom URL copied', 'success'), () => showToast('Clipboard access denied', 'danger'))}
                             aria-label="Copy Showroom URL"
                           >
                             <CopyIcon />

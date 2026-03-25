@@ -185,7 +185,7 @@ class RHDPConfig:
     
     def __init__(self):
         self.dry_run = False
-        self.kubeconfig_path = None
+        self.kubeconfig_path: Optional[str] = None
         self.timeout = 60
         self.retry_attempts = 3
         self.retry_delay = 5

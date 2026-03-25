@@ -66,12 +66,14 @@ from api.models import (
     DeployRequest,
     DestroyCheckRequest,
     DestroyCheckResponse,
+    DestroyCheckResult,
     DiffEntry,
     DiffResponse,
     DisableAutostopRequest,
     ExtendRequest,
     HealthResponse,
     JobResponse,
+    JobStatus,
     LockRequest,
     NumUsersValidationResponse,
     NumUsersViolation,
@@ -901,7 +903,7 @@ async def diff_schedules(file: UploadFile = File(...), _key=Depends(verify_api_k
 
 @router.post("/deploy", response_model=JobResponse)
 @_rate_limit("10/minute")
-async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=Depends(verify_api_key)):
+async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=Depends(verify_api_key)):  # type: ignore
     if not _schedules:
         raise HTTPException(400, "No schedules loaded. Upload a CSV first.")
 
@@ -1052,12 +1054,12 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
             stop_log_capture(handler)
 
     asyncio.create_task(_run())
-    return JobResponse(job_id=job.job_id, status=job.status)
+    return JobResponse(job_id=job.job_id, status=JobStatus(job.status.value), progress=job.progress)
 
 
 @router.post("/deploy/dry-run", response_model=List[DeploymentResultResponse])
 @_rate_limit("10/minute")
-def deploy_dry_run(request: Request, body: DeployRequest = DeployRequest(), _key=Depends(verify_api_key)):
+def deploy_dry_run(request: Request, body: DeployRequest = DeployRequest(), _key=Depends(verify_api_key)):  # type: ignore
     global _deploy_log_path
     if not _schedules:
         raise HTTPException(400, "No schedules loaded. Upload a CSV first.")
@@ -1130,7 +1132,7 @@ def deploy_dry_run(request: Request, body: DeployRequest = DeployRequest(), _key
 
 @router.post("/deploy/dry-run-yaml")
 @_rate_limit("10/minute")
-def deploy_dry_run_yaml(request: Request, body: DeployRequest = DeployRequest(), _key=Depends(verify_api_key)):
+def deploy_dry_run_yaml(request: Request, body: DeployRequest = DeployRequest(), _key=Depends(verify_api_key)):  # type: ignore
     """Run the same dry-run deploy path and return concatenated manifest YAML (download).
 
     Writes ResourceClaim / Workshop / WorkshopProvision YAMLs to a temp directory during
@@ -1198,7 +1200,7 @@ def deploy_status(job_id: str):
         raise HTTPException(404, "Job not found")
     return JobResponse(
         job_id=job.job_id,
-        status=job.status,
+        status=JobStatus(job.status.value),
         progress=job.progress,
         message=job.message,
         error=job.error,
@@ -1319,7 +1321,7 @@ def get_deploy_results():
 
 
 @router.post("/deploy/preview")
-def deploy_preview(body: DeployRequest = DeployRequest(), _key=Depends(verify_api_key)):
+def deploy_preview(body: DeployRequest = DeployRequest(), _key=Depends(verify_api_key)):  # type: ignore
     """Preview the deployment plan, including multi-region user splits.
 
     Returns a plan without deploying anything. Useful for reviewing
@@ -1452,7 +1454,7 @@ async def deploy_retry(request: Request, body: RetryRequest, _key=Depends(verify
             stop_log_capture(handler)
 
     asyncio.create_task(_run())
-    return JobResponse(job_id=job.job_id, status=job.status)
+    return JobResponse(job_id=job.job_id, status=JobStatus(job.status.value), progress=job.progress)
 
 
 # ---------------------------------------------------------------------------
@@ -1618,7 +1620,7 @@ def op_showroom_preflight(request: Request, body: ShowroomPreflightRequest = Sho
 
 @router.post("/operations/showroom-applicationset")
 @_rate_limit("10/minute")
-def op_showroom_applicationset(request: Request, body: ShowroomAppSetRequest = ShowroomAppSetRequest(), _key=Depends(verify_api_key)):
+def op_showroom_applicationset(request: Request, body: ShowroomAppSetRequest = ShowroomAppSetRequest(), _key=Depends(verify_api_key)):  # type: ignore
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     schedules = _filter_schedules(body.ci_filter)
@@ -1684,7 +1686,7 @@ def op_import_namespace(request: Request, namespace: str, _key=Depends(verify_ap
 
 @router.post("/qa/run")
 @_rate_limit("10/minute")
-def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_api_key)):
+def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_api_key)):  # type: ignore
     global _qa_results, _qa_log_path
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
@@ -1734,7 +1736,7 @@ def qa_get_results():
 
 @router.post("/qa/destroy-check", response_model=DestroyCheckResponse)
 @_rate_limit("10/minute")
-def qa_destroy_check_endpoint(request: Request, body: DestroyCheckRequest = DestroyCheckRequest(), _key=Depends(verify_api_key)):
+def qa_destroy_check_endpoint(request: Request, body: DestroyCheckRequest = DestroyCheckRequest(), _key=Depends(verify_api_key)):  # type: ignore
     """Read-only check whether deployments have been properly destroyed/stopped."""
     global _destroy_check_results
     if not _schedules:
@@ -1762,7 +1764,10 @@ def qa_destroy_check_endpoint(request: Request, body: DestroyCheckRequest = Dest
 
         with _state_lock:
             _destroy_check_results = all_results
-        return DestroyCheckResponse(count=len(all_results), results=all_results)
+        return DestroyCheckResponse(
+            count=len(all_results),
+            results=[DestroyCheckResult(**item) for item in all_results]
+        )
     finally:
         stop_log_capture(handler)
 
@@ -1923,7 +1928,7 @@ def export_students():
         mode="w", suffix=".csv", delete=False, encoding="utf-8"
     )
     tmp.close()
-    export_student_landing_page_csv(_qa_results, tmp.name)
+    export_student_landing_page_csv([item.model_dump() for item in _qa_results], tmp.name)
 
     def _iter():
         with open(tmp.name, "r") as f:

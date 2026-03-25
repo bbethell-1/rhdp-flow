@@ -204,7 +204,7 @@ export const DestroyQASection: React.FC<{
       setResults(data.results);
     } catch (e) {
       console.warn('Refresh destroy-check results failed', e);
-      showToast(`Failed to refresh destroy check results: ${e}`, 'warning');
+      showToast(`Failed to refresh destroy check results: ${e}`, 'danger');
     }
   };
 

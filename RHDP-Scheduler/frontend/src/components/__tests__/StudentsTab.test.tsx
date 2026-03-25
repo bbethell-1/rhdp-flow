@@ -14,7 +14,7 @@ describe('StudentsTab', () => {
   it('renders student table with landing page URLs', () => {
     render(<StudentsTab qaResults={[mockQAResult]} showToast={showToast} />);
     expect(screen.getByText('Student Landing Pages (1)')).toBeInTheDocument();
-    expect(screen.getByText(mockQAResult.landing_page_url)).toBeInTheDocument();
+    expect(screen.getByText(mockQAResult.landing_page_url!)).toBeInTheDocument();
   });
 
   it('shows copy URL button', () => {
