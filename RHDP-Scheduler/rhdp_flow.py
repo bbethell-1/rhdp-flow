@@ -829,7 +829,7 @@ def build_resource_claim_payload(
             },
             "labels": {
                 "babylon.gpte.redhat.com/catalogItemName": schedule.ci,
-                "babylon.gpte.redhat.com/catalogItemNamespace": "babylon-catalog-prod",
+                "babylon.gpte.redhat.com/catalogItemNamespace": "babylon-catalog-event" if schedule.ci.endswith(".event") else "babylon-catalog-prod",
                 "demo.redhat.com/lock-enabled": "true" if (config and config.resource_lock) else "false",
                 "demo.redhat.com/white-glove": "true" if (config and config.white_glove) else ("true" if schedule.white_glove else "false"),
                 "rhdp-flow.gpte.redhat.com/scheduled": "true",
@@ -845,6 +845,7 @@ def build_resource_claim_payload(
             },
             "provider": {
                 "name": schedule.ci,
+                "namespace": "babylon-catalog-event" if schedule.ci.endswith(".event") else "babylon-catalog-prod",
                 "parameterValues": parameter_values,
             }
         }
@@ -951,34 +952,36 @@ def build_workshop_resource_dict(
     }
     workshop_metadata["labels"] = {
         "babylon.gpte.redhat.com/catalogItemName": ci,
-        "babylon.gpte.redhat.com/catalogItemNamespace": "babylon-catalog-prod",
+        "babylon.gpte.redhat.com/catalogItemNamespace": "babylon-catalog-event" if ci.endswith(".event") else "babylon-catalog-prod",
         "demo.redhat.com/lock-enabled": "true" if config.resource_lock else "false",
         "demo.redhat.com/white-glove": "true" if config.white_glove else "false",
+    }
+
+    workshop_spec = {
+        "displayName": workshop_display_name,
+        "accessPassword": resourceclaim_payload["spec"].get("accessPassword", ""),
+        "actionSchedule": {
+            "start": param_values.get("start_timestamp", ""),
+            "stop": param_values.get("stop_timestamp", ""),
+        },
+        "lifespan": {
+            "start": param_values.get("start_timestamp", ""),
+            "end": resourceclaim_payload["spec"]["lifespan"]["end"],
+            "maximum": "180d",
+            "relativeMaximum": "30d",
+        },
+        "labUserInterface": {
+            "redirect": redirect,
+        },
+        "multiuserServices": "num_users" in param_values,
+        "openRegistration": True,
     }
 
     return {
         "apiVersion": "babylon.gpte.redhat.com/v1",
         "kind": "Workshop",
         "metadata": workshop_metadata,
-        "spec": {
-            "displayName": workshop_display_name,
-            "accessPassword": resourceclaim_payload["spec"].get("accessPassword", ""),
-            "actionSchedule": {
-                "start": param_values.get("start_timestamp", ""),
-                "stop": param_values.get("stop_timestamp", ""),
-            },
-            "lifespan": {
-                "start": param_values.get("start_timestamp", ""),
-                "end": resourceclaim_payload["spec"]["lifespan"]["end"],
-                "maximum": "180d",
-                "relativeMaximum": "30d",
-            },
-            "labUserInterface": {
-                "redirect": redirect,
-            },
-            "multiuserServices": "num_users" in param_values,
-            "openRegistration": True,
-        },
+        "spec": workshop_spec,
     }
 
 
