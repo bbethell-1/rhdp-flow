@@ -448,7 +448,8 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                     # Used when WorkshopProvision is created (workshop UI enabled) or multi-asset provisions / MultiWorkshop numberSeats.
                     # ResourceClaim-only deploy (Enable_workshop_interface False) does not pass Instances into the claim; use Users → num_users.
                     # build_workshop_provision_dict uses spec.count = 1 when count is None or not positive.
-                    instances_key = header_map.get("instances")
+                    # Support both "Instances" and "Workshop_instance_count" column names
+                    instances_key = header_map.get("instances") or header_map.get("workshop_instance_count")
                     instances_str = row.get(instances_key, "").strip() if instances_key else ""
                     concurrency_str = row.get(header_map.get('concurrency', 'Concurrency'), '').strip()
                     salesforce_ids = row.get(header_map.get('salesforce ids', header_map.get('campaign_id', 'Salesforce IDs')), '').strip()

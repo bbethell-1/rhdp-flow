@@ -191,8 +191,18 @@ export const UploadTab: React.FC<Props> = ({
       // Users reasonableness
       if (s.users !== null && s.users > 500)
         warns.push({ index: i, field: 'users', message: `"${s.ci_name}" has a high user count (${s.users}) — verify this is intentional` });
-      if (s.users !== null && s.users < 1)
-        warns.push({ index: i, field: 'users', message: `"${s.ci_name}" has an invalid user count (${s.users})` });
+      if (s.users !== null && s.users < 1) {
+        // When workshop interface is enabled and instances is set, Users=0 is expected for instances-only workshops
+        if (s.enable_workshop_interface && s.instances && s.instances > 0) {
+          warns.push({
+            index: i,
+            field: 'users',
+            message: `"${s.ci_name}" has Users=0 (correct for instances-only workshops). Instance count (${s.instances}) is set via Workshop_instance_count column.`
+          });
+        } else {
+          warns.push({ index: i, field: 'users', message: `"${s.ci_name}" has an invalid user count (${s.users})` });
+        }
+      }
 
       // num_users catalog limit check
       if (s.users !== null && s.ci in numUsersLimits && s.users > numUsersLimits[s.ci])
