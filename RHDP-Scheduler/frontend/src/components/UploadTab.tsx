@@ -36,6 +36,7 @@ interface ScheduleWarning {
   index: number;
   field: string;
   message: string;
+  severity?: 'info' | 'warning' | 'danger';
 }
 
 /** Parse DD/MM/YYYY HH:MM (or DD/MM/YY HH:MM) into a Date, or null. */
@@ -197,10 +198,11 @@ export const UploadTab: React.FC<Props> = ({
           warns.push({
             index: i,
             field: 'users',
+            severity: 'info',
             message: `"${s.ci_name}" has Users=0 (correct for instances-only workshops). Instance count (${s.instances}) is set via Workshop_instance_count column.`
           });
         } else {
-          warns.push({ index: i, field: 'users', message: `"${s.ci_name}" has an invalid user count (${s.users})` });
+          warns.push({ index: i, field: 'users', severity: 'danger', message: `"${s.ci_name}" has an invalid user count (${s.users})` });
         }
       }
 
@@ -680,11 +682,25 @@ export const UploadTab: React.FC<Props> = ({
             </Alert>
           )}
 
-          {/* Validation warnings */}
-          {warnings.length > 0 && (
-            <Alert variant="warning" isInline title={`${warnings.length} validation warning(s) — review before deploying`} style={{ marginBottom: 12 }}>
+          {/* Validation warnings - separated by severity */}
+          {warnings.filter(w => w.severity === 'info').length > 0 && (
+            <Alert variant="info" isInline title={`${warnings.filter(w => w.severity === 'info').length} configuration note(s)`} style={{ marginBottom: 12 }}>
               <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
-                {warnings.map((w, i) => <li key={i}>{w.message}</li>)}
+                {warnings.filter(w => w.severity === 'info').map((w, i) => <li key={i}>{w.message}</li>)}
+              </ul>
+            </Alert>
+          )}
+          {warnings.filter(w => w.severity === 'warning').length > 0 && (
+            <Alert variant="warning" isInline title={`${warnings.filter(w => w.severity === 'warning').length} warning(s) — review before deploying`} style={{ marginBottom: 12 }}>
+              <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+                {warnings.filter(w => w.severity === 'warning').map((w, i) => <li key={i}>{w.message}</li>)}
+              </ul>
+            </Alert>
+          )}
+          {warnings.filter(w => w.severity === 'danger').length > 0 && (
+            <Alert variant="danger" isInline title={`${warnings.filter(w => w.severity === 'danger').length} error(s) — must fix before deploying`} style={{ marginBottom: 12 }}>
+              <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+                {warnings.filter(w => w.severity === 'danger').map((w, i) => <li key={i}>{w.message}</li>)}
               </ul>
             </Alert>
           )}
