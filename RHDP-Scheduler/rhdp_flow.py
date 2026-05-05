@@ -651,6 +651,35 @@ def dry_run_validate_schedules(
             logger.warning(f"  ⚠️  {schedule.ci_name}: Could not parse auto-destroy '{schedule.auto_destroy}'")
         if schedule.concurrency is not None and (schedule.concurrency < 1 or schedule.concurrency > 100):
             logger.warning(f"  ⚠️  {schedule.ci_name}: Concurrency {schedule.concurrency} may be invalid")
+
+        # Validate Users/Instances logic for all workshops
+        if not schedule.is_multi_asset:
+            ci_expects_num_users = get_catalog_item_has_num_users(schedule.ci, config)
+            has_users = _should_include_users(schedule)
+            has_instances = schedule.instances is not None and schedule.instances > 0
+
+            # Check for common CSV mistakes
+            if has_users and has_instances and schedule.users == schedule.instances:
+                if ci_expects_num_users is True:
+                    logger.info(f"  ✓ {schedule.ci_name}: Users={schedule.users}, Instances={schedule.instances} (num_users workshop with instances count)")
+                elif ci_expects_num_users is False:
+                    logger.warning(f"  ⚠️  {schedule.ci_name}: Users={schedule.users}, Instances={schedule.instances} should be Users=0, Instances={schedule.instances} (instances-only workshop)")
+                    logger.warning(f"      Hint: This catalog item does not use num_users. Set Users=0 and only populate Instances column.")
+            elif has_users and (not has_instances or schedule.instances == 1):
+                if ci_expects_num_users is True:
+                    logger.info(f"  ✓ {schedule.ci_name}: Users={schedule.users}, Instances={schedule.instances or 1} (num_users workshop)")
+                elif ci_expects_num_users is False:
+                    logger.warning(f"  ⚠️  {schedule.ci_name}: Users={schedule.users} but catalog item is instances-only (no num_users parameter)")
+                    logger.warning(f"      Hint: Set Users=0, Instances={schedule.users} for instances-only workshops.")
+            elif not has_users and has_instances:
+                if ci_expects_num_users is False:
+                    logger.info(f"  ✓ {schedule.ci_name}: Users=0, Instances={schedule.instances} (instances-only workshop)")
+                elif ci_expects_num_users is True:
+                    logger.warning(f"  ⚠️  {schedule.ci_name}: Users=0 but catalog item expects num_users parameter")
+                    logger.warning(f"      Hint: Set Users={schedule.instances}, Instances=1 for num_users workshops.")
+            elif ci_expects_num_users is None:
+                logger.info(f"  ℹ️  {schedule.ci_name}: Users={schedule.users or 0}, Instances={schedule.instances or 0} (catalog item not checked)")
+
         if not schedule.is_multi_asset:
             continue
         # Multi-asset: list assets and num_users / password
