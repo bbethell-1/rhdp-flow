@@ -64,13 +64,19 @@ def _expected_total_seats(schedule: "WorkshopSchedule") -> Optional[int]:
 def _provider_parameter_values(
     schedule: "WorkshopSchedule", start_timestamp: str, stop_timestamp: str
 ) -> Dict:
-    """Build provider parameterValues; include num_users only when Users is set and > 0."""
+    """Build provider parameterValues; include num_users only when Users is set and > 0.
+
+    When Enable_workshop_interface=True, num_users is NOT included because Workshop/WorkshopProvision
+    handles instance count via spec.count (from Workshop_instance_count column), not via num_users parameter.
+    """
     pv: Dict = {
         "purpose": schedule.purpose,
         "start_timestamp": start_timestamp,
         "stop_timestamp": stop_timestamp,
     }
-    if _should_include_users(schedule) and schedule.users is not None:
+    # Only include num_users when workshop interface is disabled
+    # With workshop interface enabled, instance count is handled by WorkshopProvision spec.count
+    if not schedule.enable_workshop_interface and _should_include_users(schedule) and schedule.users is not None:
         pv["num_users"] = schedule.users
     regions = [r.strip().replace("_", "-") for r in schedule.aws_regions.split(",") if r.strip()]
     if len(regions) == 1:
