@@ -680,6 +680,14 @@ def dry_run_validate_schedules(
             elif ci_expects_num_users is None:
                 logger.info(f"  ℹ️  {schedule.ci_name}: Users={schedule.users or 0}, Instances={schedule.instances or 0} (catalog item not checked)")
 
+            # CRITICAL: Check Enable_workshop_interface vs num_users compatibility
+            if ci_expects_num_users is True and has_users and schedule.enable_workshop_interface:
+                logger.error(f"  ❌ {schedule.ci_name}: Enable_workshop_interface=True BUT catalog expects num_users!")
+                logger.error(f"      This will deploy as instances-only Workshop instead of ResourceClaims with num_users={schedule.users}")
+                logger.error(f"      FIX: Set Enable_workshop_interface=False for num_users workshops")
+                logger.error(f"      Current: Users={schedule.users}, Instances={schedule.instances or 1}, Enable_workshop_interface=True")
+                logger.error(f"      Correct: Users={schedule.users}, Instances={schedule.instances or 1}, Enable_workshop_interface=False")
+
         if not schedule.is_multi_asset:
             continue
         # Multi-asset: list assets and num_users / password
