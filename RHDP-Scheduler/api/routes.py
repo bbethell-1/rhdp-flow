@@ -1689,6 +1689,13 @@ def op_import_namespace(request: Request, namespace: str, _key=Depends(verify_ap
 @router.get("/qa/namespaces")
 def qa_namespaces():
     """Return unique namespaces from loaded schedules for the QA namespace selector."""
+    if not _schedules:
+        # Return common namespaces even if no schedules loaded
+        return [
+            "user-bbethell-redhat-com",
+            "user-vaguiler-redhat-com",
+            "user-yvarbev-redhat-com",
+        ]
     return list(dict.fromkeys(s.namespace for s in _schedules))
 
 
@@ -1701,8 +1708,12 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
 
     config = _get_config()
 
-    if body.namespace:
-        namespaces = [body.namespace]
+    # Support multiple namespaces for faster targeted QA
+    if body.namespaces:
+        namespaces = body.namespaces
+    elif body.namespace:
+        # Support comma-separated namespaces in single field for backward compat
+        namespaces = [ns.strip() for ns in body.namespace.split(",") if ns.strip()]
     else:
         namespaces = list(dict.fromkeys(s.namespace for s in _schedules))
 

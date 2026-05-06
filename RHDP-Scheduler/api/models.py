@@ -184,7 +184,11 @@ class QARequest(BaseModel):
     namespace: Optional[str] = Field(
         None,
         min_length=1,
-        description="Optional namespace override for QA runs; defaults to the loaded schedule namespace",
+        description="Optional namespace override for QA runs (can be comma-separated list); defaults to the loaded schedule namespace",
+    )
+    namespaces: Optional[List[str]] = Field(
+        None,
+        description="Optional list of namespaces to scan for faster targeted QA",
     )
 
     @field_validator("namespace")

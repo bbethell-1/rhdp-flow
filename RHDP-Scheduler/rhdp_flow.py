@@ -681,6 +681,17 @@ def dry_run_validate_schedules(
     logger.info("[DRY-RUN] Validation and num_users check")
     logger.info("=" * 70)
     for schedule in schedules:
+        # Validate catalog item exists in expected namespace
+        expected_ns = get_catalog_namespace(schedule.ci, schedule.catalog_namespace)
+        exists, found_ns, suggestion = validate_catalog_item_exists(schedule.ci, expected_ns, config)
+        if not exists:
+            if found_ns:
+                logger.error(f"  ❌ {schedule.ci_name}: {suggestion}")
+            else:
+                logger.error(f"  ❌ {schedule.ci_name}: {suggestion}")
+        elif found_ns == expected_ns:
+            logger.info(f"  ✓ {schedule.ci_name}: Catalog item exists in {expected_ns}")
+
         # Validate dates
         prov = parse_date_time(schedule.provisioning_date)
         stop = parse_date_time(schedule.auto_stop)
@@ -2103,14 +2114,60 @@ def get_catalog_item_parameter_defaults(
     return {}
 
 
+def validate_catalog_item_exists(ci: str, expected_namespace: str, config: RHDPConfig) -> Tuple[bool, Optional[str], Optional[str]]:
+    """
+    Validate that a catalog item exists in the expected namespace.
+
+    Args:
+        ci: Catalog Item ID (e.g., "summit-2026.lb1234.event")
+        expected_namespace: Expected catalog namespace (e.g., "babylon-catalog-event")
+        config: RHDPConfig object
+
+    Returns:
+        Tuple of (exists: bool, found_namespace: Optional[str], suggestion: Optional[str])
+        - exists: True if found in expected namespace
+        - found_namespace: Namespace where item was found (if different from expected)
+        - suggestion: Error message with suggestion if not found in expected namespace
+    """
+    env = os.environ.copy()
+    if config.kubeconfig_path:
+        env["KUBECONFIG"] = config.kubeconfig_path
+
+    # Try expected namespace first
+    try:
+        cmd = [config.oc_command, "get", "catalogitem", ci, "-n", expected_namespace, "-o", "json"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)
+        if result.returncode == 0:
+            return (True, expected_namespace, None)
+    except Exception:
+        pass
+
+    # Not found in expected namespace - check other namespaces
+    for ns in ("babylon-catalog-event", "babylon-catalog-prod", "babylon-catalog-dev"):
+        if ns == expected_namespace:
+            continue  # Already tried this one
+        try:
+            cmd = [config.oc_command, "get", "catalogitem", ci, "-n", ns, "-o", "json"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)
+            if result.returncode == 0:
+                suggestion = f"Item '{ci}' not found in {expected_namespace}. Found in {ns} instead. Update your CSV Catalog_Namespace column or CI suffix."
+                return (False, ns, suggestion)
+        except Exception:
+            continue
+
+    # Not found anywhere
+    suggestion = f"Item '{ci}' not found in any catalog namespace ({expected_namespace}, babylon-catalog-event, babylon-catalog-prod, babylon-catalog-dev). Verify the CI name is correct."
+    return (False, None, suggestion)
+
+
 def get_catalog_item_info(ci: str, config: RHDPConfig) -> Dict[str, str]:
     """
     Get catalog item information (namespace, displayName) from the catalog.
-    
+
     Args:
         ci: Catalog Item ID (e.g., "zt-ansiblebu.ansible-network-automation-basics-lab-2.event")
         config: RHDPConfig object
-        
+
     Returns:
         Dict with 'namespace' and 'displayName' keys, or empty dict if not found
     """
