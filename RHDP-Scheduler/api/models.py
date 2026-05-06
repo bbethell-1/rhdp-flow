@@ -38,6 +38,7 @@ class WorkshopScheduleResponse(BaseModel):
     count: Optional[int] = None
     white_glove: bool = True
     redirect: bool = True
+    catalog_namespace: str = ""
     showroom_repo: str = ""
     showroom_ref: str = ""
     showroom_novnc: bool = False

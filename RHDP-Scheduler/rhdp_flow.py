@@ -87,6 +87,38 @@ def _provider_parameter_values(
 VALID_SALESFORCE_TYPES = {"opportunity", "campaign", "project", "cdh"}
 
 
+def get_catalog_namespace(ci: str, explicit_namespace: Optional[str] = None) -> str:
+    """
+    Determine the catalog namespace for a given catalog item.
+
+    Args:
+        ci: Catalog Item ID (e.g., "summit-2026.lb1234.event")
+        explicit_namespace: Optional explicit namespace from CSV Catalog_Namespace column
+
+    Returns:
+        Catalog namespace string (e.g., "babylon-catalog-event")
+
+    Logic:
+        1. If explicit_namespace is provided and non-empty, use it
+        2. Auto-detect based on CI suffix:
+           - .event → babylon-catalog-event
+           - .prod → babylon-catalog-prod
+           - .dev → babylon-catalog-dev
+        3. Default to babylon-catalog-prod for unknown suffixes
+    """
+    if explicit_namespace:
+        return explicit_namespace.strip()
+
+    if ci.endswith(".event"):
+        return "babylon-catalog-event"
+    elif ci.endswith(".prod"):
+        return "babylon-catalog-prod"
+    elif ci.endswith(".dev"):
+        return "babylon-catalog-dev"
+    else:
+        return "babylon-catalog-prod"
+
+
 def _salesforce_items(schedule: "WorkshopSchedule") -> str:
     """Format salesforce_items JSON string.
 
@@ -159,6 +191,7 @@ class WorkshopSchedule:
     count: Optional[int] = None  # Optional deployment count (from Count CSV column); distinct from instances
     white_glove: bool = True  # Optional white-glove mode flag (default: enabled)
     redirect: bool = True  # labUserInterface.redirect (default: enabled)
+    catalog_namespace: str = ""  # Optional explicit catalog namespace override (e.g., "babylon-catalog-event"); auto-detected if empty
     showroom_repo: str = ""  # Optional Showroom Antora docs git repo URL
     showroom_ref: str = ""  # Optional Showroom docs git branch/tag (default: main)
     showroom_novnc: bool = False  # Enable noVNC remote desktop in Showroom
@@ -457,6 +490,7 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                     count_str = row.get(header_map.get('count', 'Count'), '').strip()
                     aws_regions = row.get(header_map.get('aws_region', 'AWS_Region'), '').strip()
                     redirect_str = row.get(header_map.get('redirect', 'Redirect'), '').strip()
+                    catalog_namespace = row.get(header_map.get('catalog_namespace', 'Catalog_Namespace'), '').strip()
                     showroom_repo = row.get(header_map.get('showroom_repo', 'Showroom_Repo'), '').strip()
                     showroom_ref = row.get(header_map.get('showroom_ref', 'Showroom_Ref'), '').strip()
                     showroom_novnc_str = row.get(header_map.get('showroom_novnc', 'Showroom_NoVNC'), '').strip()
@@ -569,6 +603,7 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                         count=count,
                         white_glove=white_glove_val,
                         redirect=redirect_val,
+                        catalog_namespace=catalog_namespace,
                         showroom_repo=showroom_repo,
                         showroom_ref=showroom_ref or "main",
                         showroom_novnc=showroom_novnc_val,
@@ -873,7 +908,7 @@ def build_resource_claim_payload(
             },
             "labels": {
                 "babylon.gpte.redhat.com/catalogItemName": schedule.ci,
-                "babylon.gpte.redhat.com/catalogItemNamespace": "babylon-catalog-event" if schedule.ci.endswith(".event") else "babylon-catalog-prod",
+                "babylon.gpte.redhat.com/catalogItemNamespace": get_catalog_namespace(schedule.ci, schedule.catalog_namespace),
                 "demo.redhat.com/lock-enabled": "true" if (config and config.resource_lock) else "false",
                 "demo.redhat.com/white-glove": "true" if (config and config.white_glove) else ("true" if schedule.white_glove else "false"),
                 "rhdp-flow.gpte.redhat.com/scheduled": "true",
@@ -889,7 +924,7 @@ def build_resource_claim_payload(
             },
             "provider": {
                 "name": schedule.ci,
-                "namespace": "babylon-catalog-event" if schedule.ci.endswith(".event") else "babylon-catalog-prod",
+                "namespace": get_catalog_namespace(schedule.ci, schedule.catalog_namespace),
                 "parameterValues": parameter_values,
             }
         }
@@ -959,6 +994,7 @@ def build_workshop_resource_dict(
     resourceclaim_payload: Dict,
     config: RHDPConfig,
     redirect: bool,
+    catalog_namespace_override: str = "",
 ) -> Dict:
     """Build the Workshop object as applied to the cluster (shared by create + dry-run YAML export)."""
     ci = resourceclaim_payload["spec"]["provider"]["name"]
@@ -996,7 +1032,7 @@ def build_workshop_resource_dict(
     }
     workshop_metadata["labels"] = {
         "babylon.gpte.redhat.com/catalogItemName": ci,
-        "babylon.gpte.redhat.com/catalogItemNamespace": "babylon-catalog-event" if ci.endswith(".event") else "babylon-catalog-prod",
+        "babylon.gpte.redhat.com/catalogItemNamespace": get_catalog_namespace(ci, catalog_namespace_override),
         "demo.redhat.com/lock-enabled": "true" if config.resource_lock else "false",
         "demo.redhat.com/white-glove": "true" if config.white_glove else "false",
     }
@@ -1368,6 +1404,7 @@ def create_workshop_with_ui(
     resourceclaim_payload: Dict,
     config: RHDPConfig,
     redirect: Optional[bool] = None,
+    catalog_namespace_override: str = "",
 ) -> Optional[str]:
     """
     Create Workshop resource directly with UI enabled and annotation.
@@ -1395,7 +1432,7 @@ def create_workshop_with_ui(
         )
         if config.dry_run_export_yaml_dir:
             w_manifest = build_workshop_resource_dict(
-                workshop_name_or_prefix, namespace, resourceclaim_payload, config, redirect
+                workshop_name_or_prefix, namespace, resourceclaim_payload, config, redirect, catalog_namespace_override
             )
             export_dry_run_manifest_yaml(config, f"workshop-{ci}", w_manifest)
         prefix = (
@@ -1412,7 +1449,7 @@ def create_workshop_with_ui(
             expected_workshop_name = workshop_name_or_prefix
 
         workshop = build_workshop_resource_dict(
-            workshop_name_or_prefix, namespace, resourceclaim_payload, config, redirect
+            workshop_name_or_prefix, namespace, resourceclaim_payload, config, redirect, catalog_namespace_override
         )
 
         # Create Workshop
@@ -1767,7 +1804,7 @@ def get_catalog_item_has_num_users(ci: str, config: RHDPConfig) -> Optional[bool
     Returns True if CI has num_users, False if not, None if cannot determine (e.g. not connected).
     """
     try:
-        catalog_namespace = "babylon-catalog-event" if ci.endswith(".event") else "babylon-catalog-prod"
+        catalog_namespace = get_catalog_namespace(ci)
         cmd = [
             config.oc_command,
             "get", "catalogitem", ci,
@@ -1807,7 +1844,7 @@ def get_catalog_item_num_users_limit(ci: str, config: RHDPConfig) -> Optional[Di
     Returns None if the cluster is unreachable or the CI cannot be fetched.
     """
     try:
-        catalog_namespace = "babylon-catalog-event" if ci.endswith(".event") else "babylon-catalog-prod"
+        catalog_namespace = get_catalog_namespace(ci)
         cmd = [
             config.oc_command,
             "get", "catalogitem", ci,
@@ -1850,7 +1887,7 @@ def get_catalog_item_num_users_limit(ci: str, config: RHDPConfig) -> Optional[Di
 
 def list_catalog_items(config: RHDPConfig) -> List[Dict]:
     """
-    List CatalogItem resources from babylon-catalog-prod and babylon-catalog-event.
+    List CatalogItem resources from babylon-catalog-prod, babylon-catalog-event, and babylon-catalog-dev.
 
     Returns sorted list of dicts with keys: id, display_name, catalog_namespace,
     description, category, and a list of parameter summaries extracted from the spec.
@@ -1859,7 +1896,7 @@ def list_catalog_items(config: RHDPConfig) -> List[Dict]:
     env = os.environ.copy()
     if config.kubeconfig_path:
         env["KUBECONFIG"] = config.kubeconfig_path
-    for ns in ("babylon-catalog-prod", "babylon-catalog-event"):
+    for ns in ("babylon-catalog-prod", "babylon-catalog-event", "babylon-catalog-dev"):
         try:
             cmd = [
                 config.oc_command,
@@ -2048,7 +2085,7 @@ def get_catalog_item_parameter_defaults(
     Used when building WorkshopProvision so unset CSV fields inherit the same defaults as the
     RHDP UI (e.g. aws_region, cert manager flags). Returns {} if the CatalogItem cannot be read.
     """
-    primary = "babylon-catalog-event" if ci.endswith(".event") else "babylon-catalog-prod"
+    primary = get_catalog_namespace(ci, catalog_namespace)
     secondary = (
         "babylon-catalog-event" if primary == "babylon-catalog-prod" else "babylon-catalog-prod"
     )
@@ -2080,7 +2117,7 @@ def get_catalog_item_info(ci: str, config: RHDPConfig) -> Dict[str, str]:
     try:
         # Determine catalog namespace based on CI name pattern
         # Items ending in .event are typically in babylon-catalog-event
-        catalog_namespace = "babylon-catalog-event" if ci.endswith(".event") else "babylon-catalog-prod"
+        catalog_namespace = get_catalog_namespace(ci)
         
         # Try the determined namespace first
         cmd = [
@@ -2137,7 +2174,7 @@ def get_catalog_item_info(ci: str, config: RHDPConfig) -> Dict[str, str]:
     except Exception as e:
         logger.warning(f"Error getting catalog item info for {ci}: {e}")
         # Default based on pattern
-        catalog_namespace = "babylon-catalog-event" if ci.endswith(".event") else "babylon-catalog-prod"
+        catalog_namespace = get_catalog_namespace(ci)
         return {
             'namespace': catalog_namespace,
             'displayName': ci
@@ -2373,7 +2410,7 @@ def create_multi_workshop(
             }
 
             # Create Workshop for this asset
-            asset_workshop_name = create_workshop_with_ui(asset_workshop_prefix, schedule.namespace, asset_payload, config, redirect=schedule.redirect)
+            asset_workshop_name = create_workshop_with_ui(asset_workshop_prefix, schedule.namespace, asset_payload, config, redirect=schedule.redirect, catalog_namespace_override=schedule.catalog_namespace)
             
             if not asset_workshop_name:
                 logger.warning(f"Failed to create Workshop for asset {asset_ci}, continuing...")
@@ -2521,7 +2558,7 @@ def create_multi_region_workshop(
     payload = build_resource_claim_payload(schedule, config)
     generate_name = f"{schedule.ci}-"
 
-    workshop_name = create_workshop_with_ui(generate_name, schedule.namespace, payload, config, redirect=schedule.redirect)
+    workshop_name = create_workshop_with_ui(generate_name, schedule.namespace, payload, config, redirect=schedule.redirect, catalog_namespace_override=schedule.catalog_namespace)
     if not workshop_name:
         return None
 
@@ -4301,7 +4338,7 @@ def process_schedule(
             ci = schedule.ci
             generate_name = f"{ci}-"
             # Create Workshop directly
-            workshop_name = create_workshop_with_ui(generate_name, schedule.namespace, payload, config, redirect=schedule.redirect)
+            workshop_name = create_workshop_with_ui(generate_name, schedule.namespace, payload, config, redirect=schedule.redirect, catalog_namespace_override=schedule.catalog_namespace)
             if workshop_name:
                 logger.info(f"✅ Successfully created Workshop: {workshop_name} with UI enabled")
                 # Create WorkshopProvision to manage the Workshop

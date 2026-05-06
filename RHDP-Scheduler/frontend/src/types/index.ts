@@ -33,6 +33,7 @@ export interface WorkshopSchedule {
   count: number | null;
   white_glove: boolean;
   redirect: boolean;
+  catalog_namespace: string;
   showroom_repo: string;
   showroom_ref: string;
   showroom_novnc: boolean;
