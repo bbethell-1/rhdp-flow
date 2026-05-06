@@ -325,6 +325,26 @@ class NumUsersValidationResponse(BaseModel):
     limits: dict = Field(default_factory=dict, description="Per-CI maximum map, e.g. {'ci-name': 40}")
 
 
+class CatalogNamespaceMismatch(BaseModel):
+    """A catalog item found in a different namespace than expected."""
+
+    ci_name: str
+    ci: str
+    namespace: str
+    expected_catalog_namespace: str
+    found_catalog_namespace: str
+    suggestion: str
+
+
+class CatalogNamespaceValidationResponse(BaseModel):
+    """Response for POST /schedules/validate-catalog-namespaces."""
+
+    mismatches: List[CatalogNamespaceMismatch] = Field(default_factory=list)
+    not_found: List[dict] = Field(default_factory=list, description="CIs not found in any catalog namespace")
+    checked: int = 0
+    skipped: int = 0
+
+
 class ResourceStatus(BaseModel):
     exists: bool
     status: str           # "not_found" | "active" | "overdue"

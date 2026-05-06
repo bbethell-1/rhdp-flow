@@ -227,6 +227,28 @@ export interface NumUsersValidationResponse {
   limits: Record<string, number>;
 }
 
+export interface CatalogNamespaceMismatch {
+  ci_name: string;
+  ci: string;
+  namespace: string;
+  expected_catalog_namespace: string;
+  found_catalog_namespace: string;
+  suggestion: string;
+}
+
+export interface CatalogNamespaceValidationResponse {
+  mismatches: CatalogNamespaceMismatch[];
+  not_found: Array<{
+    ci_name: string;
+    ci: string;
+    namespace: string;
+    expected_catalog_namespace: string;
+    message: string;
+  }>;
+  checked: number;
+  skipped: number;
+}
+
 export interface ResourceStatus {
   exists: boolean;
   status: string;

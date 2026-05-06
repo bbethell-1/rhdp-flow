@@ -122,6 +122,10 @@ export const UploadTab: React.FC<Props> = ({
   const [usersNotInCatalog, setUsersNotInCatalog] = useState<UsersNotInCatalogAdvisory[]>([]);
   const [numUsersLimits, setNumUsersLimits] = useState<Record<string, number>>({});
 
+  // Catalog namespace validation
+  const [catalogNamespaceMismatches, setCatalogNamespaceMismatches] = useState<import('../types').CatalogNamespaceMismatch[]>([]);
+  const [catalogNotFound, setCatalogNotFound] = useState<Array<{ ci_name: string; ci: string; namespace: string; expected_catalog_namespace: string; message: string }>>([]);
+
   // Confirmation modal state
   const [showDeployConfirm, setShowDeployConfirm] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -233,21 +237,26 @@ export const UploadTab: React.FC<Props> = ({
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logLines]);
 
-  /** Re-fetch namespace + catalog num_users checks from the server (uses loaded schedules). */
+  /** Re-fetch namespace + catalog num_users + catalog namespace checks from the server (uses loaded schedules). */
   const refreshClusterValidation = useCallback(async () => {
     setMissingNamespaces([]);
     setNumUsersViolations([]);
     setUsersNotInCatalog([]);
     setNumUsersLimits({});
-    const [nsRes, nuRes] = await Promise.all([
+    setCatalogNamespaceMismatches([]);
+    setCatalogNotFound([]);
+    const [nsRes, nuRes, cnRes] = await Promise.all([
       api.validateNamespaces(),
       api.validateNumUsers(),
+      api.validateCatalogNamespaces(),
     ]);
     if (nsRes.missing.length) setMissingNamespaces(nsRes.missing);
     if (nuRes.violations.length) setNumUsersViolations(nuRes.violations);
     if (nuRes.users_not_in_catalog?.length) setUsersNotInCatalog(nuRes.users_not_in_catalog);
     if (Object.keys(nuRes.limits).length) setNumUsersLimits(nuRes.limits);
-    return { nsRes, nuRes };
+    if (cnRes.mismatches.length) setCatalogNamespaceMismatches(cnRes.mismatches);
+    if (cnRes.not_found.length) setCatalogNotFound(cnRes.not_found);
+    return { nsRes, nuRes, cnRes };
   }, []);
 
   const handleValidate = async () => {
@@ -715,6 +724,44 @@ export const UploadTab: React.FC<Props> = ({
                   <li key={i}>{a.message}</li>
                 ))}
               </ul>
+            </Alert>
+          )}
+
+          {/* Catalog namespace mismatches */}
+          {catalogNamespaceMismatches.length > 0 && (
+            <Alert
+              variant="warning"
+              isInline
+              title={`${catalogNamespaceMismatches.length} catalog item(s) found in different namespace`}
+              style={{ marginBottom: 12 }}
+            >
+              <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+                {catalogNamespaceMismatches.map((m, i) => (
+                  <li key={i}>
+                    <strong>{m.ci_name}</strong> ({m.ci}): {m.suggestion}
+                  </li>
+                ))}
+              </ul>
+              Update your CSV Catalog_Namespace column or CI suffix to avoid ghost workshops.
+            </Alert>
+          )}
+
+          {/* Catalog items not found */}
+          {catalogNotFound.length > 0 && (
+            <Alert
+              variant="danger"
+              isInline
+              title={`${catalogNotFound.length} catalog item(s) not found`}
+              style={{ marginBottom: 12 }}
+            >
+              <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+                {catalogNotFound.map((nf, i) => (
+                  <li key={i}>
+                    <strong>{nf.ci_name}</strong> ({nf.ci}): {nf.message}
+                  </li>
+                ))}
+              </ul>
+              Verify the CI names are correct. Deployment will fail for these items.
             </Alert>
           )}
 

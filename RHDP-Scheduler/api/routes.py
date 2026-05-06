@@ -57,6 +57,8 @@ from rhdp_flow import (
     derive_base_domain,
     utc_timestamp_str,
     get_catalog_item_num_users_limit,
+    get_catalog_namespace,
+    validate_catalog_item_exists,
     list_catalog_items,
     users_column_ignored_by_catalog_advisory,
 )
@@ -64,6 +66,8 @@ from rhdp_flow import (
 from api.models import (
     CatalogItemEntry,
     CatalogItemParameter,
+    CatalogNamespaceMismatch,
+    CatalogNamespaceValidationResponse,
     DeploymentResultResponse,
     DeployRequest,
     DestroyCheckRequest,
@@ -833,6 +837,64 @@ def validate_num_users(_key=Depends(verify_api_key)):
         checked=checked,
         skipped=skipped,
         limits=limits,
+    )
+
+
+@router.post("/schedules/validate-catalog-namespaces", response_model=CatalogNamespaceValidationResponse)
+def validate_catalog_namespaces(_key=Depends(verify_api_key)):
+    """Check whether catalog items exist in their expected catalog namespaces."""
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+    config = _get_config()
+    mismatches: List[CatalogNamespaceMismatch] = []
+    not_found: List[dict] = []
+    checked = 0
+    skipped = 0
+    ci_cache: Dict[str, tuple] = {}  # Cache validation results
+
+    def _check_ci(ci: str, schedule: WorkshopSchedule):
+        nonlocal checked, skipped
+        expected_ns = get_catalog_namespace(ci, schedule.catalog_namespace or None)
+
+        if ci not in ci_cache:
+            exists, found_ns, suggestion = validate_catalog_item_exists(ci, expected_ns, config)
+            ci_cache[ci] = (exists, found_ns, suggestion)
+
+        exists, found_ns, suggestion = ci_cache[ci]
+        checked += 1
+
+        if not exists and found_ns is not None:
+            # Mismatch: found in different namespace
+            mismatches.append(CatalogNamespaceMismatch(
+                ci_name=schedule.ci_name,
+                ci=ci,
+                namespace=schedule.namespace,
+                expected_catalog_namespace=expected_ns,
+                found_catalog_namespace=found_ns,
+                suggestion=suggestion or f"Found in {found_ns} instead of {expected_ns}",
+            ))
+        elif not exists and found_ns is None:
+            # Not found anywhere
+            not_found.append({
+                "ci_name": schedule.ci_name,
+                "ci": ci,
+                "namespace": schedule.namespace,
+                "expected_catalog_namespace": expected_ns,
+                "message": suggestion or f"Not found in any catalog namespace",
+            })
+
+    for s in _schedules:
+        _check_ci(s.ci, s)
+        # Also check individual asset CIs for multi-asset workshops
+        if s.is_multi_asset and s.asset_cis:
+            for asset_ci in (c.strip() for c in s.asset_cis.split(",") if c.strip()):
+                _check_ci(asset_ci, s)
+
+    return CatalogNamespaceValidationResponse(
+        mismatches=mismatches,
+        not_found=not_found,
+        checked=checked,
+        skipped=skipped,
     )
 
 

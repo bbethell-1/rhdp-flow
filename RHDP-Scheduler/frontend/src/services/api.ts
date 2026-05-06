@@ -113,6 +113,8 @@ export const api = {
     request<{ namespaces: Record<string, boolean>; missing: string[] }>('/schedules/validate-namespaces', { method: 'POST', body: '{}' }),
   validateNumUsers: () =>
     request<NumUsersValidationResponse>('/schedules/validate-num-users', { method: 'POST', body: '{}' }),
+  validateCatalogNamespaces: () =>
+    request<import('../types').CatalogNamespaceValidationResponse>('/schedules/validate-catalog-namespaces', { method: 'POST', body: '{}' }),
   diffSchedules: async (file: File): Promise<import('../types').DiffResponse> => {
     const form = new FormData();
     form.append('file', file);
