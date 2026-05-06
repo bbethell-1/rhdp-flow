@@ -245,6 +245,52 @@ To run **40 seats** when the catalog allows **20** per claim, model it explicitl
 
 **Not in CSV:** **White Glove** — only Deploy Settings / API / CLI config. Extra columns (e.g. `White_Glove`) are ignored by the parser.
 
+### Catalog Namespace Auto-Detection
+
+Flow automatically determines which catalog namespace to use based on your catalog item (CI) suffix:
+
+| CI Suffix | Catalog Namespace | Example |
+|-----------|-------------------|---------|
+| `.event` | `babylon-catalog-event` | `summit-2026.lb1234.event` |
+| `.prod` | `babylon-catalog-prod` | `openshift-cnv.ocp-virt-roadshow.prod` |
+| `.dev` | `babylon-catalog-dev` | `test-workshop.dev` |
+| *(no suffix)* | `babylon-catalog-prod` (default) | `legacy-workshop-name` |
+
+**Manual Override:** Add an optional `Catalog_Namespace` column to your CSV to explicitly specify the namespace:
+
+```csv
+CI Name,CI,Namespace,Catalog_Namespace,...
+Workshop A,summit-2026.lb1234.event,user-alice,babylon-catalog-event,...
+Workshop B,custom.workshop,user-bob,babylon-catalog-dev,...
+```
+
+**Why This Matters:** If the catalog namespace is wrong, workshops will be created as "ghosts" — stuck with `PHASE: <none>` and `provisioningCount: 0`. This wastes cluster resources and requires manual cleanup.
+
+**Validation:** During dry-run mode (`--dry-run` or Deploy Settings → Dry-Run Mode), Flow validates that each catalog item exists in its expected namespace. Mismatches can occur if:
+- You manually override `Catalog_Namespace` to the wrong namespace
+- Your CI doesn't have a recognized suffix (defaults to prod)
+
+**Example 1 - Manual override error:**
+```
+❌ Workshop: Item 'summit-2026.lb1234.event' not found in babylon-catalog-prod.
+   Found in babylon-catalog-event instead. Remove Catalog_Namespace column 
+   to use auto-detection, or set it to babylon-catalog-event.
+```
+
+**Example 2 - Missing suffix:**
+```
+❌ Workshop: Item 'legacy-workshop-name' not found in babylon-catalog-prod.
+   Found in babylon-catalog-event instead. Add .event suffix to CI name, 
+   or set Catalog_Namespace=babylon-catalog-event in CSV.
+```
+
+**Troubleshooting Ghost Workshops:**
+
+1. **Check the catalog namespace** in your CSV or via auto-detection
+2. **Verify the catalog item exists**: `oc get catalogitem <CI> -n <namespace>`
+3. **Run dry-run mode** before deploying to catch namespace mismatches early
+4. **Clean up ghosts**: Delete stale WorkshopProvisions with `oc delete workshopprovision <name> -n <namespace>`
+
 ### Full header checklist
 
 ```
