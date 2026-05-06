@@ -28,7 +28,6 @@ interface CatalogItemSelectProps {
   label?: string;
   isRequired?: boolean;
   helperText?: string;
-  validated?: 'default' | 'success' | 'warning' | 'error';
   filterNamespace?: string; // e.g., "babylon-catalog-event"
 }
 
@@ -42,7 +41,6 @@ export function CatalogItemSelect({
   label = 'Catalog Item (CI)',
   isRequired = false,
   helperText,
-  validated = 'default',
   filterNamespace,
 }: CatalogItemSelectProps) {
   const [isOpen, setIsOpen] = useState(false);

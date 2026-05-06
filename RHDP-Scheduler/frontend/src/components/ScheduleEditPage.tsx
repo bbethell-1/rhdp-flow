@@ -47,6 +47,7 @@ import { api, clearApiCache } from '../services/api';
 import type { WorkshopSchedule, CatalogItemEntry, CatalogItemParameter } from '../types';
 import { createBlankWorkshopSchedule } from '../utils/scheduleDefaults';
 import { workshopSchedulesToCsv, downloadTextFile } from '../utils/scheduleCsv';
+import { CatalogItemSelect } from './CatalogItemSelect';
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -748,9 +749,14 @@ export function ScheduleEditPage({ showToast }: Props) {
                   <TextInput id="ci_name" value={s.ci_name} onChange={(_e, v) => patch(selectedIdx, { ci_name: v })} placeholder="Display name for this workshop" />
                   <FormHelperText><HelperText><HelperTextItem variant="indeterminate">Pick from the catalog above or type manually</HelperTextItem></HelperText></FormHelperText>
                 </FormGroup>
-                <FormGroup label="CI (Catalog Item ID)" fieldId="ci" isRequired>
-                  <TextInput id="ci" value={s.ci} onChange={(_e, v) => patch(selectedIdx, { ci: v })} validated={!s.ci.trim() ? 'error' : 'default'} placeholder="vendor.item.env" />
-                </FormGroup>
+                <CatalogItemSelect
+                  value={s.ci}
+                  onChange={(v) => patch(selectedIdx, { ci: v })}
+                  label="CI (Catalog Item ID)"
+                  isRequired
+                  helperText="Select from Babylon catalog or type to search"
+                  filterNamespace={s.catalog_namespace}
+                />
                 <FormGroup label="Namespace" fieldId="namespace" isRequired>
                   <TextInput id="namespace" value={s.namespace} onChange={(_e, v) => patch(selectedIdx, { namespace: v })} validated={!s.namespace.trim() ? 'error' : 'default'} placeholder="user-you-redhat-com" />
                 </FormGroup>

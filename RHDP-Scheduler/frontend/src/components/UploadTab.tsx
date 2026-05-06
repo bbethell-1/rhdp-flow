@@ -29,6 +29,7 @@ import InfoCircleIcon from '@patternfly/react-icons/dist/esm/icons/info-circle-i
 
 import { api } from '../services/api';
 import { DiffView } from './DiffView';
+import { CatalogItemSelect } from './CatalogItemSelect';
 import type { WorkshopSchedule, DeploymentResult, NumUsersViolation, UsersNotInCatalogAdvisory, ScheduleExampleMeta } from '../types';
 
 /* ── Schedule date validation helpers ── */
@@ -782,6 +783,7 @@ export const UploadTab: React.FC<Props> = ({
                 <Tr>
                   <Th />
                   <Th>CI Name</Th>
+                  <Th>CI (Catalog Item)</Th>
                   <Th>Workshop Name</Th>
                   <Th>Namespace</Th>
                   <Th>
@@ -822,12 +824,87 @@ export const UploadTab: React.FC<Props> = ({
                           onToggle: () => toggleExpanded(i),
                         }}
                       />
-                      <Td dataLabel="CI Name">{s.ci_name}</Td>
-                      <Td dataLabel="Workshop Name">{s.workshop_name}</Td>
-                      <Td dataLabel="Namespace">{s.namespace}</Td>
+                      <Td dataLabel="CI Name">
+                        <TextInput
+                          value={s.ci_name || ''}
+                          onChange={(_e, value) => {
+                            const updated = schedules.map((sc, idx) => idx === i ? { ...sc, ci_name: value } : sc);
+                            setSchedules(updated);
+                            api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
+                          }}
+                          placeholder="CI display name"
+                          style={{ minWidth: '150px' }}
+                          readOnly={rowEditsLocked}
+                        />
+                      </Td>
+                      <Td dataLabel="CI" style={{ minWidth: '280px' }}>
+                        <div style={{ width: '100%' }}>
+                          <CatalogItemSelect
+                            value={s.ci || ''}
+                            onChange={(value) => {
+                              const updated = schedules.map((sc, idx) => idx === i ? { ...sc, ci: value } : sc);
+                              setSchedules(updated);
+                              api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
+                            }}
+                            label=""
+                            helperText=""
+                            filterNamespace={s.catalog_namespace}
+                          />
+                        </div>
+                      </Td>
+                      <Td dataLabel="Workshop Name">
+                        <TextInput
+                          value={s.workshop_name || ''}
+                          onChange={(_e, value) => {
+                            const updated = schedules.map((sc, idx) => idx === i ? { ...sc, workshop_name: value } : sc);
+                            setSchedules(updated);
+                            api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
+                          }}
+                          placeholder="Workshop name"
+                          style={{ minWidth: '120px' }}
+                          readOnly={rowEditsLocked}
+                        />
+                      </Td>
+                      <Td dataLabel="Namespace">
+                        <TextInput
+                          value={s.namespace || ''}
+                          onChange={(_e, value) => {
+                            const updated = schedules.map((sc, idx) => idx === i ? { ...sc, namespace: value } : sc);
+                            setSchedules(updated);
+                            api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
+                          }}
+                          placeholder="user-example-redhat-com"
+                          style={{ minWidth: '180px' }}
+                          readOnly={rowEditsLocked}
+                        />
+                      </Td>
                       <Td dataLabel="Catalog Namespace">{s.catalog_namespace || '-'}</Td>
-                      <Td dataLabel="Users">{s.users ?? '-'}</Td>
-                      <Td dataLabel="Instances">{s.instances ?? '-'}</Td>
+                      <Td dataLabel="Users">
+                        <TextInput
+                          value={s.users?.toString() || ''}
+                          onChange={(_e, value) => {
+                            const updated = schedules.map((sc, idx) => idx === i ? { ...sc, users: value ? parseInt(value) : null } : sc);
+                            setSchedules(updated);
+                            api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
+                          }}
+                          type="number"
+                          style={{ width: '60px' }}
+                          readOnly={rowEditsLocked}
+                        />
+                      </Td>
+                      <Td dataLabel="Instances">
+                        <TextInput
+                          value={s.instances?.toString() || ''}
+                          onChange={(_e, value) => {
+                            const updated = schedules.map((sc, idx) => idx === i ? { ...sc, instances: value ? parseInt(value) : null } : sc);
+                            setSchedules(updated);
+                            api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
+                          }}
+                          type="number"
+                          style={{ width: '60px' }}
+                          readOnly={rowEditsLocked}
+                        />
+                      </Td>
                       <Td dataLabel="UI">{s.enable_workshop_interface ? 'Yes' : 'No'}</Td>
                       <Td dataLabel="Redirect">
                         <Switch
