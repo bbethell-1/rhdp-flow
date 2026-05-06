@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import {
   Alert,
   Button,
@@ -7,6 +7,7 @@ import {
   CardTitle,
   Divider,
   PageSection,
+  Label,
   Switch,
   FormSelect,
   FormSelectOption,
@@ -18,19 +19,13 @@ import {
   ToggleGroup,
   ToggleGroupItem,
   Tooltip,
-  Flex,
-  FlexItem,
 } from '@patternfly/react-core';
 import SearchIcon from '@patternfly/react-icons/dist/esm/icons/search-icon';
-import CheckCircleIcon from '@patternfly/react-icons/dist/esm/icons/check-circle-icon';
-import ExclamationCircleIcon from '@patternfly/react-icons/dist/esm/icons/exclamation-circle-icon';
-import ExclamationTriangleIcon from '@patternfly/react-icons/dist/esm/icons/exclamation-triangle-icon';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
 import { api } from '../services/api';
 import { AUTO_REFRESH_INTERVAL_MS, DEFAULT_PER_PAGE } from '../constants';
 import type { QAResult } from '../types';
-import { qaStatusCategory } from '../utils/statusColors';
 import { QAResultsTable } from './QAResultsTable';
 import { DestroyQASection } from './DestroyQASection';
 
@@ -40,9 +35,9 @@ interface Props {
   showToast: (msg: string, variant: 'success' | 'danger' | 'info') => void;
 }
 
-type SortableQAColumn = 'ci_name' | 'ci' | 'status' | 'namespace';
+type SortableQAColumn = 'ci_name' | 'ci' | 'status';
 
-type QAStatusFilter = 'all' | 'success' | 'warning' | 'failed';
+type QAStatusFilter = 'all' | 'verified' | 'failed';
 
 export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) => {
   const [qaType, setQaType] = useState<'1' | '2' | 'both'>('both');
@@ -55,12 +50,6 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [qaSearch, setQaSearch] = useState('');
   const [qaStatusFilter, setQaStatusFilter] = useState<QAStatusFilter>('all');
-  const [namespaces, setNamespaces] = useState<string[]>([]);
-  const [selectedNamespace, setSelectedNamespace] = useState<string>('');
-
-  useEffect(() => {
-    api.qaNamespaces().then(setNamespaces).catch(() => {});
-  }, []);
 
   const refreshQA = useCallback(async () => {
     try {
@@ -74,10 +63,7 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
   const handleRun = async () => {
     setRunning(true);
     try {
-      const data = await api.runQA({
-        type: qaType,
-        namespace: selectedNamespace || undefined,
-      });
+      const data = await api.runQA({ type: qaType });
       setQAResults(data.results);
       showToast(`QA complete: ${data.count} result(s)`, 'success');
     } catch (e) {
@@ -101,27 +87,13 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
     }
   };
 
-  // --- Summary counts ---
-  const summary = useMemo(() => {
-    let success = 0, warning = 0, danger = 0;
-    for (const r of qaResults) {
-      const cat = qaStatusCategory(r.status);
-      if (cat === 'success') success++;
-      else if (cat === 'warning') warning++;
-      else danger++;
-    }
-    return { total: qaResults.length, success, warning, danger };
-  }, [qaResults]);
-
-  // --- Filtering ---
   const filteredQAResults = useMemo(() => {
     let filtered = qaResults;
     if (qaStatusFilter !== 'all') {
       filtered = filtered.filter(r => {
-        const cat = qaStatusCategory(r.status);
-        if (qaStatusFilter === 'success') return cat === 'success';
-        if (qaStatusFilter === 'warning') return cat === 'warning';
-        return cat === 'danger' || cat === 'unknown';
+        const s = (r.status || '').toLowerCase();
+        if (qaStatusFilter === 'verified') return s.includes('verified') && !s.includes('unverified');
+        return s.includes('failed') || s.includes('error');
       });
     }
     if (qaSearch) {
@@ -142,7 +114,7 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
     : `QA Results (${qaResults.length})`;
 
   const handleDownloadFilteredCSV = () => {
-    const headers = ['CI Name', 'Namespace', 'CI', 'Status', 'Deployed', 'Healthy', 'Expected Seats', 'Actual Seats', 'Issues', 'Landing Page URL'];
+    const headers = ['CI Name', 'Namespace', 'CI', 'Status', 'Deployed', 'Healthy', 'Expected Seats', 'Actual Seats', 'Landing Page URL'];
     const rows = filteredQAResults.map(r => {
       const rec = r as QAResult & { expected_seats?: unknown; actual_seats?: unknown; actual_users?: unknown };
       const deployedYes = String(r.deployed || '').trim().toLowerCase() === 'yes';
@@ -155,9 +127,7 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
       }
       return [
         r.ci_name, r.namespace || '', r.ci, r.status, r.deployed,
-        String(r.healthy ?? ''), expCsv, actCsv,
-        String(r.issues ?? ''),
-        r.landing_page_url || '',
+        String(r.healthy ?? ''), expCsv, actCsv, r.landing_page_url || '',
       ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
     });
     const csv = [headers.join(','), ...rows].join('\n');
@@ -172,123 +142,61 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
 
   return (
     <PageSection>
+      {/* QA guidance */}
       <Alert variant="info" isInline isPlain title="When to use QA" style={{ marginBottom: 16 }}>
         Run QA checks after deploying workshops to verify they were created correctly and are healthy.
-        <strong> QA1</strong> verifies configuration immediately after deployment.
-        <strong> QA2</strong> checks health and collects student landing page URLs (run 10-30 min after deploy).
+        <strong> QA1</strong> should be run immediately after deployment to confirm configuration.
+        <strong> QA2</strong> should be run once workshops have had time to provision (typically 10-30 min) to verify health and collect student landing page URLs.
       </Alert>
 
-      {/* Controls row */}
-      <Split hasGutter style={{ marginBottom: 16, alignItems: 'flex-end' }}>
+      {/* QA type selector + run controls */}
+      <Split hasGutter style={{ marginBottom: 16, alignItems: 'flex-start' }}>
         <SplitItem>
-          <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: 4 }}>QA Type</div>
-          <FormSelect
-            value={qaType}
-            onChange={(_e, val) => setQaType(val as '1' | '2' | 'both')}
-            aria-label="QA type"
-            className="qa-type-select"
-            style={{ width: 200 }}
-          >
-            <FormSelectOption value="1" label="QA1 - Verify Setup" />
-            <FormSelectOption value="2" label="QA2 - Deployment" />
-            <FormSelectOption value="both" label="Both (recommended)" />
-          </FormSelect>
-        </SplitItem>
-        {namespaces.length > 1 && (
-          <SplitItem>
-            <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: 4 }}>Namespace</div>
+          <div>
             <FormSelect
-              value={selectedNamespace}
-              onChange={(_e, val) => setSelectedNamespace(val)}
-              aria-label="QA namespace"
-              style={{ width: 240 }}
+              value={qaType}
+              onChange={(_e, val) => setQaType(val as '1' | '2' | 'both')}
+              aria-label="QA type"
+              className="qa-type-select"
+              style={{ width: 220 }}
             >
-              <FormSelectOption value="" label={`All namespaces (${namespaces.length})`} />
-              {namespaces.map(ns => (
-                <FormSelectOption key={ns} value={ns} label={ns} />
-              ))}
+              <FormSelectOption value="1" label="QA1 - Verify Setup" />
+              <FormSelectOption value="2" label="QA2 - Verify Deployment" />
+              <FormSelectOption value="both" label="Both" />
             </FormSelect>
-          </SplitItem>
-        )}
+            <p className="qa-type-hint">
+              {qaType === '1' && 'Compares live workshops against your CSV schedule — checks dates, user counts, and configuration match what you uploaded.'}
+              {qaType === '2' && 'Checks that workshops are actually provisioned and healthy, verifies seat counts, and retrieves student landing page URLs.'}
+              {qaType === 'both' && 'Runs setup verification and deployment checks; the table shows one row per workshop (deployment results when both apply).'}
+            </p>
+          </div>
+        </SplitItem>
         <SplitItem>
-          <Button variant="primary" onClick={handleRun} isDisabled={running} isLoading={running} style={{ marginTop: 20 }}>
+          <Button variant="primary" onClick={handleRun} isDisabled={running} isLoading={running}>
             Run QA
           </Button>
         </SplitItem>
         <SplitItem>
-          <Button variant="secondary" onClick={handleRefresh} isLoading={refreshing} isDisabled={refreshing} style={{ marginTop: 20 }}>
-            Refresh
-          </Button>
+          <Button variant="secondary" onClick={handleRefresh} isLoading={refreshing} isDisabled={refreshing}>Refresh</Button>
         </SplitItem>
-        <SplitItem isFilled />
         <SplitItem>
           <Tooltip content="Automatically poll for updated QA results every 15 seconds">
             <Switch
               id="qa-auto-refresh"
-              label="Auto-refresh"
+              label="Auto-refresh (15s)"
               isChecked={autoRefresh}
               onChange={(_e, checked) => setAutoRefresh(checked)}
             />
           </Tooltip>
         </SplitItem>
+        {qaResults.length > 0 && (
+          <SplitItem>
+            <Label color="blue">{qaResults.length} result(s)</Label>
+          </SplitItem>
+        )}
       </Split>
 
-      {/* QA type hint */}
-      <p className="qa-type-hint" style={{ marginBottom: 16, fontSize: '0.85rem', opacity: 0.7 }}>
-        {qaType === '1' && 'Compares live workshops against your CSV schedule — checks dates, user counts, and configuration.'}
-        {qaType === '2' && 'Checks that workshops are provisioned, healthy, verifies seat counts, and retrieves student URLs.'}
-        {qaType === 'both' && 'Runs setup verification then deployment checks; shows one merged row per workshop.'}
-      </p>
-
-      {/* Summary cards */}
-      {qaResults.length > 0 && (
-        <Flex style={{ marginBottom: 16, gap: 12 }}>
-          <FlexItem>
-            <Card isCompact style={{ minWidth: 120, textAlign: 'center' }}>
-              <CardBody style={{ padding: '12px 16px' }}>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700 }}>{summary.total}</div>
-                <div style={{ fontSize: '0.8rem', opacity: 0.7 }}>Total</div>
-              </CardBody>
-            </Card>
-          </FlexItem>
-          <FlexItem>
-            <Card isCompact style={{ minWidth: 120, textAlign: 'center', borderLeft: '3px solid var(--pf-t--global--color--status--success--default)' }}>
-              <CardBody style={{ padding: '12px 16px' }}>
-                <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--pf-t--global--color--status--success--default)' }}>
-                  <CheckCircleIcon style={{ marginRight: 4, verticalAlign: 'middle' }} />{summary.success}
-                </div>
-                <div style={{ fontSize: '0.8rem', opacity: 0.7 }}>Passed</div>
-              </CardBody>
-            </Card>
-          </FlexItem>
-          {summary.warning > 0 && (
-            <FlexItem>
-              <Card isCompact style={{ minWidth: 120, textAlign: 'center', borderLeft: '3px solid var(--pf-t--global--color--status--warning--default)' }}>
-                <CardBody style={{ padding: '12px 16px' }}>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--pf-t--global--color--status--warning--default)' }}>
-                    <ExclamationTriangleIcon style={{ marginRight: 4, verticalAlign: 'middle' }} />{summary.warning}
-                  </div>
-                  <div style={{ fontSize: '0.8rem', opacity: 0.7 }}>Warning</div>
-                </CardBody>
-              </Card>
-            </FlexItem>
-          )}
-          {summary.danger > 0 && (
-            <FlexItem>
-              <Card isCompact style={{ minWidth: 120, textAlign: 'center', borderLeft: '3px solid var(--pf-t--global--color--status--danger--default)' }}>
-                <CardBody style={{ padding: '12px 16px' }}>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--pf-t--global--color--status--danger--default)' }}>
-                    <ExclamationCircleIcon style={{ marginRight: 4, verticalAlign: 'middle' }} />{summary.danger}
-                  </div>
-                  <div style={{ fontSize: '0.8rem', opacity: 0.7 }}>Failed</div>
-                </CardBody>
-              </Card>
-            </FlexItem>
-          )}
-        </Flex>
-      )}
-
-      {/* Toolbar: search + filter + CSV download */}
+      {/* QA search + status filter toolbar */}
       {qaResults.length > 0 && (
         <Split hasGutter style={{ marginBottom: 16, alignItems: 'center' }}>
           <SplitItem>
@@ -309,17 +217,14 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
           <SplitItem>
             <ToggleGroup aria-label="QA status filter">
               <ToggleGroupItem buttonId="qa-filter-all" text="All" isSelected={qaStatusFilter === 'all'} onChange={() => { setQaStatusFilter('all'); setPage(1); }} />
-              <ToggleGroupItem buttonId="qa-filter-success" text={`Passed${summary.success ? ` (${summary.success})` : ''}`} isSelected={qaStatusFilter === 'success'} onChange={() => { setQaStatusFilter('success'); setPage(1); }} />
-              {summary.warning > 0 && (
-                <ToggleGroupItem buttonId="qa-filter-warning" text={`Warning (${summary.warning})`} isSelected={qaStatusFilter === 'warning'} onChange={() => { setQaStatusFilter('warning'); setPage(1); }} />
-              )}
-              <ToggleGroupItem buttonId="qa-filter-failed" text={`Failed${summary.danger ? ` (${summary.danger})` : ''}`} isSelected={qaStatusFilter === 'failed'} onChange={() => { setQaStatusFilter('failed'); setPage(1); }} />
+              <ToggleGroupItem buttonId="qa-filter-verified" text="Verified" isSelected={qaStatusFilter === 'verified'} onChange={() => { setQaStatusFilter('verified'); setPage(1); }} />
+              <ToggleGroupItem buttonId="qa-filter-failed" text="Failed" isSelected={qaStatusFilter === 'failed'} onChange={() => { setQaStatusFilter('failed'); setPage(1); }} />
             </ToggleGroup>
           </SplitItem>
         </Split>
       )}
 
-      {/* Empty state: QA type explanation cards */}
+      {/* QA type explanation cards */}
       {qaResults.length === 0 && (
         <div className="ops-grid" style={{ marginBottom: 16 }}>
           <Card isCompact>
@@ -373,6 +278,7 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
         </EmptyState>
       )}
 
+      {/* Destroy QA section */}
       <Divider style={{ margin: '24px 0' }} />
       <DestroyQASection showToast={showToast} />
     </PageSection>
