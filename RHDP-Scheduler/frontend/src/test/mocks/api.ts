@@ -51,6 +51,7 @@ export const mockSchedule: WorkshopSchedule = {
   count: null,
   white_glove: true,
   redirect: true,
+  catalog_namespace: 'babylon-catalog-prod',
   showroom_repo: '',
   showroom_ref: '',
   showroom_novnc: false,

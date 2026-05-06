@@ -25,6 +25,7 @@ import {
 import { Table, Thead, Tbody, Tr, Th, Td, ExpandableRowContent } from '@patternfly/react-table';
 import UploadIcon from '@patternfly/react-icons/dist/esm/icons/upload-icon';
 import TrashIcon from '@patternfly/react-icons/dist/esm/icons/trash-icon';
+import InfoCircleIcon from '@patternfly/react-icons/dist/esm/icons/info-circle-icon';
 
 import { api } from '../services/api';
 import { DiffView } from './DiffView';
@@ -738,6 +739,23 @@ export const UploadTab: React.FC<Props> = ({
                   <Th>CI</Th>
                   <Th>Workshop Name</Th>
                   <Th>Namespace</Th>
+                  <Th>
+                    Catalog Namespace{' '}
+                    <Tooltip
+                      content={
+                        <div>
+                          Auto-detected from CI suffix:<br />
+                          • .event → babylon-catalog-event<br />
+                          • .prod → babylon-catalog-prod<br />
+                          • .dev → babylon-catalog-dev<br />
+                          • (no suffix) → babylon-catalog-prod (default)<br />
+                          Override via CSV Catalog_Namespace column.
+                        </div>
+                      }
+                    >
+                      <InfoCircleIcon style={{ color: 'var(--pf-v6-global--info-color--100)', cursor: 'help' }} />
+                    </Tooltip>
+                  </Th>
                   <Th>Users</Th>
                   <Th>Instances</Th>
                   <Th>UI</Th>
@@ -763,6 +781,7 @@ export const UploadTab: React.FC<Props> = ({
                       <Td dataLabel="CI">{s.ci}</Td>
                       <Td dataLabel="Workshop Name">{s.workshop_name}</Td>
                       <Td dataLabel="Namespace">{s.namespace}</Td>
+                      <Td dataLabel="Catalog Namespace">{s.catalog_namespace || '-'}</Td>
                       <Td dataLabel="Users">{s.users ?? '-'}</Td>
                       <Td dataLabel="Instances">{s.instances ?? '-'}</Td>
                       <Td dataLabel="UI">{s.enable_workshop_interface ? 'Yes' : 'No'}</Td>
