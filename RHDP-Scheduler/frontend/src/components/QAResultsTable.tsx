@@ -1,7 +1,8 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Pagination,
   Title,
+  ExpandableSection,
 } from '@patternfly/react-core';
 import { Table, Thead, Tbody, Tr, Th, Td, ThProps } from '@patternfly/react-table';
 
@@ -50,7 +51,8 @@ export const QAResultsTable: React.FC<{
   setSortBy: (c: SortableQAColumn) => void;
   sortDir: 'asc' | 'desc';
   setSortDir: (d: 'asc' | 'desc') => void;
-}> = ({ qaResults, title, page, setPage, perPage, setPerPage, sortBy, setSortBy, sortDir, setSortDir }) => {
+  groupByNamespace?: boolean;
+}> = ({ qaResults, title, page, setPage, perPage, setPerPage, sortBy, setSortBy, sortDir, setSortDir, groupByNamespace = false }) => {
   const sorted = useMemo(() => {
     if (!sortBy) return qaResults;
     return [...qaResults].sort((a, b) => {
@@ -66,6 +68,31 @@ export const QAResultsTable: React.FC<{
     return sorted.slice(start, start + perPage);
   }, [sorted, page, perPage]);
 
+  // Group results by namespace
+  const groupedByNamespace = useMemo(() => {
+    const groups: Record<string, QAResult[]> = {};
+    for (const result of sorted) {
+      const ns = result.namespace || '(no namespace)';
+      if (!groups[ns]) groups[ns] = [];
+      groups[ns].push(result);
+    }
+    return groups;
+  }, [sorted]);
+
+  const [expandedNamespaces, setExpandedNamespaces] = useState<Set<string>>(new Set(Object.keys(groupedByNamespace)));
+
+  const toggleNamespace = (ns: string) => {
+    setExpandedNamespaces(prev => {
+      const next = new Set(prev);
+      if (next.has(ns)) {
+        next.delete(ns);
+      } else {
+        next.add(ns);
+      }
+      return next;
+    });
+  };
+
   const getSortParams = (col: SortableQAColumn): ThProps['sort'] => ({
     sortBy: sortBy === col ? { index: 0, direction: sortDir } : { index: 0, direction: 'asc', defaultDirection: 'asc' },
     onSort: () => {
@@ -80,47 +107,84 @@ export const QAResultsTable: React.FC<{
     columnIndex: 0,
   });
 
+  const renderTableRow = (r: QAResult) => (
+    <Tr key={`${r.ci_name}-${r.ci}-${r.namespace}`}>
+      <Td dataLabel="CI Name">
+        <div>{r.ci_name}</div>
+        <div className="qa-ci-meta" title={r.ci}>{r.ci}</div>
+      </Td>
+      {!groupByNamespace && <Td dataLabel="Namespace">{r.namespace || '-'}</Td>}
+      <Td dataLabel="Status"><span className={statusColorClass(r.status)}>{(() => { const Icon = statusIcon(r.status); return Icon ? <Icon style={{ marginRight: 4 }} /> : null; })()}{r.status}</span></Td>
+      <Td dataLabel="Deployed">{r.deployed || '-'}</Td>
+      <Td dataLabel="Healthy"><span className={healthyColorClass(r.healthy)}>{healthyDisplay(r.healthy)}</span></Td>
+      <Td dataLabel="Seats">{seatsDisplay(r)}</Td>
+      <Td dataLabel="Landing Page URL">
+        {r.landing_page_url ? (
+          <a href={r.landing_page_url} target="_blank" rel="noopener noreferrer" className="cell-truncate" title={r.landing_page_url}>
+            {r.landing_page_url}
+          </a>
+        ) : '-'}
+      </Td>
+    </Tr>
+  );
+
   return (
     <>
       <Title headingLevel="h3" style={{ marginBottom: 8 }}>{title}</Title>
-      <div className="table-sticky-wrapper">
-      <Table aria-label="QA results" variant="compact" className="fixed-table" isStickyHeader>
-        <Thead>
-          <Tr>
-            <Th sort={getSortParams('ci_name')} info={{ tooltip: 'Catalog Item display name' }}>CI Name</Th>
-            <Th info={{ tooltip: 'Namespace checked during QA' }}>Namespace</Th>
-            <Th sort={getSortParams('status')} info={{ tooltip: 'QA verification result: verified or failed' }}>Status</Th>
-            <Th info={{ tooltip: 'Whether the workshop was successfully deployed and running' }}>Deployed</Th>
-            <Th info={{ tooltip: 'Whether the deployed workshop passed health checks' }}>Healthy</Th>
-            <Th info={{ tooltip: 'Expected from CSV / actual provisioned seats when deployed (— for actual if not deployed yet)' }}>Seats</Th>
-            <Th info={{ tooltip: 'Student-facing URL for accessing the workshop — also available in the Students tab' }}>Landing Page URL</Th>
-          </Tr>
-        </Thead>
-        <Tbody>
-          {paginated.map((r) => (
-            <Tr key={`${r.ci_name}-${r.ci}`}>
-              <Td dataLabel="CI Name">
-                <div>{r.ci_name}</div>
-                <div className="qa-ci-meta" title={r.ci}>{r.ci}</div>
-              </Td>
-              <Td dataLabel="Namespace">{r.namespace || '-'}</Td>
-              <Td dataLabel="Status"><span className={statusColorClass(r.status)}>{(() => { const Icon = statusIcon(r.status); return Icon ? <Icon style={{ marginRight: 4 }} /> : null; })()}{r.status}</span></Td>
-              <Td dataLabel="Deployed">{r.deployed || '-'}</Td>
-              <Td dataLabel="Healthy"><span className={healthyColorClass(r.healthy)}>{healthyDisplay(r.healthy)}</span></Td>
-              <Td dataLabel="Seats">{seatsDisplay(r)}</Td>
-              <Td dataLabel="Landing Page URL">
-                {r.landing_page_url ? (
-                  <a href={r.landing_page_url} target="_blank" rel="noopener noreferrer" className="cell-truncate" title={r.landing_page_url}>
-                    {r.landing_page_url}
-                  </a>
-                ) : '-'}
-              </Td>
-            </Tr>
+
+      {groupByNamespace ? (
+        // Grouped by namespace view
+        <>
+          {Object.entries(groupedByNamespace).map(([ns, results]) => (
+            <ExpandableSection
+              key={ns}
+              toggleText={`${ns} (${results.length} ${results.length === 1 ? 'workshop' : 'workshops'})`}
+              isExpanded={expandedNamespaces.has(ns)}
+              onToggle={() => toggleNamespace(ns)}
+              style={{ marginBottom: 16 }}
+            >
+              <div className="table-sticky-wrapper">
+                <Table aria-label={`QA results for ${ns}`} variant="compact" className="fixed-table">
+                  <Thead>
+                    <Tr>
+                      <Th sort={getSortParams('ci_name')} info={{ tooltip: 'Catalog Item display name' }}>CI Name</Th>
+                      <Th sort={getSortParams('status')} info={{ tooltip: 'QA verification result: verified or failed' }}>Status</Th>
+                      <Th info={{ tooltip: 'Whether the workshop was successfully deployed and running' }}>Deployed</Th>
+                      <Th info={{ tooltip: 'Whether the deployed workshop passed health checks' }}>Healthy</Th>
+                      <Th info={{ tooltip: 'Expected from CSV / actual provisioned seats when deployed (— for actual if not deployed yet)' }}>Seats</Th>
+                      <Th info={{ tooltip: 'Student-facing URL for accessing the workshop — also available in the Students tab' }}>Landing Page URL</Th>
+                    </Tr>
+                  </Thead>
+                  <Tbody>
+                    {results.map(renderTableRow)}
+                  </Tbody>
+                </Table>
+              </div>
+            </ExpandableSection>
           ))}
-        </Tbody>
-      </Table>
-      </div>
-      {sorted.length > perPage && (
+        </>
+      ) : (
+        // Flat view with pagination
+        <div className="table-sticky-wrapper">
+          <Table aria-label="QA results" variant="compact" className="fixed-table" isStickyHeader>
+            <Thead>
+              <Tr>
+                <Th sort={getSortParams('ci_name')} info={{ tooltip: 'Catalog Item display name' }}>CI Name</Th>
+                <Th info={{ tooltip: 'Namespace checked during QA' }}>Namespace</Th>
+                <Th sort={getSortParams('status')} info={{ tooltip: 'QA verification result: verified or failed' }}>Status</Th>
+                <Th info={{ tooltip: 'Whether the workshop was successfully deployed and running' }}>Deployed</Th>
+                <Th info={{ tooltip: 'Whether the deployed workshop passed health checks' }}>Healthy</Th>
+                <Th info={{ tooltip: 'Expected from CSV / actual provisioned seats when deployed (— for actual if not deployed yet)' }}>Seats</Th>
+                <Th info={{ tooltip: 'Student-facing URL for accessing the workshop — also available in the Students tab' }}>Landing Page URL</Th>
+              </Tr>
+            </Thead>
+            <Tbody>
+              {paginated.map(renderTableRow)}
+            </Tbody>
+          </Table>
+        </div>
+      )}
+      {!groupByNamespace && sorted.length > perPage && (
         <Pagination
           itemCount={sorted.length}
           perPage={perPage}

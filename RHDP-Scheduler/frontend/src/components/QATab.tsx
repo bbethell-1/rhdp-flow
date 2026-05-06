@@ -44,6 +44,7 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
   const [running, setRunning] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
+  const [groupByNamespace, setGroupByNamespace] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const [sortBy, setSortBy] = useState<SortableQAColumn | null>('ci_name');
@@ -191,6 +192,18 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
         </SplitItem>
         {qaResults.length > 0 && (
           <SplitItem>
+            <Tooltip content="Group results by namespace with collapsible sections">
+              <Switch
+                id="qa-group-by-namespace"
+                label="Group by Namespace"
+                isChecked={groupByNamespace}
+                onChange={(_e, checked) => setGroupByNamespace(checked)}
+              />
+            </Tooltip>
+          </SplitItem>
+        )}
+        {qaResults.length > 0 && (
+          <SplitItem>
             <Label color="blue">{qaResults.length} result(s)</Label>
           </SplitItem>
         )}
@@ -271,6 +284,7 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
           setSortBy={setSortBy}
           sortDir={sortDir}
           setSortDir={setSortDir}
+          groupByNamespace={groupByNamespace}
         />
       ) : (
         <EmptyState titleText="No QA results yet" headingLevel="h3" icon={SearchIcon}>
