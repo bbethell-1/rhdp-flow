@@ -780,7 +780,6 @@ export const UploadTab: React.FC<Props> = ({
                 <Tr>
                   <Th />
                   <Th>CI Name</Th>
-                  <Th>CI</Th>
                   <Th>Workshop Name</Th>
                   <Th>Namespace</Th>
                   <Th>
@@ -822,7 +821,6 @@ export const UploadTab: React.FC<Props> = ({
                         }}
                       />
                       <Td dataLabel="CI Name">{s.ci_name}</Td>
-                      <Td dataLabel="CI">{s.ci}</Td>
                       <Td dataLabel="Workshop Name">{s.workshop_name}</Td>
                       <Td dataLabel="Namespace">{s.namespace}</Td>
                       <Td dataLabel="Catalog Namespace">{s.catalog_namespace || '-'}</Td>

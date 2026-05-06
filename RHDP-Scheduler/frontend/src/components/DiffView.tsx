@@ -85,7 +85,6 @@ export const DiffView: React.FC<Props> = ({ hasSchedules, showToast }) => {
                 <Tr>
                   <Th>Change</Th>
                   <Th>CI Name</Th>
-                  <Th>CI</Th>
                   <Th>Namespace</Th>
                   <Th>Details</Th>
                 </Tr>
@@ -95,7 +94,6 @@ export const DiffView: React.FC<Props> = ({ hasSchedules, showToast }) => {
                   <Tr key={`a-${i}`} className="diff-added">
                     <Td><span className="status-verified">Added</span></Td>
                     <Td>{e.ci_name}</Td>
-                    <Td>{e.ci}</Td>
                     <Td>{e.namespace}</Td>
                     <Td>{e.details}</Td>
                   </Tr>
@@ -104,7 +102,6 @@ export const DiffView: React.FC<Props> = ({ hasSchedules, showToast }) => {
                   <Tr key={`r-${i}`} className="diff-removed">
                     <Td><span className="status-failed">Removed</span></Td>
                     <Td>{e.ci_name}</Td>
-                    <Td>{e.ci}</Td>
                     <Td>{e.namespace}</Td>
                     <Td>{e.details}</Td>
                   </Tr>
@@ -113,7 +110,6 @@ export const DiffView: React.FC<Props> = ({ hasSchedules, showToast }) => {
                   <Tr key={`c-${i}`} className="diff-changed">
                     <Td><span className="status-deployed_unverified">Changed</span></Td>
                     <Td>{e.ci_name}</Td>
-                    <Td>{e.ci}</Td>
                     <Td>{e.namespace}</Td>
                     <Td style={{ fontSize: '0.82rem', fontFamily: 'monospace' }}>{e.details}</Td>
                   </Tr>
