@@ -428,10 +428,7 @@ export const UploadTab: React.FC<Props> = ({
     setShowDeployConfirm(false);
 
     if (schedules.length === 0) { showToast('Upload a CSV first', 'danger'); return; }
-    if (!dryRun && numUsersViolations.length > 0) {
-      showToast('Deploy blocked: one or more schedules exceed the catalog num_users limit', 'danger');
-      return;
-    }
+    // Blocking issues are now shown in confirmation modal with disabled deploy button
     setDeploying(true);
     setDeployPaused(false);
     setProgress(0);
@@ -1116,7 +1113,7 @@ export const UploadTab: React.FC<Props> = ({
 
       {/* Deploy confirmation modal (live mode only) */}
       <Modal
-        variant="small"
+        variant="medium"
         isOpen={showDeployConfirm}
         onClose={() => setShowDeployConfirm(false)}
         aria-labelledby="deploy-confirm-title"
@@ -1127,15 +1124,81 @@ export const UploadTab: React.FC<Props> = ({
             You are about to run a <strong>live deployment</strong> for {schedules.length} schedule(s).
             This will provision real resources.
           </p>
-          {warnings.length > 0 && (
-            <Alert variant="warning" isInline isPlain title={`${warnings.length} unresolved warning(s)`} style={{ margin: '12px 0' }}>
-              Review the warnings on the schedule preview before deploying.
+
+          {/* BLOCKING ISSUES */}
+          {(numUsersViolations.length > 0 || catalogNotFound.length > 0) && (
+            <Alert variant="danger" isInline title="Deployment blocked" style={{ margin: '12px 0' }}>
+              <p style={{ marginBottom: 8 }}>The following issues must be resolved before deployment:</p>
+              {numUsersViolations.length > 0 && (
+                <div style={{ marginBottom: 8 }}>
+                  <strong>• num_users exceeds catalog maximum ({numUsersViolations.length}):</strong>
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+                    {numUsersViolations.slice(0, 3).map((v, i) => (
+                      <li key={i}>{v.ci_name}: {v.requested_users} users requested, max is {v.maximum}</li>
+                    ))}
+                    {numUsersViolations.length > 3 && <li>... and {numUsersViolations.length - 3} more</li>}
+                  </ul>
+                </div>
+              )}
+              {catalogNotFound.length > 0 && (
+                <div>
+                  <strong>• Catalog items not found ({catalogNotFound.length}):</strong>
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+                    {catalogNotFound.slice(0, 3).map((nf, i) => (
+                      <li key={i}>{nf.ci_name} ({nf.ci})</li>
+                    ))}
+                    {catalogNotFound.length > 3 && <li>... and {catalogNotFound.length - 3} more</li>}
+                  </ul>
+                </div>
+              )}
             </Alert>
           )}
-          <div style={{ marginTop: 12, fontSize: '0.85rem', maxHeight: 200, overflowY: 'auto' }}>
+
+          {/* WARNINGS (non-blocking) */}
+          {(catalogNamespaceMismatches.length > 0 || usersNotInCatalog.filter(a => a.severity === 'high').length > 0 || warnings.length > 0) && (
+            <Alert variant="warning" isInline title="Warnings detected" style={{ margin: '12px 0' }}>
+              <p style={{ marginBottom: 8 }}>Review these issues before deploying:</p>
+              {catalogNamespaceMismatches.length > 0 && (
+                <div style={{ marginBottom: 8 }}>
+                  <strong>• Catalog namespace mismatches ({catalogNamespaceMismatches.length}):</strong>
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+                    {catalogNamespaceMismatches.slice(0, 2).map((m, i) => (
+                      <li key={i}>{m.ci_name}: expected {m.expected_catalog_namespace}, found in {m.found_catalog_namespace}</li>
+                    ))}
+                    {catalogNamespaceMismatches.length > 2 && <li>... and {catalogNamespaceMismatches.length - 2} more (may create ghost workshops)</li>}
+                  </ul>
+                </div>
+              )}
+              {usersNotInCatalog.filter(a => a.severity === 'high').length > 0 && (
+                <div style={{ marginBottom: 8 }}>
+                  <strong>• High-severity Users/Instances issues ({usersNotInCatalog.filter(a => a.severity === 'high').length}):</strong>
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+                    {usersNotInCatalog.filter(a => a.severity === 'high').slice(0, 2).map((a, i) => (
+                      <li key={i}>{a.ci_name}: {a.message}</li>
+                    ))}
+                    {usersNotInCatalog.filter(a => a.severity === 'high').length > 2 && <li>... and {usersNotInCatalog.filter(a => a.severity === 'high').length - 2} more</li>}
+                  </ul>
+                </div>
+              )}
+              {warnings.length > 0 && (
+                <div>
+                  <strong>• Date/configuration warnings ({warnings.length}):</strong> Check schedule preview for details
+                </div>
+              )}
+            </Alert>
+          )}
+
+          {/* SUCCESS STATE - no issues */}
+          {numUsersViolations.length === 0 && catalogNotFound.length === 0 && catalogNamespaceMismatches.length === 0 && usersNotInCatalog.filter(a => a.severity === 'high').length === 0 && warnings.length === 0 && (
+            <Alert variant="success" isInline title="Pre-deployment checks passed" style={{ margin: '12px 0' }}>
+              No blocking issues or warnings detected. Ready to deploy.
+            </Alert>
+          )}
+
+          <div style={{ marginTop: 12, fontSize: '0.85rem', maxHeight: 150, overflowY: 'auto' }}>
             <strong>Schedules to deploy:</strong>
             <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
-              {schedules.map((s) => (
+              {schedules.slice(0, 10).map((s) => (
                 <li key={`${s.ci}-${s.namespace}`}>
                   <strong>{s.ci_name}</strong> — {s.ci} in {s.namespace}
                   {s.instances != null && ` (${s.instances} instances)`}
@@ -1143,11 +1206,18 @@ export const UploadTab: React.FC<Props> = ({
                   {s.is_multi_asset && ' [multi-asset]'}
                 </li>
               ))}
+              {schedules.length > 10 && <li>... and {schedules.length - 10} more</li>}
             </ul>
           </div>
         </ModalBody>
         <ModalFooter>
-          <Button variant="danger" onClick={handleDeploy}>Deploy Now</Button>
+          <Button
+            variant="danger"
+            onClick={handleDeploy}
+            isDisabled={numUsersViolations.length > 0 || catalogNotFound.length > 0}
+          >
+            {numUsersViolations.length > 0 || catalogNotFound.length > 0 ? 'Cannot Deploy (blocked)' : 'Deploy Now'}
+          </Button>
           <Button variant="link" onClick={() => setShowDeployConfirm(false)}>Cancel</Button>
         </ModalFooter>
       </Modal>

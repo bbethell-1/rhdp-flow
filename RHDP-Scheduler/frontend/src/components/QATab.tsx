@@ -19,6 +19,7 @@ import {
   ToggleGroup,
   ToggleGroupItem,
   Tooltip,
+  FileUpload,
 } from '@patternfly/react-core';
 import SearchIcon from '@patternfly/react-icons/dist/esm/icons/search-icon';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
@@ -45,6 +46,8 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
   const [refreshing, setRefreshing] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [groupByNamespace, setGroupByNamespace] = useState(false);
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvUploading, setCsvUploading] = useState(false);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(DEFAULT_PER_PAGE);
   const [sortBy, setSortBy] = useState<SortableQAColumn | null>('ci_name');
@@ -85,6 +88,53 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
       showToast(`Refresh failed: ${e}`, 'danger');
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const handleCsvUpload = async (file: File | null) => {
+    if (!file) {
+      setCsvFile(null);
+      return;
+    }
+    setCsvFile(file);
+    setCsvUploading(true);
+    try {
+      // Parse CSV to extract namespaces
+      const text = await file.text();
+      const lines = text.split('\n').filter(l => l.trim());
+      if (lines.length < 2) {
+        showToast('CSV must have header and at least one row', 'danger');
+        setCsvUploading(false);
+        return;
+      }
+      const headers = lines[0].toLowerCase().split(',').map(h => h.trim());
+      const nsIdx = headers.indexOf('namespace');
+      if (nsIdx === -1) {
+        showToast('CSV must have a "Namespace" column', 'danger');
+        setCsvUploading(false);
+        return;
+      }
+      const namespaces = Array.from(new Set(
+        lines.slice(1).map(line => {
+          const cells = line.split(',');
+          return cells[nsIdx]?.trim();
+        }).filter(ns => ns && ns.length > 0)
+      ));
+
+      if (namespaces.length === 0) {
+        showToast('No valid namespaces found in CSV', 'danger');
+        setCsvUploading(false);
+        return;
+      }
+
+      // Run QA against extracted namespaces
+      const data = await api.runQA({ type: qaType, namespaces });
+      setQAResults(data.results);
+      showToast(`QA complete from CSV: ${data.count} result(s) across ${namespaces.length} namespace(s)`, 'success');
+    } catch (e) {
+      showToast(`CSV QA failed: ${e}`, 'danger');
+    } finally {
+      setCsvUploading(false);
     }
   };
 
@@ -208,6 +258,38 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
           </SplitItem>
         )}
       </Split>
+
+      {/* CSV Upload for ad-hoc QA */}
+      <Card isCompact style={{ marginBottom: 16 }}>
+        <CardBody>
+          <Split hasGutter style={{ alignItems: 'center' }}>
+            <SplitItem>
+              <strong>Or run QA from CSV:</strong>
+            </SplitItem>
+            <SplitItem style={{ flexGrow: 1, maxWidth: 400 }}>
+              <FileUpload
+                id="qa-csv-upload"
+                type="text"
+                value={csvFile || undefined}
+                filename={csvFile?.name || ''}
+                filenamePlaceholder="Upload CSV to extract namespaces"
+                onFileInputChange={(_e, file) => handleCsvUpload(file)}
+                onClearClick={() => {
+                  setCsvFile(null);
+                }}
+                isLoading={csvUploading}
+                browseButtonText="Browse..."
+                clearButtonText="Clear"
+              />
+            </SplitItem>
+            <SplitItem>
+              <Tooltip content="Upload a CSV with a 'Namespace' column. QA will run against all unique namespaces found.">
+                <Label color="blue" icon={<SearchIcon />}>Ad-hoc QA</Label>
+              </Tooltip>
+            </SplitItem>
+          </Split>
+        </CardBody>
+      </Card>
 
       {/* QA search + status filter toolbar */}
       {qaResults.length > 0 && (

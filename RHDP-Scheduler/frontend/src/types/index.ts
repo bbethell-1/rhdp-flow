@@ -148,6 +148,7 @@ export interface ShowroomHealthRequest {
 export interface QARequest {
   type: '1' | '2' | 'both';
   namespace?: string | null;
+  namespaces?: string[];
 }
 
 export interface RetryRequest {
