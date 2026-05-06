@@ -2114,6 +2114,58 @@ def get_catalog_item_parameter_defaults(
     return {}
 
 
+def find_similar_catalog_items(ci: str, namespace: str, config: RHDPConfig, limit: int = 5) -> List[str]:
+    """
+    Find catalog items with similar names (fuzzy match).
+
+    Args:
+        ci: Catalog Item ID user provided (e.g., "ai-qs-product-rec-tenant")
+        namespace: Catalog namespace to search
+        config: RHDPConfig object
+        limit: Max number of suggestions to return
+
+    Returns:
+        List of similar catalog item names
+    """
+    env = os.environ.copy()
+    if config.kubeconfig_path:
+        env["KUBECONFIG"] = config.kubeconfig_path
+
+    try:
+        # List all catalog items in namespace
+        cmd = [config.oc_command, "get", "catalogitem", "-n", namespace, "-o", "json"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)
+        if result.returncode != 0:
+            return []
+
+        data = json.loads(result.stdout)
+        all_items = [item['metadata']['name'] for item in data.get('items', [])]
+
+        # Normalize user input for matching
+        ci_normalized = ci.lower().replace('.event', '').replace('.prod', '').replace('.dev', '')
+        # Remove common vendor prefixes for partial matching
+        ci_core = re.sub(r'^(summit-\d+\.|ai-quickstarts\.|openshift-cnv\.|sandboxes-gpte\.|agd-v2\.)', '', ci_normalized)
+
+        # Find matches by checking if the core pattern appears in catalog item names
+        matches = []
+        for item in all_items:
+            item_lower = item.lower()
+            # Exact match on core pattern (ignoring vendor prefix)
+            if ci_core in item_lower:
+                matches.append((item, 100))  # High score for substring match
+            # Partial word match
+            elif any(word in item_lower for word in ci_core.split('-') if len(word) > 3):
+                matches.append((item, 50))  # Lower score for partial match
+
+        # Sort by score (descending) and return top N
+        matches.sort(key=lambda x: x[1], reverse=True)
+        return [m[0] for m in matches[:limit]]
+
+    except Exception as e:
+        logger.debug(f"Error finding similar catalog items: {e}")
+        return []
+
+
 def validate_catalog_item_exists(ci: str, expected_namespace: str, config: RHDPConfig) -> Tuple[bool, Optional[str], Optional[str]]:
     """
     Validate that a catalog item exists in the expected namespace.
@@ -2155,8 +2207,14 @@ def validate_catalog_item_exists(ci: str, expected_namespace: str, config: RHDPC
         except Exception:
             continue
 
-    # Not found anywhere
-    suggestion = f"Item '{ci}' not found in any catalog namespace ({expected_namespace}, babylon-catalog-event, babylon-catalog-prod, babylon-catalog-dev). Verify the CI name is correct."
+    # Not found anywhere - try fuzzy matching to suggest similar items
+    similar = find_similar_catalog_items(ci, expected_namespace, config, limit=3)
+    if similar:
+        suggestions_text = ", ".join(f"'{s}'" for s in similar)
+        suggestion = f"Item '{ci}' not found in {expected_namespace}. Did you mean: {suggestions_text}?"
+    else:
+        suggestion = f"Item '{ci}' not found in any catalog namespace ({expected_namespace}, babylon-catalog-event, babylon-catalog-prod, babylon-catalog-dev). Verify the CI name is correct."
+
     return (False, None, suggestion)
 
 

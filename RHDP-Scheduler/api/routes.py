@@ -59,6 +59,7 @@ from rhdp_flow import (
     get_catalog_item_num_users_limit,
     get_catalog_namespace,
     validate_catalog_item_exists,
+    find_similar_catalog_items,
     list_catalog_items,
     users_column_ignored_by_catalog_advisory,
 )
@@ -681,6 +682,27 @@ def get_catalog_items_list(request: Request):
             parameters=params,
         ))
     return out
+
+
+@router.get("/catalog/suggestions")
+@_rate_limit("30/minute")
+def get_catalog_item_suggestions(request: Request, ci: str, namespace: str = "babylon-catalog-event", limit: int = 5):
+    """Find similar catalog item names (fuzzy match) for a given CI name.
+
+    Args:
+        ci: Catalog Item ID user provided (partial or incorrect)
+        namespace: Catalog namespace to search (default: babylon-catalog-event)
+        limit: Max number of suggestions to return (default: 5)
+
+    Returns:
+        List of suggested catalog item names
+    """
+    config = _get_config()
+    if not config.validate():
+        raise HTTPException(503, "OpenShift client (oc) is not available on the API host")
+
+    suggestions = find_similar_catalog_items(ci, namespace, config, limit=limit)
+    return {"suggestions": suggestions}
 
 
 # ---------------------------------------------------------------------------
