@@ -176,11 +176,13 @@ class RetryRequest(BaseModel):
 class QAType(str, Enum):
     qa1 = "1"
     qa2 = "2"
-    both = "both"
+    qa3 = "3"
+    both = "both"  # For backward compatibility (runs 1+2 only)
+    all = "all"    # Runs all QA checks (1+2+3)
 
 
 class QARequest(BaseModel):
-    type: QAType = QAType.both
+    type: QAType = QAType.all
     namespace: Optional[str] = Field(
         None,
         min_length=1,

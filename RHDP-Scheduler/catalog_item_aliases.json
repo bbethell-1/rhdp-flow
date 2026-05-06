@@ -1,0 +1,64 @@
+{
+  "_comment": "Catalog Item Alias/Typo Mapping - Maps common typos and old names to correct catalog items",
+  "_usage": "This file can be used to autocorrect common catalog item name mistakes",
+
+  "aliases": {
+    "agd-v2.ocp4-ai-data-governance-copilot-tenant.event": "ai-quickstarts.ai-qs-data-gov-tenant.event",
+    "agd-v2.ocp4-ai-it-self-service-tenant.event": "ai-quickstarts.ai-qs-it-self-service-tenant.event",
+    "agd-v2.ocp4-ai-ppe-monitor-tenant.event": "ai-quickstarts.ai-qs-ppe-comp-tenant.event",
+    "agd-v2.ocp4-ai-product-recommender-tenant.event": "ai-quickstarts.ai-qs-product-rec-tenant.event",
+    "agd-v2.ocp4-ai-rag-tenant.event": "ai-quickstarts.ai-qs-rag-tenant.event",
+    "agd-v2.ocp4-virt-roadshow-tenant.event": "openshift-cnv.ocp-virt-roadshow-2026.event",
+
+    "summit-2026.lb-ai-data-governance-copilot.event": "ai-quickstarts.ai-qs-data-gov-tenant.event",
+    "summit-2026.lb1237-workshop.event": "summit-2026.lb1237-hol-rhel10-cnv.event",
+    "summit-2026.lb1347-workshop.event": "summit-2026.lb1347-advanced-features-of-aap-cnv.event",
+    "summit-2026.lb2655-workshop.event": "summit-2026.lb2655-net-automation.event",
+    "summit-2026.lb2898-ocp-virt-roadshow.event": "openshift-cnv.ocp-virt-roadshow-2026.event",
+    "summit-2026.lb4000-ai-product-recommender.event": "ai-quickstarts.ai-qs-product-rec-tenant.event",
+    "summit-2026.lb4001-ai-it-self-service-tenant.event": "ai-quickstarts.ai-qs-it-self-service-tenant.event",
+    "summit-2026.lb4002-ai-ppe-monitor-tenant.event": "ai-quickstarts.ai-qs-ppe-comp-tenant.event",
+    "summit-2026.lb4003-ai-rag-tenant.event": "ai-quickstarts.ai-qs-rag-tenant.event"
+  },
+
+  "common_patterns": {
+    "_comment": "Common naming patterns to help identify correct catalog items",
+    "ai_quickstarts": {
+      "prefix": "ai-quickstarts.",
+      "suffix": ".event",
+      "examples": [
+        "ai-quickstarts.ai-qs-data-gov-tenant.event",
+        "ai-quickstarts.ai-qs-it-self-service-tenant.event",
+        "ai-quickstarts.ai-qs-ppe-comp-tenant.event",
+        "ai-quickstarts.ai-qs-product-rec-tenant.event",
+        "ai-quickstarts.ai-qs-rag-tenant.event"
+      ]
+    },
+    "openshift_cnv": {
+      "prefix": "openshift-cnv.",
+      "suffix": ".event",
+      "examples": [
+        "openshift-cnv.ocp-virt-roadshow-2026.event",
+        "openshift-cnv.ocp-virt-roadshow-multi-user.event"
+      ]
+    },
+    "summit_2026": {
+      "prefix": "summit-2026.",
+      "suffix": ".event",
+      "note": "Summit catalog items usually have descriptive suffixes like -cnv, -aws, or specific feature names",
+      "examples": [
+        "summit-2026.lb1237-hol-rhel10-cnv.event",
+        "summit-2026.lb1347-advanced-features-of-aap-cnv.event",
+        "summit-2026.lb2655-net-automation.event"
+      ]
+    }
+  },
+
+  "validation_tips": [
+    "Always verify catalog item names before deploying to avoid failed provisions",
+    "Use QA3 (qa3_verify_catalog_items_exist) to validate all catalog items exist before deployment",
+    "Check babylon-catalog-event for .event items, babylon-catalog-prod for .prod items",
+    "Use 'oc get catalogitems -n babylon-catalog-event' to list available catalog items",
+    "Fuzzy matching may help identify similar catalog items if exact match not found"
+  ]
+}

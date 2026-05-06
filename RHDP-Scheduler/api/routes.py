@@ -37,6 +37,7 @@ from rhdp_flow import (
     create_multi_workshop_from_group,
     qa1_verify_setup,
     qa2_verify_deployment_status,
+    qa3_verify_catalog_items_exist,
     qa_destroy_check,
     _merge_qa1_qa2,
     _dedup_qa_results,
@@ -1806,6 +1807,7 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
     try:
         all_qa1: List[dict] = []
         all_qa2: List[dict] = []
+        all_qa3: List[dict] = []
 
         for ns in namespaces:
             # Always write a fresh temp CSV from in-memory schedules so that
@@ -1813,20 +1815,26 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
             temp_path = _write_qa_csv_for_namespace(ns)
             temp_csv_paths.append(temp_path)
 
-            if body.type.value == "1":
+            if body.type.value in ("1", "both", "all"):
                 all_qa1.extend(qa1_verify_setup(temp_path, ns, config))
-            elif body.type.value == "2":
+            if body.type.value in ("2", "both", "all"):
                 all_qa2.extend(qa2_verify_deployment_status(temp_path, ns, config))
-            else:
-                all_qa1.extend(qa1_verify_setup(temp_path, ns, config))
-                all_qa2.extend(qa2_verify_deployment_status(temp_path, ns, config))
+
+        # QA3 runs once on full CSV (not namespace-specific)
+        if body.type.value in ("3", "all") and temp_csv_paths:
+            all_qa3.extend(qa3_verify_catalog_items_exist(temp_csv_paths[0], config))
 
         if body.type.value == "1":
             all_raw = _dedup_qa_results(all_qa1)
         elif body.type.value == "2":
             all_raw = all_qa2
-        else:
+        elif body.type.value == "3":
+            all_raw = all_qa3
+        elif body.type.value == "both":
             all_raw = _merge_qa1_qa2(all_qa1, all_qa2)
+        else:  # "all"
+            merged = _merge_qa1_qa2(all_qa1, all_qa2)
+            all_raw = merged + all_qa3
 
         all_raw = [_normalize_qa_result_dict(r) for r in all_raw]
         all_results = [QAResultItem(**r) for r in all_raw]

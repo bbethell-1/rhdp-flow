@@ -41,7 +41,7 @@ type SortableQAColumn = 'ci_name' | 'ci' | 'status';
 type QAStatusFilter = 'all' | 'verified' | 'failed';
 
 export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) => {
-  const [qaType, setQaType] = useState<'1' | '2' | 'both'>('both');
+  const [qaType, setQaType] = useState<'1' | '2' | '3' | 'both' | 'all'>('all');
   const [running, setRunning] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
@@ -213,12 +213,16 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
             >
               <FormSelectOption value="1" label="QA1 - Verify Setup" />
               <FormSelectOption value="2" label="QA2 - Verify Deployment" />
-              <FormSelectOption value="both" label="Both" />
+              <FormSelectOption value="3" label="QA3 - Verify Catalog Items" />
+              <FormSelectOption value="both" label="Both (QA1 + QA2)" />
+              <FormSelectOption value="all" label="All (QA1 + QA2 + QA3)" />
             </FormSelect>
             <p className="qa-type-hint">
               {qaType === '1' && 'Compares live workshops against your CSV schedule — checks dates, user counts, and configuration match what you uploaded.'}
               {qaType === '2' && 'Checks that workshops are actually provisioned and healthy, verifies seat counts, and retrieves student landing page URLs.'}
+              {qaType === '3' && 'Validates that all catalog items in your CSV exist in the cluster. Catches typos and non-existent catalog items before deployment.'}
               {qaType === 'both' && 'Runs setup verification and deployment checks; the table shows one row per workshop (deployment results when both apply).'}
+              {qaType === 'all' && 'Runs all QA checks: setup verification, deployment status, and catalog item validation.'}
             </p>
           </div>
         </SplitItem>

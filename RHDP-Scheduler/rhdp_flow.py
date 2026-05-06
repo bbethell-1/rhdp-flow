@@ -3914,7 +3914,118 @@ def qa2_verify_deployment_status(
     logger.info(f"  ✅ Seat Counts Match: {seats_match}/{total_deployed}")
     logger.info(f"  ❌ Not Deployed: {total_scheduled - total_deployed}")
     logger.info("=" * 70)
-    
+
+    return results
+
+
+def qa3_verify_catalog_items_exist(
+    csv_file: str,
+    config: RHDPConfig
+) -> List[Dict]:
+    """
+    QA Function 3: Verify all catalog items in CSV exist in the cluster.
+
+    This prevents deployment failures due to typos or non-existent catalog items.
+
+    Args:
+        csv_file: Path to input CSV
+        config: RHDPConfig object
+
+    Returns:
+        List of dicts with catalog item validation results:
+        {
+            "ci_name": str,
+            "ci": str,
+            "namespace": str,
+            "scheduled": "Yes",
+            "deployed": "",
+            "status": "✅ OK" | "❌ NOT FOUND" | "⚠️ CANNOT VERIFY",
+            "matches_schedule": "",
+            "issues": str,
+            "catalog_namespace": str,
+            "exists": "Yes" | "No" | "Unknown"
+        }
+    """
+    logger.info("=" * 70)
+    logger.info("QA3: Verify Catalog Items Exist")
+    logger.info("=" * 70)
+
+    schedules = read_csv_input(csv_file)
+
+    # Deduplicate catalog items
+    ci_map: Dict[str, WorkshopSchedule] = {}
+    for schedule in schedules:
+        if schedule.is_multi_asset:
+            # For multi-asset, check each asset CI
+            for asset_ci in schedule.asset_cis.split(','):
+                asset_ci = asset_ci.strip()
+                if asset_ci and asset_ci not in ci_map:
+                    ci_map[asset_ci] = schedule
+        else:
+            if schedule.ci not in ci_map:
+                ci_map[schedule.ci] = schedule
+
+    results = []
+    total = len(ci_map)
+    found_count = 0
+    not_found_count = 0
+    unknown_count = 0
+
+    for idx, (ci, schedule) in enumerate(ci_map.items(), 1):
+        expected_ns = get_catalog_namespace(ci, schedule.catalog_namespace)
+        exists, found_ns, suggestion = validate_catalog_item_exists(ci, expected_ns, config)
+
+        if exists:
+            status = "✅ OK"
+            exists_str = "Yes"
+            issues = ""
+            found_count += 1
+            logger.info(f"[{idx}/{total}] ✅ {ci} exists in {expected_ns}")
+        elif found_ns:
+            # Found in different namespace
+            status = "⚠️ WRONG NAMESPACE"
+            exists_str = "No"
+            issues = suggestion or f"Found in {found_ns} instead of {expected_ns}"
+            not_found_count += 1
+            logger.warning(f"[{idx}/{total}] ⚠️ {ci} - {issues}")
+        else:
+            # Not found anywhere
+            status = "❌ NOT FOUND"
+            exists_str = "No"
+            issues = suggestion or f"Catalog item '{ci}' does not exist"
+            not_found_count += 1
+            logger.error(f"[{idx}/{total}] ❌ {ci} - {issues}")
+
+        result = {
+            "ci_name": schedule.ci_name,
+            "ci": ci,
+            "namespace": schedule.namespace,
+            "scheduled": "Yes",
+            "deployed": "",
+            "status": status,
+            "matches_schedule": "",
+            "issues": issues,
+            "catalog_namespace": catalog_namespace,
+            "exists": exists_str,
+        }
+        results.append(result)
+
+    # Summary
+    logger.info("=" * 70)
+    logger.info("QA3 Summary: Catalog Item Validation")
+    logger.info(f"  Total Catalog Items: {total}")
+    logger.info(f"  ✅ Found: {found_count}")
+    logger.info(f"  ❌ Not Found: {not_found_count}")
+    logger.info(f"  ⚠️  Unknown: {unknown_count}")
+
+    if not_found_count > 0:
+        logger.warning("")
+        logger.warning(f"⚠️  WARNING: {not_found_count} catalog item(s) do NOT exist!")
+        logger.warning("   Deployments using these items will FAIL to provision.")
+        logger.warning("   Please verify catalog item names before deploying.")
+
+    logger.info("=" * 70)
+
     return results
 
 
