@@ -146,7 +146,7 @@ export interface ShowroomHealthRequest {
 }
 
 export interface QARequest {
-  type: '1' | '2' | 'both';
+  type: '1' | '2' | '3' | 'both' | 'all';
   namespace?: string | null;
   namespaces?: string[];
 }
