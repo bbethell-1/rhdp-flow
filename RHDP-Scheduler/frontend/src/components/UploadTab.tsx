@@ -116,6 +116,7 @@ export const UploadTab: React.FC<Props> = ({
   const [redirect, setRedirect] = useState(true);
   const [showroomNovnc, setShowroomNovnc] = useState(false);
   const [showroomZerotouch, setShowroomZerotouch] = useState(false);
+  const [useCatalogLookup, setUseCatalogLookup] = useState(false);
 
   // Namespace validation
   const [missingNamespaces, setMissingNamespaces] = useState<string[]>([]);
@@ -838,19 +839,33 @@ export const UploadTab: React.FC<Props> = ({
                         />
                       </Td>
                       <Td dataLabel="CI" style={{ minWidth: '280px' }}>
-                        <div style={{ width: '100%' }}>
-                          <CatalogItemSelect
+                        {useCatalogLookup ? (
+                          <div style={{ width: '100%' }}>
+                            <CatalogItemSelect
+                              value={s.ci || ''}
+                              onChange={(value) => {
+                                const updated = schedules.map((sc, idx) => idx === i ? { ...sc, ci: value } : sc);
+                                setSchedules(updated);
+                                api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
+                              }}
+                              label=""
+                              helperText=""
+                              filterNamespace={s.catalog_namespace}
+                            />
+                          </div>
+                        ) : (
+                          <TextInput
                             value={s.ci || ''}
-                            onChange={(value) => {
+                            onChange={(_e, value) => {
                               const updated = schedules.map((sc, idx) => idx === i ? { ...sc, ci: value } : sc);
                               setSchedules(updated);
                               api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
                             }}
-                            label=""
-                            helperText=""
-                            filterNamespace={s.catalog_namespace}
+                            placeholder="vendor.item.env"
+                            style={{ minWidth: '200px' }}
+                            readOnly={rowEditsLocked}
                           />
-                        </div>
+                        )}
                       </Td>
                       <Td dataLabel="Workshop Name">
                         <TextInput
@@ -1076,6 +1091,16 @@ export const UploadTab: React.FC<Props> = ({
                           setSchedules(schedules.map(s => ({ ...s, redirect: checked })));
                         }
                       }}
+                    />
+                  </Tooltip>
+                </SplitItem>
+                <SplitItem>
+                  <Tooltip content="Enable catalog dropdown with search/filter for CI field. When off, uses plain text input for faster loading (default).">
+                    <Switch
+                      id="catalog-lookup-switch"
+                      label="Use Catalog Lookup"
+                      isChecked={useCatalogLookup}
+                      onChange={(_e, checked) => setUseCatalogLookup(checked)}
                     />
                   </Tooltip>
                 </SplitItem>
