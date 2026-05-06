@@ -47,7 +47,9 @@ function parseScheduleDate(dateStr: string): Date | null {
     const yr = m[3].length === 2 ? 2000 + parseInt(m[3]) : parseInt(m[3]);
     return new Date(Date.UTC(yr, parseInt(m[2]) - 1, parseInt(m[1]), parseInt(m[4]), parseInt(m[5])));
   }
-  const d = new Date(dateStr);
+  // Fallback: append 'Z' to force UTC parsing (fixes BST/local time bug)
+  const utcStr = dateStr.trim() + (dateStr.includes('Z') ? '' : 'Z');
+  const d = new Date(utcStr);
   return isNaN(d.getTime()) ? null : d;
 }
 
