@@ -27,6 +27,7 @@ import {
   Radio,
   Form,
   FormGroup,
+  Checkbox,
 } from '@patternfly/react-core';
 import { Table, Thead, Tbody, Tr, Th, Td, ExpandableRowContent } from '@patternfly/react-table';
 import UploadIcon from '@patternfly/react-icons/dist/esm/icons/upload-icon';
@@ -127,6 +128,7 @@ export const UploadTab: React.FC<Props> = ({
   const [useGenericPoolOverride, setUseGenericPoolOverride] = useState(false);
   const [genericPoolName, setGenericPoolName] = useState('ocp-base-pool');
   const [genericPoolVariant, setGenericPoolVariant] = useState<'tenant' | 'self-service'>('tenant');
+  const [genericPoolSelectedRows, setGenericPoolSelectedRows] = useState<Set<number>>(new Set());
   const [whiteGlove, setWhiteGlove] = useState(true);
   const [redirect, setRedirect] = useState(true);
   const [showroomNovnc, setShowroomNovnc] = useState(false);
@@ -342,14 +344,16 @@ export const UploadTab: React.FC<Props> = ({
       return;
     }
 
-    // Apply generic pool override if enabled
-    if (useGenericPoolOverride && genericPoolName.trim()) {
+    // Apply generic pool override to selected rows
+    if (useGenericPoolOverride && genericPoolName.trim() && genericPoolSelectedRows.size > 0) {
       const suffix = genericPoolVariant === 'tenant' ? '-tenant' : '-slfsrv';
       const overriddenCatalogItem = `${genericPoolName.trim()}${suffix}`;
-      const overriddenSchedules = schedules.map(s => ({ ...s, ci: overriddenCatalogItem }));
+      const overriddenSchedules = schedules.map((s, idx) =>
+        genericPoolSelectedRows.has(idx) ? { ...s, ci: overriddenCatalogItem } : s
+      );
       await api.updateSchedules(overriddenSchedules);
       setSchedules(overriddenSchedules);
-      showToast(`Applied generic pool override: ${overriddenCatalogItem}`, 'info');
+      showToast(`Applied generic pool override to ${genericPoolSelectedRows.size} row(s): ${overriddenCatalogItem}`, 'info');
     }
 
     setYamlDownloading(true);
@@ -467,14 +471,16 @@ export const UploadTab: React.FC<Props> = ({
   const handleDryRun = async () => {
     if (schedules.length === 0) { showToast('Upload a CSV first', 'danger'); return; }
 
-    // Apply generic pool override if enabled
-    if (useGenericPoolOverride && genericPoolName.trim()) {
+    // Apply generic pool override to selected rows
+    if (useGenericPoolOverride && genericPoolName.trim() && genericPoolSelectedRows.size > 0) {
       const suffix = genericPoolVariant === 'tenant' ? '-tenant' : '-slfsrv';
       const overriddenCatalogItem = `${genericPoolName.trim()}${suffix}`;
-      const overriddenSchedules = schedules.map(s => ({ ...s, ci: overriddenCatalogItem }));
+      const overriddenSchedules = schedules.map((s, idx) =>
+        genericPoolSelectedRows.has(idx) ? { ...s, ci: overriddenCatalogItem } : s
+      );
       await api.updateSchedules(overriddenSchedules);
       setSchedules(overriddenSchedules);
-      showToast(`Applied generic pool override: ${overriddenCatalogItem}`, 'info');
+      showToast(`Applied generic pool override to ${genericPoolSelectedRows.size} row(s): ${overriddenCatalogItem}`, 'info');
     }
 
     try {
@@ -505,14 +511,16 @@ export const UploadTab: React.FC<Props> = ({
     setProgressMsg('Starting...');
     setLogLines([]);
 
-    // Apply generic pool override if enabled
-    if (useGenericPoolOverride && genericPoolName.trim()) {
+    // Apply generic pool override to selected rows
+    if (useGenericPoolOverride && genericPoolName.trim() && genericPoolSelectedRows.size > 0) {
       const suffix = genericPoolVariant === 'tenant' ? '-tenant' : '-slfsrv';
       const overriddenCatalogItem = `${genericPoolName.trim()}${suffix}`;
-      const overriddenSchedules = schedules.map(s => ({ ...s, ci: overriddenCatalogItem }));
+      const overriddenSchedules = schedules.map((s, idx) =>
+        genericPoolSelectedRows.has(idx) ? { ...s, ci: overriddenCatalogItem } : s
+      );
       await api.updateSchedules(overriddenSchedules);
       setSchedules(overriddenSchedules);
-      showToast(`Applied generic pool override: ${overriddenCatalogItem}`, 'info');
+      showToast(`Applied generic pool override to ${genericPoolSelectedRows.size} row(s): ${overriddenCatalogItem}`, 'info');
     }
 
     try {
@@ -859,6 +867,13 @@ export const UploadTab: React.FC<Props> = ({
               <Thead>
                 <Tr>
                   <Th />
+                  {useGenericPoolOverride && (
+                    <Th>
+                      <Tooltip content="Select rows to apply generic pool override">
+                        <span>Use Generic Pool</span>
+                      </Tooltip>
+                    </Th>
+                  )}
                   <Th>CI Name</Th>
                   <Th>CI (Catalog Item)</Th>
                   {usePoolLookup && (
@@ -919,6 +934,23 @@ export const UploadTab: React.FC<Props> = ({
                           onToggle: () => toggleExpanded(i),
                         }}
                       />
+                      {useGenericPoolOverride && (
+                        <Td dataLabel="Use Generic Pool">
+                          <Checkbox
+                            id={`generic-pool-${i}`}
+                            isChecked={genericPoolSelectedRows.has(i)}
+                            onChange={(_e, checked) => {
+                              const newSet = new Set(genericPoolSelectedRows);
+                              if (checked) {
+                                newSet.add(i);
+                              } else {
+                                newSet.delete(i);
+                              }
+                              setGenericPoolSelectedRows(newSet);
+                            }}
+                          />
+                        </Td>
+                      )}
                       <Td dataLabel="CI Name">
                         <TextInput
                           value={s.ci_name || ''}
@@ -1235,7 +1267,7 @@ export const UploadTab: React.FC<Props> = ({
                       </Tooltip>
                     </SplitItem>
                     <SplitItem>
-                      <Tooltip content="Use a single generic pool for all workshops, regardless of catalog item. Useful for deploying through a base OCP pool with tenant or self-service routing.">
+                      <Tooltip content="Enable per-row generic pool selection. Select which workshops should use a base OCP pool instead of their specific catalog items. Choose between tenant or self-service pool variants.">
                         <Switch
                           id="generic-pool-override-switch"
                           label="Generic Pool Override"
@@ -1343,13 +1375,39 @@ export const UploadTab: React.FC<Props> = ({
                       />
                     </div>
                   </FormGroup>
+                  <div style={{ marginTop: '12px', marginBottom: '8px' }}>
+                    <Button
+                      variant="link"
+                      isInline
+                      onClick={() => {
+                        const allIndices = schedules.map((_, idx) => idx);
+                        setGenericPoolSelectedRows(new Set(allIndices));
+                      }}
+                      style={{ paddingLeft: 0, fontSize: '0.85rem' }}
+                    >
+                      Select All
+                    </Button>
+                    <span style={{ margin: '0 8px', color: 'var(--pf-v6-global--Color--200)' }}>|</span>
+                    <Button
+                      variant="link"
+                      isInline
+                      onClick={() => setGenericPoolSelectedRows(new Set())}
+                      style={{ paddingLeft: 0, fontSize: '0.85rem' }}
+                    >
+                      Deselect All
+                    </Button>
+                  </div>
                   <Alert
-                    variant="info"
+                    variant={genericPoolSelectedRows.size === 0 ? 'warning' : 'info'}
                     isInline
-                    title="All catalog items will be overridden"
+                    title={genericPoolSelectedRows.size === 0 ? 'No rows selected' : `${genericPoolSelectedRows.size} row${genericPoolSelectedRows.size !== 1 ? 's' : ''} selected`}
                     style={{ marginTop: '12px' }}
                   >
-                    When deployed, all workshops will use: <strong>{genericPoolName}-{genericPoolVariant === 'tenant' ? 'tenant' : 'slfsrv'}</strong>
+                    {genericPoolSelectedRows.size === 0 ? (
+                      'Select rows in the table below to apply generic pool override.'
+                    ) : (
+                      <>Selected workshops will use: <strong>{genericPoolName}-{genericPoolVariant === 'tenant' ? 'tenant' : 'slfsrv'}</strong></>
+                    )}
                   </Alert>
                 </Form>
               </CardBody>
