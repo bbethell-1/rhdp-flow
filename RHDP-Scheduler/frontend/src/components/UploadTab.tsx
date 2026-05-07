@@ -24,6 +24,9 @@ import {
   SearchInput,
   Tooltip,
   TextInput,
+  Radio,
+  Form,
+  FormGroup,
 } from '@patternfly/react-core';
 import { Table, Thead, Tbody, Tr, Th, Td, ExpandableRowContent } from '@patternfly/react-table';
 import UploadIcon from '@patternfly/react-icons/dist/esm/icons/upload-icon';
@@ -121,6 +124,9 @@ export const UploadTab: React.FC<Props> = ({
   const [showPoolSelector, setShowPoolSelector] = useState(false);
   const [poolSelectorIndex, setPoolSelectorIndex] = useState<number | null>(null);
   const [selectedPool, setSelectedPool] = useState<string>('');
+  const [useGenericPoolOverride, setUseGenericPoolOverride] = useState(false);
+  const [genericPoolName, setGenericPoolName] = useState('ocp-base-pool');
+  const [genericPoolVariant, setGenericPoolVariant] = useState<'tenant' | 'self-service'>('tenant');
   const [whiteGlove, setWhiteGlove] = useState(true);
   const [redirect, setRedirect] = useState(true);
   const [showroomNovnc, setShowroomNovnc] = useState(false);
@@ -335,6 +341,17 @@ export const UploadTab: React.FC<Props> = ({
       showToast('Upload a CSV first', 'danger');
       return;
     }
+
+    // Apply generic pool override if enabled
+    if (useGenericPoolOverride && genericPoolName.trim()) {
+      const suffix = genericPoolVariant === 'tenant' ? '-tenant' : '-slfsrv';
+      const overriddenCatalogItem = `${genericPoolName.trim()}${suffix}`;
+      const overriddenSchedules = schedules.map(s => ({ ...s, ci: overriddenCatalogItem }));
+      await api.updateSchedules(overriddenSchedules);
+      setSchedules(overriddenSchedules);
+      showToast(`Applied generic pool override: ${overriddenCatalogItem}`, 'info');
+    }
+
     setYamlDownloading(true);
     try {
       await api.downloadDryRunYaml({
@@ -449,6 +466,17 @@ export const UploadTab: React.FC<Props> = ({
 
   const handleDryRun = async () => {
     if (schedules.length === 0) { showToast('Upload a CSV first', 'danger'); return; }
+
+    // Apply generic pool override if enabled
+    if (useGenericPoolOverride && genericPoolName.trim()) {
+      const suffix = genericPoolVariant === 'tenant' ? '-tenant' : '-slfsrv';
+      const overriddenCatalogItem = `${genericPoolName.trim()}${suffix}`;
+      const overriddenSchedules = schedules.map(s => ({ ...s, ci: overriddenCatalogItem }));
+      await api.updateSchedules(overriddenSchedules);
+      setSchedules(overriddenSchedules);
+      showToast(`Applied generic pool override: ${overriddenCatalogItem}`, 'info');
+    }
+
     try {
       const data = await api.dryRun({ dry_run: true, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect, showroom_novnc: showroomNovnc, showroom_zerotouch: showroomZerotouch });
       setResults(data);
@@ -476,6 +504,16 @@ export const UploadTab: React.FC<Props> = ({
     setProgress(0);
     setProgressMsg('Starting...');
     setLogLines([]);
+
+    // Apply generic pool override if enabled
+    if (useGenericPoolOverride && genericPoolName.trim()) {
+      const suffix = genericPoolVariant === 'tenant' ? '-tenant' : '-slfsrv';
+      const overriddenCatalogItem = `${genericPoolName.trim()}${suffix}`;
+      const overriddenSchedules = schedules.map(s => ({ ...s, ci: overriddenCatalogItem }));
+      await api.updateSchedules(overriddenSchedules);
+      setSchedules(overriddenSchedules);
+      showToast(`Applied generic pool override: ${overriddenCatalogItem}`, 'info');
+    }
 
     try {
       const job = await api.deploy({ dry_run: dryRun, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect, showroom_novnc: showroomNovnc, showroom_zerotouch: showroomZerotouch });
@@ -1185,16 +1223,28 @@ export const UploadTab: React.FC<Props> = ({
                   </Tooltip>
                 </SplitItem>
                 {enableResourcePools && (
-                  <SplitItem>
-                    <Tooltip content="Query the cluster for available resource pools for each catalog item. Shows pool status (ready count, provisioning, etc.) and allows overriding which pool to use. Leave off to skip pool validation during upload.">
-                      <Switch
-                        id="pool-lookup-switch"
-                        label="Pool Lookup"
-                        isChecked={usePoolLookup}
-                        onChange={(_e, checked) => setUsePoolLookup(checked)}
-                      />
-                    </Tooltip>
-                  </SplitItem>
+                  <>
+                    <SplitItem>
+                      <Tooltip content="Query the cluster for available resource pools for each catalog item. Shows pool status (ready count, provisioning, etc.) and allows overriding which pool to use. Leave off to skip pool validation during upload.">
+                        <Switch
+                          id="pool-lookup-switch"
+                          label="Pool Lookup"
+                          isChecked={usePoolLookup}
+                          onChange={(_e, checked) => setUsePoolLookup(checked)}
+                        />
+                      </Tooltip>
+                    </SplitItem>
+                    <SplitItem>
+                      <Tooltip content="Use a single generic pool for all workshops, regardless of catalog item. Useful for deploying through a base OCP pool with tenant or self-service routing.">
+                        <Switch
+                          id="generic-pool-override-switch"
+                          label="Generic Pool Override"
+                          isChecked={useGenericPoolOverride}
+                          onChange={(_e, checked) => setUseGenericPoolOverride(checked)}
+                        />
+                      </Tooltip>
+                    </SplitItem>
+                  </>
                 )}
                 <SplitItem>
                   <Tooltip content="Mark workshops as fully managed and pre-configured. Applies the white-glove label for managed delivery.">
@@ -1259,6 +1309,52 @@ export const UploadTab: React.FC<Props> = ({
               )}
             </CardBody>
           </Card>
+
+          {/* Generic pool override configuration */}
+          {useGenericPoolOverride && (
+            <Card isCompact style={{ marginBottom: 16, border: '2px solid var(--pf-v6-global--palette--blue-300)' }}>
+              <CardTitle>Generic Pool Override Configuration</CardTitle>
+              <CardBody>
+                <Form isHorizontal>
+                  <FormGroup label="Pool Name" isRequired fieldId="generic-pool-name">
+                    <TextInput
+                      id="generic-pool-name"
+                      value={genericPoolName}
+                      onChange={(_e, value) => setGenericPoolName(value)}
+                      placeholder="e.g., ocp-base-pool"
+                      style={{ maxWidth: '300px' }}
+                    />
+                  </FormGroup>
+                  <FormGroup label="Pool Variant" isRequired fieldId="generic-pool-variant">
+                    <div style={{ display: 'flex', gap: '16px' }}>
+                      <Radio
+                        id="variant-tenant"
+                        name="pool-variant"
+                        label="Tenant"
+                        isChecked={genericPoolVariant === 'tenant'}
+                        onChange={() => setGenericPoolVariant('tenant')}
+                      />
+                      <Radio
+                        id="variant-self-service"
+                        name="pool-variant"
+                        label="Self-Service"
+                        isChecked={genericPoolVariant === 'self-service'}
+                        onChange={() => setGenericPoolVariant('self-service')}
+                      />
+                    </div>
+                  </FormGroup>
+                  <Alert
+                    variant="info"
+                    isInline
+                    title="All catalog items will be overridden"
+                    style={{ marginTop: '12px' }}
+                  >
+                    When deployed, all workshops will use: <strong>{genericPoolName}-{genericPoolVariant === 'tenant' ? 'tenant' : 'slfsrv'}</strong>
+                  </Alert>
+                </Form>
+              </CardBody>
+            </Card>
+          )}
 
           {/* Deploy buttons */}
           <Split hasGutter style={{ marginBottom: 16, flexWrap: 'wrap' }}>
@@ -1488,6 +1584,11 @@ export const UploadTab: React.FC<Props> = ({
             value={selectedPool}
             onChange={(_e, value) => setSelectedPool(value as string)}
             aria-label="Select resource pool"
+            style={{
+              backgroundColor: 'var(--pf-v6-global--BackgroundColor--100)',
+              color: 'var(--pf-v6-global--Color--100)',
+              border: '1px solid var(--pf-v6-global--BorderColor--100)'
+            }}
           >
             <FormSelectOption key="placeholder" value="" label="Choose a pool..." isDisabled />
             {allPools.map(pool => (
