@@ -318,3 +318,24 @@ export interface DeployPreviewItem {
 export interface DeployPreviewResponse {
   schedules: DeployPreviewItem[];
 }
+
+export interface PoolInfo {
+  pool_name: string;
+  min_available: number;
+  max_available: number | null;
+  ready: number;
+  available: number;
+  claimed: number;
+  provisioning: number;
+  lifespan_default: string;
+  lifespan_unclaimed: string;
+  lifespan_maximum: string;
+  provider_name: string;
+  exists: boolean;
+}
+
+export interface PoolLookupResponse {
+  catalog_item: string;
+  pool: PoolInfo | null;
+  has_pool: boolean;
+}

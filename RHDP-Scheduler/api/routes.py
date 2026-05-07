@@ -87,6 +87,8 @@ from api.models import (
     NumUsersViolation,
     UsersNotInCatalogAdvisory,
     OperationResponse,
+    PoolInfo,
+    PoolLookupResponse,
     QARequest,
     QAResultItem,
     RetryRequest,
@@ -704,6 +706,65 @@ def get_catalog_item_suggestions(request: Request, ci: str, namespace: str = "ba
 
     suggestions = find_similar_catalog_items(ci, namespace, config, limit=limit)
     return {"suggestions": suggestions}
+
+
+# ---------------------------------------------------------------------------
+# Resource Pools
+# ---------------------------------------------------------------------------
+
+@router.get("/pools/lookup")
+@_rate_limit("30/minute")
+def lookup_pool_for_catalog_item(request: Request, catalog_item: str):
+    """
+    Lookup ResourcePool for a given catalog item.
+
+    Args:
+        catalog_item: Catalog item ID to lookup pool for
+
+    Returns:
+        PoolLookupResponse with pool info if found, or null if no pool exists
+    """
+    from api.pool_utils import get_pool_for_catalog_item
+    from api.models import PoolInfo, PoolLookupResponse
+
+    config = _get_config()
+    if not config.validate():
+        raise HTTPException(503, "OpenShift client (oc) is not available on the API host")
+
+    pool_data = get_pool_for_catalog_item(catalog_item)
+
+    if pool_data:
+        return PoolLookupResponse(
+            catalog_item=catalog_item,
+            pool=PoolInfo(**pool_data),
+            has_pool=True
+        )
+    else:
+        return PoolLookupResponse(
+            catalog_item=catalog_item,
+            pool=None,
+            has_pool=False
+        )
+
+
+@router.get("/pools/all")
+@_rate_limit("10/minute")
+def list_all_pools(request: Request):
+    """
+    List all ResourcePools available in the cluster.
+
+    Returns:
+        List of PoolInfo objects
+    """
+    from api.pool_utils import list_all_pools as get_all_pools
+    from api.models import PoolInfo
+
+    config = _get_config()
+    if not config.validate():
+        raise HTTPException(503, "OpenShift client (oc) is not available on the API host")
+
+    pools = get_all_pools()
+    return {"pools": [PoolInfo(**p) for p in pools]}
 
 
 # ---------------------------------------------------------------------------

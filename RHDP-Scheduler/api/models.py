@@ -416,3 +416,32 @@ class SessionSummary(BaseModel):
     has_results: bool
     deploy_log_file: Optional[str] = None
     qa_log_file: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Pool Lookup Models
+# ---------------------------------------------------------------------------
+
+class PoolInfo(BaseModel):
+    """ResourcePool information for a catalog item."""
+
+    pool_name: str
+    min_available: int
+    max_available: Optional[int] = None
+    ready: int = 0
+    available: int = 0
+    claimed: int = 0
+    provisioning: int = 0
+    lifespan_default: str = "N/A"
+    lifespan_unclaimed: str = "N/A"
+    lifespan_maximum: str = "N/A"
+    provider_name: str
+    exists: bool = True
+
+
+class PoolLookupResponse(BaseModel):
+    """Response for pool lookup by catalog item."""
+
+    catalog_item: str
+    pool: Optional[PoolInfo] = None
+    has_pool: bool = False

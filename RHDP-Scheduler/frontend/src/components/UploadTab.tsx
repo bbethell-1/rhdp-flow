@@ -10,6 +10,7 @@ import {
   Progress,
   Split,
   SplitItem,
+  Spinner,
   Switch,
   EmptyState,
   EmptyStateBody,
@@ -112,6 +113,8 @@ export const UploadTab: React.FC<Props> = ({
   // Deploy settings
   const [resourceLock, setResourceLock] = useState(true);
   const [enableResourcePools, setEnableResourcePools] = useState(false);
+  const [usePoolLookup, setUsePoolLookup] = useState(false);
+  const [poolLookupData, setPoolLookupData] = useState<Record<string, import('../types').PoolLookupResponse>>({});
   const [whiteGlove, setWhiteGlove] = useState(true);
   const [redirect, setRedirect] = useState(true);
   const [showroomNovnc, setShowroomNovnc] = useState(false);
@@ -240,6 +243,29 @@ export const UploadTab: React.FC<Props> = ({
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logLines]);
+
+  // Pool lookup - fetch pool data when enabled
+  useEffect(() => {
+    if (!usePoolLookup || schedules.length === 0) {
+      setPoolLookupData({});
+      return;
+    }
+
+    const fetchPoolData = async () => {
+      const uniqueCIs = Array.from(new Set(schedules.map(s => s.ci)));
+      const poolPromises = uniqueCIs.map(ci =>
+        api.lookupPool(ci).catch(() => ({ catalog_item: ci, pool: null, has_pool: false }))
+      );
+      const results = await Promise.all(poolPromises);
+      const poolMap: Record<string, import('../types').PoolLookupResponse> = {};
+      results.forEach(r => {
+        poolMap[r.catalog_item] = r;
+      });
+      setPoolLookupData(poolMap);
+    };
+
+    fetchPoolData();
+  }, [usePoolLookup, schedules]);
 
   /** Re-fetch namespace + catalog num_users + catalog namespace checks from the server (uses loaded schedules). */
   const refreshClusterValidation = useCallback(async () => {
@@ -785,6 +811,24 @@ export const UploadTab: React.FC<Props> = ({
                   <Th />
                   <Th>CI Name</Th>
                   <Th>CI (Catalog Item)</Th>
+                  {usePoolLookup && (
+                    <Th>
+                      Pool Status{' '}
+                      <Tooltip
+                        content={
+                          <div>
+                            Resource pool availability:<br />
+                            • Ready: Resources available now<br />
+                            • Provisioning: Resources being created<br />
+                            • Min: Target pool size<br />
+                            Click pool name to override selection.
+                          </div>
+                        }
+                      >
+                        <InfoCircleIcon style={{ color: 'var(--pf-v6-global--info-color--100)', cursor: 'help' }} />
+                      </Tooltip>
+                    </Th>
+                  )}
                   <Th>Workshop Name</Th>
                   <Th>Namespace</Th>
                   <Th>
@@ -867,6 +911,36 @@ export const UploadTab: React.FC<Props> = ({
                           />
                         )}
                       </Td>
+                      {usePoolLookup && (
+                        <Td dataLabel="Pool Status">
+                          {poolLookupData[s.ci] ? (
+                            poolLookupData[s.ci].has_pool && poolLookupData[s.ci].pool ? (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>
+                                  {poolLookupData[s.ci].pool!.pool_name}
+                                </div>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--pf-v6-global--Color--200)' }}>
+                                  Ready: {poolLookupData[s.ci].pool!.ready} / Min: {poolLookupData[s.ci].pool!.min_available}
+                                  {poolLookupData[s.ci].pool!.provisioning > 0 && (
+                                    <span style={{ color: 'var(--pf-v6-global--warning-color--100)' }}>
+                                      {' '}| Provisioning: {poolLookupData[s.ci].pool!.provisioning}
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ fontSize: '0.7rem', color: 'var(--pf-v6-global--Color--300)' }}>
+                                  Lifespan: {poolLookupData[s.ci].pool!.lifespan_unclaimed}
+                                </div>
+                              </div>
+                            ) : (
+                              <span style={{ color: 'var(--pf-v6-global--Color--200)', fontSize: '0.85rem' }}>
+                                No pool available
+                              </span>
+                            )
+                          ) : (
+                            <Spinner size="md" />
+                          )}
+                        </Td>
+                      )}
                       <Td dataLabel="Workshop Name">
                         <TextInput
                           value={s.workshop_name || ''}
@@ -1065,10 +1139,25 @@ export const UploadTab: React.FC<Props> = ({
                       id="resource-pools-switch"
                       label="Enable Resource Pools"
                       isChecked={enableResourcePools}
-                      onChange={(_e, checked) => setEnableResourcePools(checked)}
+                      onChange={(_e, checked) => {
+                        setEnableResourcePools(checked);
+                        if (!checked) setUsePoolLookup(false); // Turn off pool lookup if resource pools disabled
+                      }}
                     />
                   </Tooltip>
                 </SplitItem>
+                {enableResourcePools && (
+                  <SplitItem>
+                    <Tooltip content="Query the cluster for available resource pools for each catalog item. Shows pool status (ready count, provisioning, etc.) and allows overriding which pool to use. Leave off to skip pool validation during upload.">
+                      <Switch
+                        id="pool-lookup-switch"
+                        label="Pool Lookup"
+                        isChecked={usePoolLookup}
+                        onChange={(_e, checked) => setUsePoolLookup(checked)}
+                      />
+                    </Tooltip>
+                  </SplitItem>
+                )}
                 <SplitItem>
                   <Tooltip content="Mark workshops as fully managed and pre-configured. Applies the white-glove label for managed delivery.">
                     <Switch

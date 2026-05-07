@@ -22,6 +22,8 @@ import type {
   ScheduleExampleMeta,
   CatalogItemEntry,
   DeployPreviewResponse,
+  PoolInfo,
+  PoolLookupResponse,
 } from '../types';
 
 const API = '/api';
@@ -78,6 +80,13 @@ export const api = {
 
   /** Cluster catalog items (prod + event namespaces). */
   listCatalogItems: () => request<CatalogItemEntry[]>('/catalog/items'),
+
+  /** Lookup ResourcePool for a catalog item. */
+  lookupPool: (catalogItem: string) =>
+    request<PoolLookupResponse>(`/pools/lookup?catalog_item=${encodeURIComponent(catalogItem)}`),
+
+  /** List all ResourcePools in the cluster. */
+  listAllPools: () => request<{ pools: PoolInfo[] }>('/pools/all'),
 
   // Schedules
   uploadCSV: async (file: File): Promise<UploadResponse> => {
