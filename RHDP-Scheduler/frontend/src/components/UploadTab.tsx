@@ -118,10 +118,6 @@ export const UploadTab: React.FC<Props> = ({
   const [usePoolLookup, setUsePoolLookup] = useState(false);
   const [poolLookupData, setPoolLookupData] = useState<Record<string, import('../types').PoolLookupResponse>>({});
   const [allPools, setAllPools] = useState<import('../types').PoolInfo[]>([]);
-  const [showPoolSelector, setShowPoolSelector] = useState(false);
-  const [poolSelectorIndex, setPoolSelectorIndex] = useState<number | null>(null);
-  const [selectedPool, setSelectedPool] = useState<string>('');
-  const [useGenericPoolOverride, setUseGenericPoolOverride] = useState(false);
   const [whiteGlove, setWhiteGlove] = useState(true);
   const [redirect, setRedirect] = useState(true);
   const [showroomNovnc, setShowroomNovnc] = useState(false);
@@ -251,46 +247,34 @@ export const UploadTab: React.FC<Props> = ({
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logLines]);
 
-  // Pool lookup - fetch pool data when enabled (or when generic pool override needs pool list)
+  // Pool lookup - fetch pool data when enabled
   useEffect(() => {
-    if ((!usePoolLookup && !useGenericPoolOverride) || schedules.length === 0) {
+    if (!usePoolLookup || schedules.length === 0) {
       setPoolLookupData({});
       setAllPools([]);
       return;
     }
 
     const fetchPoolData = async () => {
-      // Fetch pools for each CI (if pool lookup enabled) + all pools (for override/generic selection)
-      const tasks: Promise<unknown>[] = [];
+      // Fetch pools for each CI + all pools for override selection
+      const uniqueCIs = Array.from(new Set(schedules.map(s => s.ci)));
+      const [poolResults, allPoolsRes] = await Promise.all([
+        Promise.all(uniqueCIs.map(ci =>
+          api.lookupPool(ci).catch(() => ({ catalog_item: ci, pool: null, has_pool: false }))
+        )),
+        api.listAllPools().catch(() => ({ pools: [] }))
+      ]);
 
-      if (usePoolLookup) {
-        const uniqueCIs = Array.from(new Set(schedules.map(s => s.ci)));
-        tasks.push(
-          Promise.all(uniqueCIs.map(ci =>
-            api.lookupPool(ci).catch(() => ({ catalog_item: ci, pool: null, has_pool: false }))
-          ))
-        );
-      }
-
-      tasks.push(api.listAllPools().catch(() => ({ pools: [] })));
-
-      const results = await Promise.all(tasks);
-
-      if (usePoolLookup && results.length === 2) {
-        const poolResults = results[0] as import('../types').PoolLookupResponse[];
-        const poolMap: Record<string, import('../types').PoolLookupResponse> = {};
-        poolResults.forEach(r => {
-          poolMap[r.catalog_item] = r;
-        });
-        setPoolLookupData(poolMap);
-        setAllPools((results[1] as { pools: import('../types').PoolInfo[] }).pools || []);
-      } else {
-        setAllPools((results[0] as { pools: import('../types').PoolInfo[] }).pools || []);
-      }
+      const poolMap: Record<string, import('../types').PoolLookupResponse> = {};
+      poolResults.forEach(r => {
+        poolMap[r.catalog_item] = r;
+      });
+      setPoolLookupData(poolMap);
+      setAllPools(allPoolsRes.pools || []);
     };
 
     fetchPoolData();
-  }, [usePoolLookup, useGenericPoolOverride, schedules]);
+  }, [usePoolLookup, schedules]);
 
   /** Re-fetch namespace + catalog num_users + catalog namespace checks from the server (uses loaded schedules). */
   const refreshClusterValidation = useCallback(async () => {
@@ -835,26 +819,19 @@ export const UploadTab: React.FC<Props> = ({
               <Thead>
                 <Tr>
                   <Th />
-                  {useGenericPoolOverride && (
-                    <Th>
-                      <Tooltip content="Override with a different pool for this workshop. Select from all available cluster pools (tenant or self-service).">
-                        <span>Generic Pool</span>
-                      </Tooltip>
-                    </Th>
-                  )}
                   <Th>CI Name</Th>
                   <Th>CI (Catalog Item)</Th>
                   {usePoolLookup && (
                     <Th>
-                      Pool Status{' '}
+                      Resource Pool{' '}
                       <Tooltip
                         content={
                           <div>
-                            Resource pool availability:<br />
+                            Shows matched pool status + dropdown to override:<br />
                             • Ready: Resources available now<br />
                             • Provisioning: Resources being created<br />
-                            • Min: Target pool size<br />
-                            Click pool name to override selection.
+                            • Use dropdown to pick any cluster pool<br />
+                            • Select "(keep current)" to use catalog item
                           </div>
                         }
                       >
@@ -902,37 +879,6 @@ export const UploadTab: React.FC<Props> = ({
                           onToggle: () => toggleExpanded(i),
                         }}
                       />
-                      {useGenericPoolOverride && (
-                        <Td dataLabel="Generic Pool" style={{ minWidth: '250px' }}>
-                          {allPools.length === 0 ? (
-                            <Spinner size="md" />
-                          ) : (
-                            <FormSelect
-                              value={s.ci || ''}
-                              onChange={(_e, value) => {
-                                const updated = schedules.map((sc, idx) => idx === i ? { ...sc, ci: value as string } : sc);
-                                setSchedules(updated);
-                                api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
-                              }}
-                              aria-label={`Select generic pool for ${s.ci_name}`}
-                              style={{
-                                backgroundColor: 'var(--pf-v6-global--BackgroundColor--100)',
-                                color: 'var(--pf-v6-global--Color--100)',
-                                border: '1px solid var(--pf-v6-global--BorderColor--100)'
-                              }}
-                            >
-                              <FormSelectOption key="none" value="" label="(use catalog item)" />
-                              {allPools.map(pool => (
-                                <FormSelectOption
-                                  key={pool.pool_name}
-                                  value={pool.pool_name}
-                                  label={`${pool.pool_name} (Ready: ${pool.ready})`}
-                                />
-                              ))}
-                            </FormSelect>
-                          )}
-                        </Td>
-                      )}
                       <Td dataLabel="CI Name">
                         <TextInput
                           value={s.ci_name || ''}
@@ -976,56 +922,51 @@ export const UploadTab: React.FC<Props> = ({
                         )}
                       </Td>
                       {usePoolLookup && (
-                        <Td dataLabel="Pool Status">
+                        <Td dataLabel="Resource Pool" style={{ minWidth: '280px' }}>
                           {poolLookupData[s.ci] ? (
-                            poolLookupData[s.ci].has_pool && poolLookupData[s.ci].pool ? (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>
-                                  {poolLookupData[s.ci].pool!.pool_name}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              {poolLookupData[s.ci].has_pool && poolLookupData[s.ci].pool && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                  <div style={{ fontSize: '0.75rem', color: 'var(--pf-v6-global--Color--200)' }}>
+                                    <strong>{poolLookupData[s.ci].pool!.pool_name}</strong>
+                                  </div>
+                                  <div style={{ fontSize: '0.7rem', color: 'var(--pf-v6-global--Color--300)' }}>
+                                    Ready: {poolLookupData[s.ci].pool!.ready} / Min: {poolLookupData[s.ci].pool!.min_available}
+                                    {poolLookupData[s.ci].pool!.provisioning > 0 && (
+                                      <span style={{ color: 'var(--pf-v6-global--warning-color--100)' }}>
+                                        {' '}| Provisioning: {poolLookupData[s.ci].pool!.provisioning}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
-                                <div style={{ fontSize: '0.75rem', color: 'var(--pf-v6-global--Color--200)' }}>
-                                  Ready: {poolLookupData[s.ci].pool!.ready} / Min: {poolLookupData[s.ci].pool!.min_available}
-                                  {poolLookupData[s.ci].pool!.provisioning > 0 && (
-                                    <span style={{ color: 'var(--pf-v6-global--warning-color--100)' }}>
-                                      {' '}| Provisioning: {poolLookupData[s.ci].pool!.provisioning}
-                                    </span>
-                                  )}
-                                </div>
-                                <div style={{ fontSize: '0.7rem', color: 'var(--pf-v6-global--Color--300)' }}>
-                                  Lifespan: {poolLookupData[s.ci].pool!.lifespan_unclaimed}
-                                </div>
-                                <Button
-                                  variant="link"
-                                  isInline
-                                  onClick={() => {
-                                    setPoolSelectorIndex(i);
-                                    setSelectedPool(s.ci);
-                                    setShowPoolSelector(true);
+                              )}
+                              {allPools.length > 0 && (
+                                <FormSelect
+                                  value={s.ci || ''}
+                                  onChange={(_e, value) => {
+                                    const updated = schedules.map((sc, idx) => idx === i ? { ...sc, ci: value as string } : sc);
+                                    setSchedules(updated);
+                                    api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
                                   }}
-                                  style={{ fontSize: '0.75rem', padding: 0, marginTop: '2px' }}
-                                >
-                                  Override pool
-                                </Button>
-                              </div>
-                            ) : (
-                              <div>
-                                <span style={{ color: 'var(--pf-v6-global--Color--200)', fontSize: '0.85rem', display: 'block', marginBottom: '4px' }}>
-                                  No pool available
-                                </span>
-                                <Button
-                                  variant="link"
-                                  isInline
-                                  onClick={() => {
-                                    setPoolSelectorIndex(i);
-                                    setSelectedPool(s.ci);
-                                    setShowPoolSelector(true);
+                                  aria-label={`Override pool for ${s.ci_name}`}
+                                  style={{
+                                    backgroundColor: 'var(--pf-v6-global--BackgroundColor--100)',
+                                    color: 'var(--pf-v6-global--Color--100)',
+                                    border: '1px solid var(--pf-v6-global--BorderColor--100)',
+                                    fontSize: '0.85rem'
                                   }}
-                                  style={{ fontSize: '0.75rem', padding: 0 }}
                                 >
-                                  Select pool override
-                                </Button>
-                              </div>
-                            )
+                                  <FormSelectOption key="use-catalog" value={s.ci || ''} label="(keep current)" />
+                                  {allPools.map(pool => (
+                                    <FormSelectOption
+                                      key={pool.pool_name}
+                                      value={pool.pool_name}
+                                      label={`${pool.pool_name} (Ready: ${pool.ready})`}
+                                    />
+                                  ))}
+                                </FormSelect>
+                              )}
+                            </div>
                           ) : (
                             <Spinner size="md" />
                           )}
@@ -1245,16 +1186,6 @@ export const UploadTab: React.FC<Props> = ({
                           label="Pool Lookup"
                           isChecked={usePoolLookup}
                           onChange={(_e, checked) => setUsePoolLookup(checked)}
-                        />
-                      </Tooltip>
-                    </SplitItem>
-                    <SplitItem>
-                      <Tooltip content="Show pool dropdown for each workshop. Lets you override with any available cluster pool (tenant or self-service) instead of using the catalog item.">
-                        <Switch
-                          id="generic-pool-override-switch"
-                          label="Generic Pool Override"
-                          isChecked={useGenericPoolOverride}
-                          onChange={(_e, checked) => setUseGenericPoolOverride(checked)}
                         />
                       </Tooltip>
                     </SplitItem>
@@ -1532,92 +1463,6 @@ export const UploadTab: React.FC<Props> = ({
         </ModalFooter>
       </Modal>
 
-      {/* Pool selector modal */}
-      <Modal
-        variant="small"
-        isOpen={showPoolSelector}
-        onClose={() => {
-          setShowPoolSelector(false);
-          setPoolSelectorIndex(null);
-          setSelectedPool('');
-        }}
-        aria-labelledby="pool-selector-title"
-      >
-        <ModalHeader title="Override Resource Pool" labelId="pool-selector-title" />
-        <ModalBody>
-          <p style={{ marginBottom: '16px' }}>
-            Select a different resource pool for this workshop. The catalog item (CI) will be updated to match your selection.
-          </p>
-          <FormSelect
-            value={selectedPool}
-            onChange={(_e, value) => setSelectedPool(value as string)}
-            aria-label="Select resource pool"
-            style={{
-              backgroundColor: 'var(--pf-v6-global--BackgroundColor--100)',
-              color: 'var(--pf-v6-global--Color--100)',
-              border: '1px solid var(--pf-v6-global--BorderColor--100)'
-            }}
-          >
-            <FormSelectOption key="placeholder" value="" label="Choose a pool..." isDisabled />
-            {allPools.map(pool => (
-              <FormSelectOption
-                key={pool.pool_name}
-                value={pool.pool_name}
-                label={`${pool.pool_name} (Ready: ${pool.ready}/${pool.min_available})`}
-              />
-            ))}
-          </FormSelect>
-          {selectedPool && (
-            <div style={{ marginTop: '12px', padding: '12px', border: '1px solid var(--pf-v6-global--BorderColor--100)', borderRadius: '4px' }}>
-              {allPools.find(p => p.pool_name === selectedPool) && (
-                <>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '8px' }}>
-                    Pool Details:
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--pf-v6-global--Color--200)' }}>
-                    <div>Ready: {allPools.find(p => p.pool_name === selectedPool)!.ready}</div>
-                    <div>Min Available: {allPools.find(p => p.pool_name === selectedPool)!.min_available}</div>
-                    <div>Provisioning: {allPools.find(p => p.pool_name === selectedPool)!.provisioning}</div>
-                    <div>Lifespan (unclaimed): {allPools.find(p => p.pool_name === selectedPool)!.lifespan_unclaimed}</div>
-                    <div>Provider: {allPools.find(p => p.pool_name === selectedPool)!.provider_name}</div>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-        </ModalBody>
-        <ModalFooter>
-          <Button
-            variant="primary"
-            isDisabled={!selectedPool || poolSelectorIndex === null}
-            onClick={() => {
-              if (poolSelectorIndex !== null && selectedPool) {
-                const updated = schedules.map((sc, idx) =>
-                  idx === poolSelectorIndex ? { ...sc, ci: selectedPool } : sc
-                );
-                setSchedules(updated);
-                api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
-                setShowPoolSelector(false);
-                setPoolSelectorIndex(null);
-                setSelectedPool('');
-                showToast(`Pool override applied: ${selectedPool}`, 'success');
-              }
-            }}
-          >
-            Apply Pool Override
-          </Button>
-          <Button
-            variant="link"
-            onClick={() => {
-              setShowPoolSelector(false);
-              setPoolSelectorIndex(null);
-              setSelectedPool('');
-            }}
-          >
-            Cancel
-          </Button>
-        </ModalFooter>
-      </Modal>
     </PageSection>
   );
 };
