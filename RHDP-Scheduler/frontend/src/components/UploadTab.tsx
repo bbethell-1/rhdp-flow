@@ -24,10 +24,6 @@ import {
   SearchInput,
   Tooltip,
   TextInput,
-  Radio,
-  Form,
-  FormGroup,
-  Checkbox,
 } from '@patternfly/react-core';
 import { Table, Thead, Tbody, Tr, Th, Td, ExpandableRowContent } from '@patternfly/react-table';
 import UploadIcon from '@patternfly/react-icons/dist/esm/icons/upload-icon';
@@ -126,9 +122,6 @@ export const UploadTab: React.FC<Props> = ({
   const [poolSelectorIndex, setPoolSelectorIndex] = useState<number | null>(null);
   const [selectedPool, setSelectedPool] = useState<string>('');
   const [useGenericPoolOverride, setUseGenericPoolOverride] = useState(false);
-  const [genericPoolName, setGenericPoolName] = useState('ocp-base-pool');
-  const [genericPoolVariant, setGenericPoolVariant] = useState<'tenant' | 'self-service'>('tenant');
-  const [genericPoolSelectedRows, setGenericPoolSelectedRows] = useState<Set<number>>(new Set());
   const [whiteGlove, setWhiteGlove] = useState(true);
   const [redirect, setRedirect] = useState(true);
   const [showroomNovnc, setShowroomNovnc] = useState(false);
@@ -258,34 +251,46 @@ export const UploadTab: React.FC<Props> = ({
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logLines]);
 
-  // Pool lookup - fetch pool data when enabled
+  // Pool lookup - fetch pool data when enabled (or when generic pool override needs pool list)
   useEffect(() => {
-    if (!usePoolLookup || schedules.length === 0) {
+    if ((!usePoolLookup && !useGenericPoolOverride) || schedules.length === 0) {
       setPoolLookupData({});
       setAllPools([]);
       return;
     }
 
     const fetchPoolData = async () => {
-      // Fetch pools for each CI + fetch all pools for override selection
-      const uniqueCIs = Array.from(new Set(schedules.map(s => s.ci)));
-      const [poolResults, allPoolsRes] = await Promise.all([
-        Promise.all(uniqueCIs.map(ci =>
-          api.lookupPool(ci).catch(() => ({ catalog_item: ci, pool: null, has_pool: false }))
-        )),
-        api.listAllPools().catch(() => ({ pools: [] }))
-      ]);
+      // Fetch pools for each CI (if pool lookup enabled) + all pools (for override/generic selection)
+      const tasks: Promise<unknown>[] = [];
 
-      const poolMap: Record<string, import('../types').PoolLookupResponse> = {};
-      poolResults.forEach(r => {
-        poolMap[r.catalog_item] = r;
-      });
-      setPoolLookupData(poolMap);
-      setAllPools(allPoolsRes.pools || []);
+      if (usePoolLookup) {
+        const uniqueCIs = Array.from(new Set(schedules.map(s => s.ci)));
+        tasks.push(
+          Promise.all(uniqueCIs.map(ci =>
+            api.lookupPool(ci).catch(() => ({ catalog_item: ci, pool: null, has_pool: false }))
+          ))
+        );
+      }
+
+      tasks.push(api.listAllPools().catch(() => ({ pools: [] })));
+
+      const results = await Promise.all(tasks);
+
+      if (usePoolLookup && results.length === 2) {
+        const poolResults = results[0] as import('../types').PoolLookupResponse[];
+        const poolMap: Record<string, import('../types').PoolLookupResponse> = {};
+        poolResults.forEach(r => {
+          poolMap[r.catalog_item] = r;
+        });
+        setPoolLookupData(poolMap);
+        setAllPools((results[1] as { pools: import('../types').PoolInfo[] }).pools || []);
+      } else {
+        setAllPools((results[0] as { pools: import('../types').PoolInfo[] }).pools || []);
+      }
     };
 
     fetchPoolData();
-  }, [usePoolLookup, schedules]);
+  }, [usePoolLookup, useGenericPoolOverride, schedules]);
 
   /** Re-fetch namespace + catalog num_users + catalog namespace checks from the server (uses loaded schedules). */
   const refreshClusterValidation = useCallback(async () => {
@@ -342,18 +347,6 @@ export const UploadTab: React.FC<Props> = ({
     if (schedules.length === 0) {
       showToast('Upload a CSV first', 'danger');
       return;
-    }
-
-    // Apply generic pool override to selected rows
-    if (useGenericPoolOverride && genericPoolName.trim() && genericPoolSelectedRows.size > 0) {
-      const suffix = genericPoolVariant === 'tenant' ? '-tenant' : '-slfsrv';
-      const overriddenCatalogItem = `${genericPoolName.trim()}${suffix}`;
-      const overriddenSchedules = schedules.map((s, idx) =>
-        genericPoolSelectedRows.has(idx) ? { ...s, ci: overriddenCatalogItem } : s
-      );
-      await api.updateSchedules(overriddenSchedules);
-      setSchedules(overriddenSchedules);
-      showToast(`Applied generic pool override to ${genericPoolSelectedRows.size} row(s): ${overriddenCatalogItem}`, 'info');
     }
 
     setYamlDownloading(true);
@@ -470,19 +463,6 @@ export const UploadTab: React.FC<Props> = ({
 
   const handleDryRun = async () => {
     if (schedules.length === 0) { showToast('Upload a CSV first', 'danger'); return; }
-
-    // Apply generic pool override to selected rows
-    if (useGenericPoolOverride && genericPoolName.trim() && genericPoolSelectedRows.size > 0) {
-      const suffix = genericPoolVariant === 'tenant' ? '-tenant' : '-slfsrv';
-      const overriddenCatalogItem = `${genericPoolName.trim()}${suffix}`;
-      const overriddenSchedules = schedules.map((s, idx) =>
-        genericPoolSelectedRows.has(idx) ? { ...s, ci: overriddenCatalogItem } : s
-      );
-      await api.updateSchedules(overriddenSchedules);
-      setSchedules(overriddenSchedules);
-      showToast(`Applied generic pool override to ${genericPoolSelectedRows.size} row(s): ${overriddenCatalogItem}`, 'info');
-    }
-
     try {
       const data = await api.dryRun({ dry_run: true, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect, showroom_novnc: showroomNovnc, showroom_zerotouch: showroomZerotouch });
       setResults(data);
@@ -510,18 +490,6 @@ export const UploadTab: React.FC<Props> = ({
     setProgress(0);
     setProgressMsg('Starting...');
     setLogLines([]);
-
-    // Apply generic pool override to selected rows
-    if (useGenericPoolOverride && genericPoolName.trim() && genericPoolSelectedRows.size > 0) {
-      const suffix = genericPoolVariant === 'tenant' ? '-tenant' : '-slfsrv';
-      const overriddenCatalogItem = `${genericPoolName.trim()}${suffix}`;
-      const overriddenSchedules = schedules.map((s, idx) =>
-        genericPoolSelectedRows.has(idx) ? { ...s, ci: overriddenCatalogItem } : s
-      );
-      await api.updateSchedules(overriddenSchedules);
-      setSchedules(overriddenSchedules);
-      showToast(`Applied generic pool override to ${genericPoolSelectedRows.size} row(s): ${overriddenCatalogItem}`, 'info');
-    }
 
     try {
       const job = await api.deploy({ dry_run: dryRun, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect, showroom_novnc: showroomNovnc, showroom_zerotouch: showroomZerotouch });
@@ -869,8 +837,8 @@ export const UploadTab: React.FC<Props> = ({
                   <Th />
                   {useGenericPoolOverride && (
                     <Th>
-                      <Tooltip content="Select rows to apply generic pool override">
-                        <span>Use Generic Pool</span>
+                      <Tooltip content="Override with a different pool for this workshop. Select from all available cluster pools (tenant or self-service).">
+                        <span>Generic Pool</span>
                       </Tooltip>
                     </Th>
                   )}
@@ -935,20 +903,34 @@ export const UploadTab: React.FC<Props> = ({
                         }}
                       />
                       {useGenericPoolOverride && (
-                        <Td dataLabel="Use Generic Pool">
-                          <Checkbox
-                            id={`generic-pool-${i}`}
-                            isChecked={genericPoolSelectedRows.has(i)}
-                            onChange={(_e, checked) => {
-                              const newSet = new Set(genericPoolSelectedRows);
-                              if (checked) {
-                                newSet.add(i);
-                              } else {
-                                newSet.delete(i);
-                              }
-                              setGenericPoolSelectedRows(newSet);
-                            }}
-                          />
+                        <Td dataLabel="Generic Pool" style={{ minWidth: '250px' }}>
+                          {allPools.length === 0 ? (
+                            <Spinner size="md" />
+                          ) : (
+                            <FormSelect
+                              value={s.ci || ''}
+                              onChange={(_e, value) => {
+                                const updated = schedules.map((sc, idx) => idx === i ? { ...sc, ci: value as string } : sc);
+                                setSchedules(updated);
+                                api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
+                              }}
+                              aria-label={`Select generic pool for ${s.ci_name}`}
+                              style={{
+                                backgroundColor: 'var(--pf-v6-global--BackgroundColor--100)',
+                                color: 'var(--pf-v6-global--Color--100)',
+                                border: '1px solid var(--pf-v6-global--BorderColor--100)'
+                              }}
+                            >
+                              <FormSelectOption key="none" value="" label="(use catalog item)" />
+                              {allPools.map(pool => (
+                                <FormSelectOption
+                                  key={pool.pool_name}
+                                  value={pool.pool_name}
+                                  label={`${pool.pool_name} (Ready: ${pool.ready})`}
+                                />
+                              ))}
+                            </FormSelect>
+                          )}
                         </Td>
                       )}
                       <Td dataLabel="CI Name">
@@ -1267,7 +1249,7 @@ export const UploadTab: React.FC<Props> = ({
                       </Tooltip>
                     </SplitItem>
                     <SplitItem>
-                      <Tooltip content="Enable per-row generic pool selection. Select which workshops should use a base OCP pool instead of their specific catalog items. Choose between tenant or self-service pool variants.">
+                      <Tooltip content="Show pool dropdown for each workshop. Lets you override with any available cluster pool (tenant or self-service) instead of using the catalog item.">
                         <Switch
                           id="generic-pool-override-switch"
                           label="Generic Pool Override"
@@ -1341,78 +1323,6 @@ export const UploadTab: React.FC<Props> = ({
               )}
             </CardBody>
           </Card>
-
-          {/* Generic pool override configuration */}
-          {useGenericPoolOverride && (
-            <Card isCompact style={{ marginBottom: 16, border: '2px solid var(--pf-v6-global--palette--blue-300)' }}>
-              <CardTitle>Generic Pool Override Configuration</CardTitle>
-              <CardBody>
-                <Form isHorizontal>
-                  <FormGroup label="Pool Name" isRequired fieldId="generic-pool-name">
-                    <TextInput
-                      id="generic-pool-name"
-                      value={genericPoolName}
-                      onChange={(_e, value) => setGenericPoolName(value)}
-                      placeholder="e.g., ocp-base-pool"
-                      style={{ maxWidth: '300px' }}
-                    />
-                  </FormGroup>
-                  <FormGroup label="Pool Variant" isRequired fieldId="generic-pool-variant">
-                    <div style={{ display: 'flex', gap: '16px' }}>
-                      <Radio
-                        id="variant-tenant"
-                        name="pool-variant"
-                        label="Tenant"
-                        isChecked={genericPoolVariant === 'tenant'}
-                        onChange={() => setGenericPoolVariant('tenant')}
-                      />
-                      <Radio
-                        id="variant-self-service"
-                        name="pool-variant"
-                        label="Self-Service"
-                        isChecked={genericPoolVariant === 'self-service'}
-                        onChange={() => setGenericPoolVariant('self-service')}
-                      />
-                    </div>
-                  </FormGroup>
-                  <div style={{ marginTop: '12px', marginBottom: '8px' }}>
-                    <Button
-                      variant="link"
-                      isInline
-                      onClick={() => {
-                        const allIndices = schedules.map((_, idx) => idx);
-                        setGenericPoolSelectedRows(new Set(allIndices));
-                      }}
-                      style={{ paddingLeft: 0, fontSize: '0.85rem' }}
-                    >
-                      Select All
-                    </Button>
-                    <span style={{ margin: '0 8px', color: 'var(--pf-v6-global--Color--200)' }}>|</span>
-                    <Button
-                      variant="link"
-                      isInline
-                      onClick={() => setGenericPoolSelectedRows(new Set())}
-                      style={{ paddingLeft: 0, fontSize: '0.85rem' }}
-                    >
-                      Deselect All
-                    </Button>
-                  </div>
-                  <Alert
-                    variant={genericPoolSelectedRows.size === 0 ? 'warning' : 'info'}
-                    isInline
-                    title={genericPoolSelectedRows.size === 0 ? 'No rows selected' : `${genericPoolSelectedRows.size} row${genericPoolSelectedRows.size !== 1 ? 's' : ''} selected`}
-                    style={{ marginTop: '12px' }}
-                  >
-                    {genericPoolSelectedRows.size === 0 ? (
-                      'Select rows in the table below to apply generic pool override.'
-                    ) : (
-                      <>Selected workshops will use: <strong>{genericPoolName}-{genericPoolVariant === 'tenant' ? 'tenant' : 'slfsrv'}</strong></>
-                    )}
-                  </Alert>
-                </Form>
-              </CardBody>
-            </Card>
-          )}
 
           {/* Deploy buttons */}
           <Split hasGutter style={{ marginBottom: 16, flexWrap: 'wrap' }}>
