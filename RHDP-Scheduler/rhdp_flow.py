@@ -2526,18 +2526,16 @@ def create_multi_workshop(
 
             # Create Workshop for this asset
             asset_workshop_name = create_workshop_with_ui(asset_workshop_prefix, schedule.namespace, asset_payload, config, redirect=schedule.redirect, catalog_namespace_override=schedule.catalog_namespace)
-            
+
             if not asset_workshop_name:
                 logger.warning(f"Failed to create Workshop for asset {asset_ci}, continuing...")
                 continue
-            
-            # Create WorkshopProvision to manage the Workshop and provision seats
-            logger.info(f"Creating WorkshopProvision for asset workshop '{asset_workshop_name}'...")
-            asset_concurrency = (asset_concurrencies or {}).get(asset_ci, schedule.concurrency)
-            create_workshop_provision(asset_workshop_name, schedule.namespace, asset_payload, config, enable_workshop_ui=False, concurrency=asset_concurrency, count=schedule.instances)
-            
+
+            # NOTE: For multi-asset workshops, we do NOT create individual WorkshopProvisions
+            # The MultiWorkshop controller will handle all provisioning when we create the MultiWorkshop resource below
+
             created_workshops.append((asset_ci, asset_workshop_name, catalog_namespace, display_name))
-            logger.info(f"✅ Created Workshop '{asset_workshop_name}' with WorkshopProvision for asset {asset_ci}")
+            logger.info(f"✅ Created Workshop '{asset_workshop_name}' for asset {asset_ci} (MultiWorkshop will handle provisioning)")
         
         if not created_workshops:
             logger.error("No workshops were created for multi-asset workshop")
