@@ -150,6 +150,10 @@ export const UploadTab: React.FC<Props> = ({
   const [skippedRows, setSkippedRows] = useState<number>(0);
   const [totalRows, setTotalRows] = useState<number>(0);
 
+  // Catalog namespace bulk override modal
+  const [showCatalogOverrideModal, setShowCatalogOverrideModal] = useState(false);
+  const [catalogOverrideAction, setCatalogOverrideAction] = useState<'event' | 'prod' | 'dev' | 'clear' | null>(null);
+
   // ── Schedule validation warnings ──
   const warnings = useMemo(() => {
     const warns: ScheduleWarning[] = [];
@@ -358,6 +362,36 @@ export const UploadTab: React.FC<Props> = ({
       if (next.has(idx)) next.delete(idx); else next.add(idx);
       return next;
     });
+  };
+
+  const handleCatalogOverride = (action: 'event' | 'prod' | 'dev' | 'clear') => {
+    setCatalogOverrideAction(action);
+    setShowCatalogOverrideModal(true);
+  };
+
+  const confirmCatalogOverride = async () => {
+    if (!catalogOverrideAction) return;
+
+    const newValue = catalogOverrideAction === 'clear' ? '' :
+                     catalogOverrideAction === 'event' ? 'babylon-catalog-event' :
+                     catalogOverrideAction === 'prod' ? 'babylon-catalog-prod' :
+                     'babylon-catalog-dev';
+
+    const updated = schedules.map(s => ({ ...s, catalog_namespace: newValue }));
+    setSchedules(updated);
+
+    try {
+      await api.updateSchedules(updated);
+      const msg = catalogOverrideAction === 'clear'
+        ? `Cleared catalog namespace override for ${schedules.length} workshop(s) - using auto-detection`
+        : `Set catalog namespace to ${newValue} for ${schedules.length} workshop(s)`;
+      showToast(msg, 'success');
+    } catch (err) {
+      showToast(`Failed to update schedules: ${err}`, 'danger');
+    }
+
+    setShowCatalogOverrideModal(false);
+    setCatalogOverrideAction(null);
   };
 
   const handleUpload = async () => {
@@ -1269,6 +1303,84 @@ export const UploadTab: React.FC<Props> = ({
                   </SplitItem>
                 </Split>
               )}
+
+              {/* Catalog Namespace Bulk Override */}
+              {schedules.length > 0 && (
+                <>
+                  <div style={{ borderTop: '1px solid var(--pf-v6-global--BorderColor--100)', marginTop: 16, paddingTop: 16 }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: 8 }}>
+                      Catalog Namespace
+                    </div>
+                    <div style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)', marginBottom: 12 }}>
+                      <InfoCircleIcon style={{ marginRight: 4 }} />
+                      Auto-detected from CI suffix (.event → event, .prod → prod, .dev → dev, none → prod).
+                      Override for all workshops if needed.
+                    </div>
+                    {(() => {
+                      const detectionSummary = schedules.reduce((acc, s) => {
+                        const detected = s.ci.endsWith('.event') ? 'babylon-catalog-event' :
+                                       s.ci.endsWith('.prod') ? 'babylon-catalog-prod' :
+                                       s.ci.endsWith('.dev') ? 'babylon-catalog-dev' :
+                                       'babylon-catalog-prod';
+                        acc[detected] = (acc[detected] || 0) + 1;
+                        return acc;
+                      }, {} as Record<string, number>);
+
+                      return (
+                        <div style={{ fontSize: '0.85rem', marginBottom: 12 }}>
+                          <strong>Current detection:</strong>
+                          <ul style={{ marginTop: 4, marginBottom: 0, paddingLeft: 20 }}>
+                            {Object.entries(detectionSummary).map(([ns, count]) => (
+                              <li key={ns}>{count} workshop{count > 1 ? 's' : ''} → {ns}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      );
+                    })()}
+                    <div style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 8 }}>
+                      Override for all workshops:
+                    </div>
+                    <Split hasGutter>
+                      <SplitItem>
+                        <Button
+                          variant="secondary"
+                          onClick={() => handleCatalogOverride('event')}
+                          size="sm"
+                        >
+                          Force Event Catalog
+                        </Button>
+                      </SplitItem>
+                      <SplitItem>
+                        <Button
+                          variant="secondary"
+                          onClick={() => handleCatalogOverride('prod')}
+                          size="sm"
+                        >
+                          Force Prod Catalog
+                        </Button>
+                      </SplitItem>
+                      <SplitItem>
+                        <Button
+                          variant="secondary"
+                          onClick={() => handleCatalogOverride('dev')}
+                          size="sm"
+                        >
+                          Force Dev Catalog
+                        </Button>
+                      </SplitItem>
+                      <SplitItem>
+                        <Button
+                          variant="tertiary"
+                          onClick={() => handleCatalogOverride('clear')}
+                          size="sm"
+                        >
+                          Clear Overrides (Auto-detect)
+                        </Button>
+                      </SplitItem>
+                    </Split>
+                  </div>
+                </>
+              )}
             </CardBody>
           </Card>
 
@@ -1477,6 +1589,116 @@ export const UploadTab: React.FC<Props> = ({
         <ModalFooter>
           <Button variant="primary" onClick={handleClear}>Clear Session</Button>
           <Button variant="link" onClick={() => setShowClearConfirm(false)}>Cancel</Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Catalog namespace override confirmation modal */}
+      <Modal
+        variant="medium"
+        isOpen={showCatalogOverrideModal}
+        onClose={() => {
+          setShowCatalogOverrideModal(false);
+          setCatalogOverrideAction(null);
+        }}
+        aria-labelledby="catalog-override-title"
+      >
+        <ModalHeader
+          title="Confirm Catalog Namespace Override"
+          labelId="catalog-override-title"
+          titleIconVariant={catalogOverrideAction === 'clear' ? undefined : 'warning'}
+        />
+        <ModalBody>
+          {catalogOverrideAction && (() => {
+            const newValue = catalogOverrideAction === 'clear' ? 'Auto-detect' :
+                           catalogOverrideAction === 'event' ? 'babylon-catalog-event' :
+                           catalogOverrideAction === 'prod' ? 'babylon-catalog-prod' :
+                           'babylon-catalog-dev';
+
+            // Count workshops by their auto-detected catalog
+            const detectionSummary = schedules.reduce((acc, s) => {
+              const detected = s.ci.endsWith('.event') ? 'babylon-catalog-event' :
+                             s.ci.endsWith('.prod') ? 'babylon-catalog-prod' :
+                             s.ci.endsWith('.dev') ? 'babylon-catalog-dev' :
+                             'babylon-catalog-prod';
+              acc[detected] = (acc[detected] || 0) + 1;
+              return acc;
+            }, {} as Record<string, number>);
+
+            // Check if override conflicts with auto-detection
+            const hasConflict = catalogOverrideAction !== 'clear' && Object.keys(detectionSummary).some(
+              ns => ns !== newValue && detectionSummary[ns] > 0
+            );
+
+            return (
+              <>
+                <p>
+                  <strong>Action:</strong> {catalogOverrideAction === 'clear' ? 'Remove overrides and use auto-detection' : `Set catalog namespace to ${newValue}`} for <strong>{schedules.length} workshop(s)</strong>
+                </p>
+
+                {catalogOverrideAction === 'clear' ? (
+                  <>
+                    <p>Workshops will use auto-detection based on CI suffix:</p>
+                    <ul style={{ marginTop: 8 }}>
+                      <li><code>.event</code> suffix → <strong>babylon-catalog-event</strong></li>
+                      <li><code>.prod</code> suffix → <strong>babylon-catalog-prod</strong></li>
+                      <li><code>.dev</code> suffix → <strong>babylon-catalog-dev</strong></li>
+                      <li>No suffix → <strong>babylon-catalog-prod</strong> (default)</li>
+                    </ul>
+                    <p style={{ marginTop: 12 }}>Current auto-detection:</p>
+                    <ul style={{ marginTop: 8 }}>
+                      {Object.entries(detectionSummary).map(([ns, count]) => (
+                        <li key={ns}>{count} workshop{count > 1 ? 's' : ''} → {ns}</li>
+                      ))}
+                    </ul>
+                  </>
+                ) : hasConflict ? (
+                  <Alert
+                    variant="warning"
+                    isInline
+                    title="Potential catalog mismatch"
+                    style={{ marginTop: 16 }}
+                  >
+                    <p>Auto-detection suggests these workshops should use:</p>
+                    <ul style={{ marginTop: 8 }}>
+                      {Object.entries(detectionSummary).map(([ns, count]) => (
+                        <li key={ns}>{count} workshop{count > 1 ? 's' : ''} have CI suffix → {ns}</li>
+                      ))}
+                    </ul>
+                    <p style={{ marginTop: 8 }}>
+                      You are forcing them to <strong>{newValue}</strong> instead.
+                      Catalog items may not be found if they don't exist in {newValue}.
+                    </p>
+                  </Alert>
+                ) : (
+                  <Alert
+                    variant="success"
+                    isInline
+                    title="Catalog override matches auto-detection"
+                    style={{ marginTop: 16 }}
+                  >
+                    All {schedules.length} workshop(s) have the appropriate CI suffix for {newValue}.
+                  </Alert>
+                )}
+              </>
+            );
+          })()}
+        </ModalBody>
+        <ModalFooter>
+          <Button
+            variant={catalogOverrideAction === 'clear' ? 'primary' : 'warning'}
+            onClick={confirmCatalogOverride}
+          >
+            {catalogOverrideAction === 'clear' ? 'Yes, Clear Overrides' : 'Yes, Override All'}
+          </Button>
+          <Button
+            variant="link"
+            onClick={() => {
+              setShowCatalogOverrideModal(false);
+              setCatalogOverrideAction(null);
+            }}
+          >
+            Cancel
+          </Button>
         </ModalFooter>
       </Modal>
 
