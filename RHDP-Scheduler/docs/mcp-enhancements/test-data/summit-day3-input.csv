@@ -1,0 +1,61 @@
+Lab Code,Title,Room,Session Date,Session Start,Session End,Cloud,Deploy Mode,User Type,Instances (Count),Attendees,Notes,Status,Successful/Required (Counts),CI (AgV Path),CI Pool Name,Namespace,Link To Service in Namespace,Workshop URL,MUST-START Provisioning Date (UTC),Provision Successful,Concurency,Collaborators,Enable_workshop_interface,Password,Workshop Name,Auto-stop (UTC),Destroy Completed,Multi_Asset,Asset_CIs,Multi_Workshop_Name,Redirect
+LB1208,Practical image mode for RHEL: delivering secure application baselines,A301,2026-05-14,08:00:00,09:30:00,CNV,Workshop,Per Attendee,60,60,,,,summit-2026.lb1208-image-mode,Disabled,user-klewis-redhat-com,,,,,10,"mmicene@redhat.com,
+nlager@redhat.com,
+wharris@redhat.com,",TRUE,imagemode,,2026-05-30 (Ops to Manually delete),,FALSE,,,TRUE
+LB1390,"Ansible Automation Platform and HashiCorp. Terraform, Vault, and AAP!",A305,2026-05-14,08:00:00,09:30:00,CNV,Workshop,Per Attendee,90,90,,,,summit-2026.lb1390-hashi-aap,Disabled,user-klewis-redhat-com,,,,,10,"hmourad@redhat.com,
+tappnel@redhat.com,
+mpacker@redhat.com,
+nmartins@redhat.com",TRUE,aapterraform,LB1208: Practical image mode for RHEL: delivering secure application baselines,2026-05-30 (Ops to Manually delete),,FALSE,,,TRUE
+LB2655,Introduction to Ansible Network Automation Workshop,A311,2026-05-14,08:00:00,09:30:00,CNV,Workshop,Per Attendee,60,60,,,,summit-2026.lb2655-net-automation.event,Disabled,user-klewis-redhat-com,,,,,10,"dgreen@redhat.com,
+andriusb@redhat.com,
+tdubiel@redhat.com,",TRUE,ansnetauto,"LB1390: Ansible Automation Platform and HashiCorp. Terraform, Vault, and AAP!",2026-05-30 (Ops to Manually delete),,FALSE,,,TRUE
+LB1305,"AI-Powered RHEL Management: Get hands on with MCP servers for Red Hat Lightspeed, Satellite & RHEL",A313,2026-05-14,08:00:00,09:30:00,CNV,Workshop,Per Attendee,60,60,,,,summit-2026.lb1305-ai-powered-rhel-mgmt-cnv,Disabled,user-klewis-redhat-com,,,,,10,"jspinks@redhat.com,
+nkinder@redhat.com,
+briasmit@redhat.com,",TRUE,mcprhel,LB2655: Introduction to Ansible Network Automation Workshop,2026-05-30 (Ops to Manually delete),,FALSE,,,TRUE
+LB2391,"AI-Powered RHEL Management: Get hands on with MCP servers for Red Hat Lightspeed, Satellite & RHEL",A315,2026-05-14,08:00:00,09:30:00,Tenant Namespace,Workshop,Per Attendee,60,60,,,,summit-2026.lb2391-modernize-ocp-virt-tenant,Disabled,user-klewis-redhat-com,,,,,10,"jboeselm@redhat.com,
+acowles@redhat.com,
+stkousso@redhat.com,",TRUE,ocpvirtmod,"LB1305: AI-Powered RHEL Management: Get hands on with MCP servers for Red Hat Lightspeed, Satellite & RHEL",2026-05-30 (Ops to Manually delete),,FALSE,,,TRUE
+LB1347,Advanced features of Ansible Automation Platform,A301,2026-05-14,10:30:00,12:00:00,CNV,Workshop,Per Attendee,60,60,,,,summit-2026.lb1347-advanced-features-of-aap-cnv,Disabled,user-jappleii-redhat-com,,,,,10,"grieger@redhat.com,
+elavarde@redhat.com,
+cjung@redhat.com,",TRUE,ansibleaap,LB2391: Accelerating Infrastructure Modernization with OpenShift Virtualization,2026-05-30 (Ops to Manually delete),,FALSE,,,TRUE
+LB1390,"Ansible Automation Platform and HashiCorp. Terraform, Vault, and AAP!",A305,2026-05-14,10:30:00,12:00:00,CNV,Workshop,Per Attendee,90,90,,,,summit-2026.lb1390-hashi-aap,Disabled,user-jappleii-redhat-com,,,,,10,"hmourad@redhat.com,
+tappnel@redhat.com,
+mpacker@redhat.com,
+nmartins@redhat.com",TRUE,aapterraform,LB1347: Advanced features of Ansible Automation Platform,2026-05-30 (Ops to Manually delete),,FALSE,,,TRUE
+LB1208,Practical image mode for RHEL: delivering secure application baselines,A311,2026-05-14,10:30:00,12:00:00,CNV,Workshop,Per Attendee,60,60,,,,summit-2026.lb1208-image-mode,Disabled,user-jappleii-redhat-com,,,,,10,"mmicene@redhat.com,
+nlager@redhat.com,
+wharris@redhat.com,",TRUE,imagemode,"LB1390: Ansible Automation Platform and HashiCorp. Terraform, Vault, and AAP!",2026-05-30 (Ops to Manually delete),,FALSE,,,TRUE
+LB1216,Demystifying Ansible Automation Platform on OpenShift - A Hands-On Troubleshooting Deep Dive,A313,2026-05-14,10:30:00,12:00:00,Tenant Namespace,Workshop,Per Attendee,60,60,,,,summit-2026.lb1216-demyst-aap-ocp-tenant,Disabled,user-jappleii-redhat-com,,,,,10,"rlaroy@redhat.com,
+mmitschk@redhat.com,
+rgarciac@redhat.com,",TRUE,ansibleocp,LB1208: Practical image mode for RHEL: delivering secure application baselines,2026-05-30 (Ops to Manually delete),,FALSE,,,TRUE
+LB1839,Beyond the basics: Operationalizing Red Hat OpenShift Virtualization,A315,2026-05-14,10:30:00,12:00:00,CNV,Workshop,Per Attendee,60,60,,,,summit-2026.lb1839-balance-virt-fallback,openshift-4.21-virt-sno-event,user-jappleii-redhat-com,,,,,10,"acowles@redhat.com,
+rcapra@redhat.com,
+jmaltin@redhat.com,
+camay@redhat.com",TRUE,ocpvirtops,LB1216: Demystifying Ansible Automation Platform on OpenShift - A Hands-On Troubleshooting Deep Dive,2026-05-30 (Ops to Manually delete),,FALSE,,,TRUE
+LB1216,Demystifying Ansible Automation Platform on OpenShift - A Hands-On Troubleshooting Deep Dive,A301,2026-05-14,13:00:00,14:30:00,Tenant Namespace,Workshop,Per Attendee,60,60,,,,summit-2026.lb1216-demyst-aap-ocp-tenant,Disabled,user-bbethell-redhat-com,,,,,10,"rlaroy@redhat.com,
+mmitschk@redhat.com,
+rgarciac@redhat.com,",TRUE,ansibleocp,LB1839: Beyond the basics: Operationalizing Red Hat OpenShift Virtualization,2026-05-30 (Ops to Manually delete),,FALSE,,,TRUE
+LB2865,Container hardening: From zero to hero with Red Hat Hardened Images,A305,2026-05-14,13:00:00,14:30:00,Tenant Namespace,Workshop,Per Attendee,90,90,,,,summit-2026.lb2865-hummingbird-cnv-tenant,Disabled,user-bbethell-redhat-com,,,,,10,"mmicene@redhat.com,
+takinosh@redhat.com,
+tnolan@redhat.com,",TRUE,containers,LB1216: Demystifying Ansible Automation Platform on OpenShift - A Hands-On Troubleshooting Deep Dive,2026-05-30 (Ops to Manually delete),,FALSE,,,TRUE
+LB1305,"AI-Powered RHEL Management: Get hands on with MCP servers for Red Hat Lightspeed, Satellite & RHEL",A311,2026-05-14,13:00:00,14:30:00,CNV,Workshop,Per Attendee,60,60,,,,summit-2026.lb1305-ai-powered-rhel-mgmt-cnv,Disabled,user-bbethell-redhat-com,,,,,10,"jspinks@redhat.com,
+nkinder@redhat.com,
+briasmit@redhat.com,",TRUE,mcprhel,LB2865: Container hardening: From zero to hero with Red Hat Hardened Images,2026-05-30 (Ops to Manually delete),,FALSE,,,TRUE
+LB1577,Troubleshooting common problems on Red Hat Enterprise Linux,A312,2026-05-14,13:00:00,14:30:00,CNV,Workshop,Per Attendee,60,60,,,,"summit-2026.lb1577-rhel-troubleshooting-1
+summit-2026.lb1577-rhel-troubleshooting-2
+summit-2026.lb1577-rhel-troubleshooting-3
+summit-2026.lb1577-rhel-troubleshooting-4
+summit-2026.lb1577-rhel-troubleshooting-5",Disabled,user-bbethell-redhat-com,,,,,10,"nlager@redhat.com,
+smcbrien@redhat.com,
+",TRUE,N/A: ZT tech,"LB1305: AI-Powered RHEL Management: Get hands on with MCP servers for Red Hat Lightspeed, Satellite & RHEL",2026-05-30 (Ops to Manually delete),,TRUE,"summit-2026.lb1577-rhel-troubleshooting-1
+summit-2026.lb1577-rhel-troubleshooting-2
+summit-2026.lb1577-rhel-troubleshooting-3
+summit-2026.lb1577-rhel-troubleshooting-4
+summit-2026.lb1577-rhel-troubleshooting-5",LB1577: Troubleshooting common problems on Red Hat Enterprise Linux,TRUE
+LB2144,AgentOps in Production: Agentic End-to-End Observability with Red Hat AI,A313,2026-05-14,13:00:00,14:30:00,CNV,Workshop,Per Attendee,60,60,,,,summit-2026.lb2144-agentops-ocp-cnv,openshift-4.20-sno-event,user-bbethell-redhat-com,,,,,10,"rcarrata@redhat.com,
+tasmith@redhat.com,
+ankay@redhat.com,",TRUE,agentops,LB2144: AgentOps in Production: Agentic End-to-End Observability with Red Hat AI,2026-05-30 (Ops to Manually delete),,FALSE,,,TRUE
+LB1839,Beyond the basics: Operationalizing Red Hat OpenShift Virtualization,A315,2026-05-14,13:00:00,14:30:00,CNV,Workshop,Per Attendee,60,60,,,,summit-2026.lb1839-balance-virt-fallback,openshift-4.21-virt-sno-event,user-bbethell-redhat-com,,,,,10,"acowles@redhat.com,
+rcapra@redhat.com,
+jmaltin@redhat.com,
+camay@redhat.com",TRUE,ocpvirtops,LB1839: Beyond the basics: Operationalizing Red Hat OpenShift Virtualization,2026-05-30 (Ops to Manually delete),,FALSE,,,TRUE
