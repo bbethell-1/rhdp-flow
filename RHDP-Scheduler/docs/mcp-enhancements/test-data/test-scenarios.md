@@ -59,6 +59,43 @@ LB1577 Troubleshooting,summit-2026.lb1577-rhel-troubleshooting-1.event,True,"sum
 
 ---
 
+## Scenario 2b: Multi-Asset Duplicate Provisioning Bug (FIXED 2026-05-08)
+
+**Problem:** Multi-asset workshops created duplicate Workshop resources, all stuck at "Provisioning 0/60".
+
+**Symptoms:**
+```bash
+# 10 workshops instead of 5!
+oc get workshop -n user-bbethell-redhat-com | grep lb1577
+automation-l6qyr-summit-2026-lb1577-rhel-troublesh-4xpgd   Provisioning 0/60
+automation-l6qyr-summit-2026-lb1577-rhel-troublesh-k7jtz   Provisioning 0/60
+automation-l6qyr-summit-2026-lb1577-rhel-troublesh-k82p6   Provisioning 0/60
+automation-l6qyr-summit-2026-lb1577-rhel-troublesh-s8tgb   Provisioning 0/60
+automation-l6qyr-summit-2026-lb1577-rhel-troublesh-scc97   Provisioning 0/60
+# ... plus 5 more created by MultiWorkshop controller
+```
+
+**Root Cause:**
+FLOW was creating individual WorkshopProvisions for each asset Workshop. The MultiWorkshop controller then created its own set of Workshops, resulting in duplicates.
+
+**What FLOW was doing (WRONG):**
+1. Create 5 asset Workshops ✅
+2. Create 5 individual WorkshopProvisions ❌ (THIS WAS THE BUG)
+3. Create MultiWorkshop ✅
+4. MultiWorkshop controller creates 5 more Workshops → DUPLICATES!
+
+**What FLOW should do (FIXED):**
+1. Create 5 asset Workshops ✅
+2. Create MultiWorkshop ✅
+3. MultiWorkshop controller handles ALL provisioning ✅
+
+**Fix:**
+Removed WorkshopProvision creation from `create_multi_workshop()` in rhdp_flow.py (commit 4ea5eaee).
+
+**Detection Tool:** `ghost_workshop_detector` or `deployment_monitor` (spot duplicate workshops)
+
+---
+
 ## Scenario 3: Timezone Conversion
 
 **Problem:** Planning sheet in BST, FLOW needs UTC.
