@@ -396,6 +396,7 @@ def _schedule_to_response(s: WorkshopSchedule) -> WorkshopScheduleResponse:
         count=s.count,
         white_glove=s.white_glove,
         redirect=s.redirect,
+        catalog_namespace=s.catalog_namespace,
         showroom_repo=s.showroom_repo,
         showroom_ref=s.showroom_ref,
         showroom_novnc=s.showroom_novnc,
