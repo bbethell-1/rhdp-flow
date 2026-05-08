@@ -998,7 +998,24 @@ export const UploadTab: React.FC<Props> = ({
                           readOnly={rowEditsLocked}
                         />
                       </Td>
-                      <Td dataLabel="Catalog Namespace">{s.catalog_namespace || '-'}</Td>
+                      <Td dataLabel="Catalog Namespace">
+                        <FormSelect
+                          value={s.catalog_namespace || ''}
+                          onChange={(_e, value) => {
+                            const updated = schedules.map((sc, idx) => idx === i ? { ...sc, catalog_namespace: value } : sc);
+                            setSchedules(updated);
+                            api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
+                          }}
+                          aria-label="Catalog namespace"
+                          style={{ minWidth: '180px' }}
+                          isDisabled={rowEditsLocked}
+                        >
+                          <FormSelectOption value="" label="Auto-detect" />
+                          <FormSelectOption value="babylon-catalog-event" label="babylon-catalog-event" />
+                          <FormSelectOption value="babylon-catalog-prod" label="babylon-catalog-prod" />
+                          <FormSelectOption value="babylon-catalog-dev" label="babylon-catalog-dev" />
+                        </FormSelect>
+                      </Td>
                       <Td dataLabel="Users">
                         <TextInput
                           value={s.users?.toString() || ''}
