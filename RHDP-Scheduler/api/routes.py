@@ -70,6 +70,9 @@ from api.models import (
     CatalogItemParameter,
     CatalogNamespaceMismatch,
     CatalogNamespaceValidationResponse,
+    ClusterTenantValidationError,
+    ClusterTenantValidationWarning,
+    ClusterTenantValidationResponse,
     DeploymentResultResponse,
     DeployRequest,
     DestroyCheckRequest,
@@ -204,11 +207,14 @@ def _write_qa_csv_for_namespace(namespace: str) -> str:
         "Count",
         "AWS_Region",
         "Redirect",
+        "Catalog_Namespace",
         "Showroom_Repo",
         "Showroom_Ref",
         "Showroom_NoVNC",
         "Showroom_Zerotouch",
         "White_Glove",
+        "Item_Type",
+        "Cluster_CI",
     ]
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".csv", mode="w", newline="", encoding="utf-8")
     with tmp:
@@ -238,11 +244,14 @@ def _write_qa_csv_for_namespace(namespace: str) -> str:
                 "Count": "" if s.count is None else s.count,
                 "AWS_Region": s.aws_regions,
                 "Redirect": s.redirect,
+                "Catalog_Namespace": s.catalog_namespace,
                 "Showroom_Repo": s.showroom_repo,
                 "Showroom_Ref": s.showroom_ref,
                 "Showroom_NoVNC": s.showroom_novnc,
                 "Showroom_Zerotouch": s.showroom_zerotouch,
                 "White_Glove": s.white_glove,
+                "Item_Type": s.item_type if s.item_type else "",
+                "Cluster_CI": s.cluster_ci_override if s.cluster_ci_override else "",
             })
     return tmp.name
 
@@ -401,6 +410,8 @@ def _schedule_to_response(s: WorkshopSchedule) -> WorkshopScheduleResponse:
         showroom_ref=s.showroom_ref,
         showroom_novnc=s.showroom_novnc,
         showroom_zerotouch=s.showroom_zerotouch,
+        item_type=s.item_type,
+        cluster_ci_override=s.cluster_ci_override,
     )
 
 
@@ -980,6 +991,24 @@ def validate_catalog_namespaces(_key=Depends(verify_api_key)):
         not_found=not_found,
         checked=checked,
         skipped=skipped,
+    )
+
+
+@router.post("/schedules/validate-cluster-tenant", response_model=ClusterTenantValidationResponse)
+def validate_cluster_tenant_scheduling(_key=Depends(verify_api_key)):
+    """Check that cluster catalog items are scheduled before tenant catalog items."""
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+
+    from cluster_tenant_validation import validate_cluster_before_tenant
+
+    validation = validate_cluster_before_tenant(_schedules)
+
+    return ClusterTenantValidationResponse(
+        errors=[ClusterTenantValidationError(**e) for e in validation["errors"]],
+        warnings=[ClusterTenantValidationWarning(**w) for w in validation["warnings"]],
+        tenants_checked=validation["tenants_checked"],
+        clusters_found=validation["clusters_found"],
     )
 
 
@@ -2057,11 +2086,14 @@ def download_template():
         "Count",
         "AWS_Region",
         "Redirect",
+        "Catalog_Namespace",
         "Showroom_Repo",
         "Showroom_Ref",
         "Showroom_NoVNC",
         "Showroom_Zerotouch",
         "White_Glove",
+        "Item_Type",
+        "Cluster_CI",
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
@@ -2088,11 +2120,14 @@ def download_template():
         "Count": "",
         "AWS_Region": "",
         "Redirect": "",
+        "Catalog_Namespace": "",
         "Showroom_Repo": "",
         "Showroom_Ref": "",
         "Showroom_NoVNC": "",
         "Showroom_Zerotouch": "",
         "White_Glove": "True",
+        "Item_Type": "",
+        "Cluster_CI": "",
     })
     output.seek(0)
     return StreamingResponse(

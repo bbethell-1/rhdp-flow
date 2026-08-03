@@ -136,6 +136,9 @@ export const UploadTab: React.FC<Props> = ({
   const [catalogNamespaceMismatches, setCatalogNamespaceMismatches] = useState<import('../types').CatalogNamespaceMismatch[]>([]);
   const [catalogNotFound, setCatalogNotFound] = useState<Array<{ ci_name: string; ci: string; namespace: string; expected_catalog_namespace: string; message: string }>>([]);
 
+  // Cluster-tenant validation
+  const [clusterTenantValidation, setClusterTenantValidation] = useState<any>(null);
+
   // Confirmation modal state
   const [showDeployConfirm, setShowDeployConfirm] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -145,6 +148,9 @@ export const UploadTab: React.FC<Props> = ({
 
   // Search filter for schedule preview
   const [previewSearch, setPreviewSearch] = useState('');
+
+  // Search filter for pool override dropdowns (per-row)
+  const [poolSearchFilters, setPoolSearchFilters] = useState<Record<number, string>>({});
 
   // Skipped row tracking (CSV parse)
   const [skippedRows, setSkippedRows] = useState<number>(0);
@@ -407,6 +413,9 @@ export const UploadTab: React.FC<Props> = ({
       showToast(msg, data.skipped_rows ? 'danger' : 'success');
       try {
         await refreshClusterValidation();
+        // Validate cluster-tenant relationships
+        const ctRes = await api.validateClusterTenant();
+        setClusterTenantValidation(ctRes);
       } catch (e) {
         console.warn('Post-upload cluster validation failed', e);
       }
@@ -622,7 +631,7 @@ export const UploadTab: React.FC<Props> = ({
     }
   };
 
-  const columnCount = 12;
+  const columnCount = 14; // Updated for Item Type + Cluster Link columns
 
   return (
     <PageSection>
@@ -836,6 +845,19 @@ export const UploadTab: React.FC<Props> = ({
             </Alert>
           )}
 
+          {/* Cluster-tenant validation errors */}
+          {clusterTenantValidation?.errors?.length > 0 && (
+            <Alert variant="danger" isInline title={`${clusterTenantValidation.errors.length} cluster-tenant error(s)`} style={{ marginBottom: 12 }}>
+              <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+                {clusterTenantValidation.errors.map((e: any, i: number) => (
+                  <li key={i}>
+                    {e.tenant_name || e.tenant_ci}: {e.issue}
+                  </li>
+                ))}
+              </ul>
+            </Alert>
+          )}
+
           {/* Multi-asset password warning */}
           {needsPasswordWarning && (
             <Alert variant="warning" isInline title="Multi-asset passwords not loaded" style={{ marginBottom: 12 }}>
@@ -853,8 +875,10 @@ export const UploadTab: React.FC<Props> = ({
               <Thead>
                 <Tr>
                   <Th />
+                  <Th>Item Type</Th>
                   <Th>CI Name</Th>
                   <Th>CI (Catalog Item)</Th>
+                  <Th>Cluster Link</Th>
                   {usePoolLookup && (
                     <Th>
                       Resource Pool{' '}
@@ -903,9 +927,17 @@ export const UploadTab: React.FC<Props> = ({
                 </Tr>
               </Thead>
               <Tbody>
-                {filteredSchedules.map(({ s, i }) => (
+                {filteredSchedules.map(({ s, i }) => {
+                  const rowStyle: React.CSSProperties = {};
+                  if (s.item_type === 'Cluster') {
+                    rowStyle.backgroundColor = 'rgba(0, 102, 204, 0.1)'; // blue tint
+                  } else if (s.item_type === 'Tenant') {
+                    rowStyle.backgroundColor = 'rgba(0, 204, 102, 0.1)'; // green tint
+                  }
+
+                  return (
                   <Fragment key={`${s.ci}-${s.namespace}-${i}`}>
-                    <Tr className={warningRowIndices.has(i) ? 'warning-row' : undefined}>
+                    <Tr className={warningRowIndices.has(i) ? 'warning-row' : undefined} style={rowStyle}>
                       <Td
                         expand={{
                           rowIndex: i,
@@ -913,6 +945,22 @@ export const UploadTab: React.FC<Props> = ({
                           onToggle: () => toggleExpanded(i),
                         }}
                       />
+                      <Td dataLabel="Item Type">
+                        <FormSelect
+                          value={s.item_type || 'Workshop'}
+                          onChange={(_e, value) => {
+                            const updated = schedules.map((sc, idx) => idx === i ? { ...sc, item_type: value as 'Workshop' | 'Cluster' | 'Tenant' } : sc);
+                            setSchedules(updated);
+                            api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
+                          }}
+                          aria-label={`Item type for ${s.ci_name}`}
+                          style={{ minWidth: '120px' }}
+                        >
+                          <FormSelectOption key="workshop" value="Workshop" label="Workshop" />
+                          <FormSelectOption key="cluster" value="Cluster" label="Cluster" />
+                          <FormSelectOption key="tenant" value="Tenant" label="Tenant" />
+                        </FormSelect>
+                      </Td>
                       <Td dataLabel="CI Name">
                         <TextInput
                           value={s.ci_name || ''}
@@ -955,6 +1003,33 @@ export const UploadTab: React.FC<Props> = ({
                           />
                         )}
                       </Td>
+                      <Td dataLabel="Cluster Link">
+                        {s.item_type === 'Tenant' ? (
+                          <FormSelect
+                            value={s.cluster_link || ''}
+                            onChange={(_e, value) => {
+                              const updated = schedules.map((sc, idx) => idx === i ? { ...sc, cluster_link: value as string } : sc);
+                              setSchedules(updated);
+                              api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
+                            }}
+                            aria-label={`Cluster link for ${s.ci_name}`}
+                            style={{ minWidth: '200px' }}
+                          >
+                            <FormSelectOption key="none" value="" label="(select cluster)" />
+                            {schedules
+                              .filter((sc, idx) => sc.item_type === 'Cluster' && idx !== i)
+                              .map((clusterSched, idx) => (
+                                <FormSelectOption
+                                  key={idx}
+                                  value={clusterSched.ci_name}
+                                  label={clusterSched.ci_name}
+                                />
+                              ))}
+                          </FormSelect>
+                        ) : (
+                          <span style={{ color: 'var(--pf-v6-global--Color--200)' }}>-</span>
+                        )}
+                      </Td>
                       {usePoolLookup && (
                         <Td dataLabel="Resource Pool" style={{ minWidth: '280px' }}>
                           {poolLookupData[s.ci] ? (
@@ -975,30 +1050,48 @@ export const UploadTab: React.FC<Props> = ({
                                 </div>
                               )}
                               {allPools.length > 0 && (
-                                <FormSelect
-                                  value={s.ci || ''}
-                                  onChange={(_e, value) => {
-                                    const updated = schedules.map((sc, idx) => idx === i ? { ...sc, ci: value as string } : sc);
-                                    setSchedules(updated);
-                                    api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
-                                  }}
-                                  aria-label={`Override pool for ${s.ci_name}`}
-                                  style={{
-                                    backgroundColor: 'var(--pf-v6-global--BackgroundColor--100)',
-                                    color: 'var(--pf-v6-global--Color--100)',
-                                    border: '1px solid var(--pf-v6-global--BorderColor--100)',
-                                    fontSize: '0.85rem'
-                                  }}
-                                >
-                                  <FormSelectOption key="use-catalog" value={s.ci || ''} label="(keep current)" />
-                                  {allPools.map(pool => (
-                                    <FormSelectOption
-                                      key={pool.pool_name}
-                                      value={pool.pool_name}
-                                      label={`${pool.pool_name} (Ready: ${pool.ready})`}
-                                    />
-                                  ))}
-                                </FormSelect>
+                                <>
+                                  <SearchInput
+                                    placeholder="Filter pools..."
+                                    value={poolSearchFilters[i] || ''}
+                                    onChange={(_e, value) => {
+                                      setPoolSearchFilters(prev => ({ ...prev, [i]: value }));
+                                    }}
+                                    onClear={() => {
+                                      setPoolSearchFilters(prev => {
+                                        const updated = { ...prev };
+                                        delete updated[i];
+                                        return updated;
+                                      });
+                                    }}
+                                    style={{ marginBottom: '4px', fontSize: '0.8rem' }}
+                                  />
+                                  <FormSelect
+                                    value={s.ci || ''}
+                                    onChange={(_e, value) => {
+                                      const updated = schedules.map((sc, idx) => idx === i ? { ...sc, ci: value as string } : sc);
+                                      setSchedules(updated);
+                                      api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
+                                    }}
+                                    aria-label={`Override pool for ${s.ci_name}`}
+                                    className="pool-override-select"
+                                  >
+                                    <FormSelectOption key="use-catalog" value={s.ci || ''} label="(keep current)" />
+                                    {allPools
+                                      .filter(pool => {
+                                        const searchTerm = (poolSearchFilters[i] || '').toLowerCase();
+                                        if (!searchTerm) return true;
+                                        return pool.pool_name.toLowerCase().includes(searchTerm);
+                                      })
+                                      .map(pool => (
+                                        <FormSelectOption
+                                          key={pool.pool_name}
+                                          value={pool.pool_name}
+                                          label={`${pool.pool_name} (Ready: ${pool.ready})`}
+                                        />
+                                      ))}
+                                  </FormSelect>
+                                </>
                               )}
                             </div>
                           ) : (
@@ -1195,7 +1288,8 @@ export const UploadTab: React.FC<Props> = ({
                       </Tr>
                     )}
                   </Fragment>
-                ))}
+                );
+                })}
               </Tbody>
             </Table>
           </div>

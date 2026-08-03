@@ -319,6 +319,23 @@ html, body, #root {
   color: var(--rh-dark);
 }
 
+.pool-override-select {
+  background-color: var(--glass-bg-input);
+  color: var(--glass-text-primary);
+  border-color: var(--glass-border);
+  font-size: 0.85rem;
+}
+
+.pool-override-select option {
+  background-color: #151515;
+  color: var(--rh-white);
+}
+
+:root:not(.pf-v6-theme-dark) .pool-override-select option {
+  background-color: var(--rh-white);
+  color: var(--rh-dark);
+}
+
 .qa-ci-meta {
   color: var(--glass-text-secondary);
   font-size: 0.8rem;

@@ -38,6 +38,8 @@ export interface WorkshopSchedule {
   showroom_ref: string;
   showroom_novnc: boolean;
   showroom_zerotouch: boolean;
+  item_type?: 'Workshop' | 'Cluster' | 'Tenant';
+  cluster_link?: string;
 }
 
 export interface UploadResponse {

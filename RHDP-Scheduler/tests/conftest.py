@@ -58,6 +58,28 @@ CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,W
 Showroom Workshop,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,20,True,Workshop1,Admin,QA,Virt Showroom,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,,,,,,2,https://github.com/rhpds/showroom-virt.git,main,False,False
 """
 
+CLUSTER_TENANT_VALID_CSV = """\
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Cluster_CI
+Cluster Workshop,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,20,True,Pass1,Admin,QA,Cluster WS,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,
+Tenant Workshop,openshift-cnv.ocp-virt-roadshow-multi-user.prod-tenant,user-bbethell-redhat-com,10,True,Pass2,Admin,QA,Tenant WS,15/02/2026 11:30,15/02/2026 19:00,17/02/2026 11:00,openshift-cnv.ocp-virt-roadshow-multi-user.prod
+"""
+
+CLUSTER_TENANT_WRONG_ORDER_CSV = """\
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Cluster_CI
+Tenant Workshop,openshift-cnv.ocp-virt-roadshow-multi-user.prod-tenant,user-bbethell-redhat-com,10,True,Pass2,Admin,QA,Tenant WS,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,openshift-cnv.ocp-virt-roadshow-multi-user.prod
+Cluster Workshop,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,20,True,Pass1,Admin,QA,Cluster WS,15/02/2026 11:30,15/02/2026 19:00,17/02/2026 11:00,
+"""
+
+CLUSTER_TENANT_MISSING_CLUSTER_CSV = """\
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Cluster_CI
+Tenant Workshop,openshift-cnv.ocp-virt-roadshow-multi-user.prod-tenant,user-bbethell-redhat-com,10,True,Pass2,Admin,QA,Tenant WS,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,openshift-cnv.ocp-virt-roadshow-multi-user.prod
+"""
+
+CLUSTER_TENANT_OVERRIDE_CSV = """\
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Cluster_CI
+Tenant Workshop,openshift-cnv.ocp-virt-roadshow-multi-user.prod-tenant,user-bbethell-redhat-com,10,True,Pass2,Admin,QA,Tenant WS,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,custom-cluster.prod
+"""
+
 
 # ============================================================================
 # Factory functions

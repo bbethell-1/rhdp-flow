@@ -1,0 +1,4 @@
+CI Name,CI,Namespace,Users,Instances,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Item_Type
+AI RAG Cluster,summit-2026.lb4003-ai-rag-cluster.event,user-bbethell-redhat-com,1,1,True,testpass1,Admin,QA,AI RAG Cluster Test,31/07/2026 15:30,01/08/2026 18:00,02/08/2026 15:30,cluster
+AI RAG Tenant User 1,summit-2026.lb4003-ai-rag-tenant.event,user-bbethell-redhat-com,5,5,True,testpass2,Admin,QA,AI RAG Tenant 1,31/07/2026 16:45,01/08/2026 18:00,02/08/2026 15:30,tenant
+AI RAG Tenant User 2,summit-2026.lb4003-ai-rag-tenant.event,user-bbethell-redhat-com,5,5,True,testpass3,Admin,QA,AI RAG Tenant 2,31/07/2026 16:45,01/08/2026 18:00,02/08/2026 15:30,tenant

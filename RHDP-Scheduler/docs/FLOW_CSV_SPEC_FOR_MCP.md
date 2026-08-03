@@ -151,6 +151,111 @@ Upload a second CSV with columns: `CI Name`, `CI`, `Password`. Overrides per-ass
 
 ---
 
+## Cluster-Tenant Catalog Items
+
+### Overview
+
+Some catalog items are available in **two infrastructure variants**:
+
+- **Cluster variant** (`-cluster` suffix): Provisions a dedicated OpenShift cluster
+- **Tenant variant** (`-tenant` suffix): Provisions tenant namespace on shared cluster via Sandbox API
+
+### Architecture Differences
+
+| Variant | Infrastructure | Provision Time | Cost | Isolation |
+|---------|---------------|----------------|------|-----------|
+| Cluster | Dedicated cluster | 45-60 min | Higher | Complete (full cluster) |
+| Tenant | Shared cluster + namespace | 5-15 min | Lower | Namespace-level |
+
+### CSV Usage
+
+**No special columns required** - just use the correct catalog item ID:
+
+```csv
+CI Name,CI,Namespace,...
+Data Gov Tenant,ai-quickstarts.ai-qs-data-gov-tenant.event,user-alice,...
+Data Gov Cluster,ai-quickstarts.ai-qs-data-gov-cluster.event,user-bob,...
+```
+
+### When to Generate Each Variant
+
+**Use tenant variant (`-tenant`) when:**
+- User requests workshop, demo, or quickstart deployment
+- Event is time-sensitive (needs fast provisioning)
+- Budget-conscious (lower cost)
+- Multi-user event (20+ seats) - stagger deployments by 5-10 minutes
+
+**Use cluster variant (`-cluster`) when:**
+- User explicitly requests "full cluster" or "dedicated cluster"
+- Testing cluster-level features (operators, cluster config, etc.)
+- Production-like environment needed
+- User mentions "cluster admin access" or "custom cluster configuration"
+
+### Catalog Item Families
+
+**AI Quickstarts** (event catalog):
+```
+ai-quickstarts.ai-qs-data-gov-cluster.event      | ai-quickstarts.ai-qs-data-gov-tenant.event
+ai-quickstarts.ai-qs-it-self-service-cluster.event | ai-quickstarts.ai-qs-it-self-service-tenant.event
+ai-quickstarts.ai-qs-product-rec-cluster.event   | ai-quickstarts.ai-qs-product-rec-tenant.event
+ai-quickstarts.ai-qs-rag-cluster.event           | ai-quickstarts.ai-qs-rag-tenant.event
+ai-quickstarts.ai-qs-ppe-comp-cluster.event      | ai-quickstarts.ai-qs-ppe-comp-tenant.event
+```
+
+### Validation
+
+Before generating CSV with cluster/tenant items, verify existence:
+
+```python
+import requests
+
+def validate_catalog_item(ci: str, catalog_ns: str = "babylon-catalog-event"):
+    """Check if catalog item exists."""
+    # Via API
+    items = requests.get("http://localhost:8000/api/catalog/items").json()
+    return any(item["id"] == ci and item["catalog_namespace"] == catalog_ns for item in items)
+
+# Example
+if validate_catalog_item("ai-quickstarts.ai-qs-data-gov-tenant.event"):
+    print("Tenant variant exists")
+```
+
+### Staggered Deployment for Tenant Variants
+
+When generating CSV with multiple tenant workshops (e.g., event with 50 seats), **stagger provisioning times** to avoid Sandbox API throttling:
+
+```python
+import datetime
+
+base_time = datetime.datetime(2026, 5, 7, 9, 0)  # Event start: 09:00
+interval_minutes = 5  # 5-minute gaps
+
+for i in range(10):  # 10 tenant workshops
+    prov_time = base_time + datetime.timedelta(minutes=i * interval_minutes)
+    row = {
+        "CI Name": f"AI Workshop {i+1}",
+        "CI": "ai-quickstarts.ai-qs-data-gov-tenant.event",
+        "Provisioning Date (UTC)": prov_time.strftime("%d/%m/%Y %H:%M"),
+        # ... rest
+    }
+```
+
+**Output:**
+```csv
+Provisioning Date (UTC)
+07/05/2026 09:00
+07/05/2026 09:05  ← 5-minute gap
+07/05/2026 09:10
+07/05/2026 09:15
+```
+
+**Recommended intervals:**
+- Small events (<10 workshops): 5 minutes
+- Medium events (10-30 workshops): 7-10 minutes
+- Large events (30+ workshops): 10-15 minutes
+
+---
+
 ## Validation Rules
 
 ### 1. `num_users` Catalog Maximum Enforcement

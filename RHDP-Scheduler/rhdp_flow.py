@@ -196,6 +196,13 @@ class WorkshopSchedule:
     showroom_ref: str = ""  # Optional Showroom docs git branch/tag (default: main)
     showroom_novnc: bool = False  # Enable noVNC remote desktop in Showroom
     showroom_zerotouch: bool = False  # Use zerotouch chart variant with setup/runtime automation
+    # Cluster/tenant detection fields
+    item_type: Optional[str] = None  # CSV: cluster, tenant, workshop (or None if not specified)
+    cluster_ci_override: Optional[str] = None  # CSV: Cluster_CI column - explicit override for tenant's cluster
+    is_cluster: bool = False  # Detected as cluster CI (either via naming or explicit label)
+    is_tenant: bool = False  # Detected as tenant CI (either via naming or explicit label)
+    detected_cluster_ci: Optional[str] = None  # For tenants: the associated cluster CI (from override or naming)
+    detection_method: str = "none"  # How the type was detected: "csv_label", "naming", "none"
 
 @dataclass
 class DeploymentResult:
@@ -214,6 +221,244 @@ class DeploymentResult:
     showroom_url: str = ""
     showroom_status: str = ""
     password: str = ""  # Workshop access password from schedule (for downstream CSV consumers)
+
+# ============================================================================
+# CLUSTER/TENANT DETECTION HELPERS
+# ============================================================================
+
+def is_cluster_ci(ci: str) -> bool:
+    """
+    Check if a catalog item is a cluster CI based on naming convention.
+
+    Args:
+        ci: Catalog item identifier (e.g., "ocp4-cluster.prod")
+
+    Returns:
+        True if CI contains "-cluster." in the name
+    """
+    return "-cluster." in ci.lower()
+
+
+def is_tenant_ci(ci: str) -> bool:
+    """
+    Check if a catalog item is a tenant CI based on naming convention.
+
+    Args:
+        ci: Catalog item identifier (e.g., "ocp4-tenant.prod")
+
+    Returns:
+        True if CI contains "-tenant." in the name
+    """
+    return "-tenant." in ci.lower()
+
+
+def get_cluster_ci_for_tenant(tenant_ci: str, override: Optional[str] = None) -> Optional[str]:
+    """
+    Determine the cluster CI for a given tenant CI.
+
+    Args:
+        tenant_ci: The tenant catalog item identifier
+        override: Optional explicit cluster CI from CSV Cluster_CI column
+
+    Returns:
+        The cluster CI, or None if:
+        - Override is "none" (case-insensitive)
+        - tenant_ci is not actually a tenant CI
+        - No valid cluster CI can be determined
+
+    Logic:
+        1. If override provided and not "none", return it
+        2. If override is "none", return None (explicit opt-out)
+        3. If no override, attempt naming fallback: replace "-tenant." with "-cluster."
+    """
+    # Handle explicit override
+    if override:
+        if override.lower() == "none":
+            return None
+        return override
+
+    # No override - try naming fallback
+    if not is_tenant_ci(tenant_ci):
+        return None
+
+    # Replace -tenant. with -cluster. (case-preserving)
+    # Find the position case-insensitively
+    lower_ci = tenant_ci.lower()
+    tenant_pos = lower_ci.find("-tenant.")
+    if tenant_pos == -1:
+        return None
+
+    # Build cluster CI preserving original case for the prefix
+    cluster_ci = tenant_ci[:tenant_pos] + "-cluster." + tenant_ci[tenant_pos + 8:]
+    return cluster_ci
+
+
+def analyze_cluster_tenant_relationships(schedules: List[WorkshopSchedule]) -> None:
+    """
+    Analyze and populate cluster/tenant detection fields for all schedules.
+
+    Uses conservative detection:
+    1. CSV item_type label takes priority (explicit "cluster", "tenant", or "workshop")
+    2. Naming convention as fallback (contains "-cluster." or "-tenant.")
+    3. For tenants, resolve cluster CI via cluster_ci_override or naming
+
+    Modifies schedules in-place, setting:
+    - is_cluster, is_tenant flags
+    - detected_cluster_ci for tenant schedules
+    - detection_method: "csv_label", "naming", or "none"
+
+    Args:
+        schedules: List of WorkshopSchedule objects to analyze
+    """
+    for schedule in schedules:
+        # Default: not cluster or tenant
+        schedule.is_cluster = False
+        schedule.is_tenant = False
+        schedule.detected_cluster_ci = None
+        schedule.detection_method = "none"
+
+        # Priority 1: Explicit CSV label
+        if schedule.item_type:
+            item_type_lower = schedule.item_type.lower().strip()
+            if item_type_lower == "cluster":
+                schedule.is_cluster = True
+                schedule.detection_method = "csv_label"
+                logger.debug(f"{schedule.ci_name}: Detected as cluster (CSV label)")
+                continue
+            elif item_type_lower == "tenant":
+                schedule.is_tenant = True
+                schedule.detection_method = "csv_label"
+                schedule.detected_cluster_ci = get_cluster_ci_for_tenant(
+                    schedule.ci,
+                    schedule.cluster_ci_override
+                )
+                logger.debug(
+                    f"{schedule.ci_name}: Detected as tenant (CSV label), "
+                    f"cluster CI: {schedule.detected_cluster_ci}"
+                )
+                continue
+            elif item_type_lower == "workshop":
+                # Explicitly labeled as workshop - not cluster or tenant
+                schedule.detection_method = "csv_label"
+                logger.debug(f"{schedule.ci_name}: Detected as workshop (CSV label)")
+                continue
+
+        # Priority 2: Naming convention fallback
+        if is_cluster_ci(schedule.ci):
+            schedule.is_cluster = True
+            schedule.detection_method = "naming"
+            logger.debug(f"{schedule.ci_name}: Detected as cluster (naming convention)")
+        elif is_tenant_ci(schedule.ci):
+            schedule.is_tenant = True
+            schedule.detection_method = "naming"
+            schedule.detected_cluster_ci = get_cluster_ci_for_tenant(
+                schedule.ci,
+                schedule.cluster_ci_override
+            )
+            logger.debug(
+                f"{schedule.ci_name}: Detected as tenant (naming convention), "
+                f"cluster CI: {schedule.detected_cluster_ci}"
+            )
+
+
+def validate_cluster_before_tenant(schedules: List[WorkshopSchedule]) -> Dict[str, Any]:
+    """
+    Validate that cluster schedules are provisioned before their tenant schedules.
+
+    Checks:
+    1. For each tenant, find its cluster schedule (by detected_cluster_ci)
+    2. Verify cluster provisioning_date < tenant provisioning_date
+    3. Warn if cluster schedule not found in same batch
+
+    Args:
+        schedules: List of WorkshopSchedule objects to validate
+
+    Returns:
+        Dictionary with validation results:
+        {
+            "valid": bool,  # Overall validity
+            "errors": List[str],  # Critical errors (tenant before cluster)
+            "warnings": List[str],  # Warnings (missing cluster in batch)
+            "relationships": List[Dict]  # Detected cluster-tenant pairs
+        }
+    """
+    errors = []
+    warnings = []
+    relationships = []
+
+    # Build cluster CI -> schedule mapping
+    cluster_map: Dict[str, WorkshopSchedule] = {}
+    for schedule in schedules:
+        if schedule.is_cluster:
+            cluster_map[schedule.ci] = schedule
+
+    # Check each tenant
+    for schedule in schedules:
+        if not schedule.is_tenant:
+            continue
+
+        if not schedule.detected_cluster_ci:
+            warnings.append(
+                f"Tenant '{schedule.ci_name}' has no detected cluster CI "
+                f"(override may be 'none')"
+            )
+            continue
+
+        cluster_schedule = cluster_map.get(schedule.detected_cluster_ci)
+
+        if not cluster_schedule:
+            warnings.append(
+                f"Tenant '{schedule.ci_name}' expects cluster '{schedule.detected_cluster_ci}' "
+                f"but no matching cluster found in this deployment batch"
+            )
+            relationships.append({
+                "tenant": schedule.ci_name,
+                "cluster_ci": schedule.detected_cluster_ci,
+                "status": "cluster_not_in_batch"
+            })
+            continue
+
+        # Parse dates for comparison (DD/MM/YYYY HH:MM format)
+        try:
+            tenant_date = datetime.strptime(schedule.provisioning_date, "%d/%m/%Y %H:%M")
+            cluster_date = datetime.strptime(cluster_schedule.provisioning_date, "%d/%m/%Y %H:%M")
+
+            if cluster_date >= tenant_date:
+                errors.append(
+                    f"Tenant '{schedule.ci_name}' (provisioning {schedule.provisioning_date}) "
+                    f"is scheduled before or at the same time as its cluster "
+                    f"'{cluster_schedule.ci_name}' (provisioning {cluster_schedule.provisioning_date}). "
+                    f"Cluster must be provisioned first."
+                )
+                relationships.append({
+                    "tenant": schedule.ci_name,
+                    "cluster": cluster_schedule.ci_name,
+                    "cluster_ci": schedule.detected_cluster_ci,
+                    "tenant_date": schedule.provisioning_date,
+                    "cluster_date": cluster_schedule.provisioning_date,
+                    "status": "timing_violation"
+                })
+            else:
+                relationships.append({
+                    "tenant": schedule.ci_name,
+                    "cluster": cluster_schedule.ci_name,
+                    "cluster_ci": schedule.detected_cluster_ci,
+                    "tenant_date": schedule.provisioning_date,
+                    "cluster_date": cluster_schedule.provisioning_date,
+                    "status": "valid"
+                })
+        except ValueError as e:
+            warnings.append(
+                f"Could not parse dates for tenant '{schedule.ci_name}' "
+                f"or cluster '{cluster_schedule.ci_name}': {e}"
+            )
+
+    return {
+        "valid": len(errors) == 0,
+        "errors": errors,
+        "warnings": warnings,
+        "relationships": relationships
+    }
 
 # ============================================================================
 # CONFIGURATION CLASS
@@ -387,8 +632,8 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
 
     Optional columns (all): Workshop Name, Multi_Asset, Asset_CIs,
     Multi_Workshop_Name, Concurrency, Instances, Salesforce IDs (alias campaign_id),
-    Salesforce_Type, Count, AWS_Region, Redirect, Showroom_Repo, Showroom_Ref,
-    Showroom_NoVNC, Showroom_Zerotouch.
+    Salesforce_Type, Count, AWS_Region, Redirect, Catalog_Namespace, Showroom_Repo,
+    Showroom_Ref, Showroom_NoVNC, Showroom_Zerotouch, Item_Type, Cluster_CI.
 
     An optional "Archive" column is ignored if present (any value or blank);
     it is not used by the script and can be used for your own logic.
@@ -491,6 +736,8 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                     aws_regions = row.get(header_map.get('aws_region', 'AWS_Region'), '').strip()
                     redirect_str = row.get(header_map.get('redirect', 'Redirect'), '').strip()
                     catalog_namespace = row.get(header_map.get('catalog_namespace', 'Catalog_Namespace'), '').strip()
+                    item_type = row.get(header_map.get('item_type', 'Item_Type'), '').strip()
+                    cluster_ci_override = row.get(header_map.get('cluster_ci', 'Cluster_CI'), '').strip()
                     showroom_repo = row.get(header_map.get('showroom_repo', 'Showroom_Repo'), '').strip()
                     showroom_ref = row.get(header_map.get('showroom_ref', 'Showroom_Ref'), '').strip()
                     showroom_novnc_str = row.get(header_map.get('showroom_novnc', 'Showroom_NoVNC'), '').strip()
@@ -608,6 +855,8 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                         showroom_ref=showroom_ref or "main",
                         showroom_novnc=showroom_novnc_val,
                         showroom_zerotouch=showroom_zerotouch_val,
+                        item_type=item_type if item_type else None,
+                        cluster_ci_override=cluster_ci_override if cluster_ci_override else None,
                     )
                     
                     schedules.append(schedule)
@@ -622,7 +871,10 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
         
         if not schedules:
             raise ValueError("No valid schedules found in CSV file")
-        
+
+        # Analyze cluster/tenant relationships after CSV parsing
+        analyze_cluster_tenant_relationships(schedules)
+
         logger.info(f"Successfully read {len(schedules)} schedules from {filepath}")
         return schedules
         
@@ -945,6 +1197,17 @@ def build_resource_claim_payload(
     if not (config and config.enable_resource_pools):
         payload["metadata"]["annotations"]["poolboy.gpte.redhat.com/resource-pool-name"] = "disable"
 
+    # Add Flow labels for cluster-tenant tracking
+    if schedule.is_cluster:
+        payload["metadata"]["labels"]["flow.demo.redhat.com/item-type"] = "cluster"
+    elif schedule.is_tenant:
+        payload["metadata"]["labels"]["flow.demo.redhat.com/item-type"] = "tenant"
+        if schedule.detected_cluster_ci or schedule.cluster_ci_override:
+            cluster_ci = schedule.cluster_ci_override or schedule.detected_cluster_ci
+            payload["metadata"]["labels"]["flow.demo.redhat.com/cluster-ci"] = cluster_ci
+    else:
+        payload["metadata"]["labels"]["flow.demo.redhat.com/item-type"] = "workshop"
+
     # Add accessPassword to spec (not parameterValues)
     if schedule.password:
         payload["spec"]["accessPassword"] = schedule.password
@@ -1048,6 +1311,13 @@ def build_workshop_resource_dict(
         "demo.redhat.com/white-glove": "true" if config.white_glove else "false",
     }
 
+    # Copy Flow labels from ResourceClaim payload if present
+    rc_labels = resourceclaim_payload.get("metadata", {}).get("labels", {})
+    if "flow.demo.redhat.com/item-type" in rc_labels:
+        workshop_metadata["labels"]["flow.demo.redhat.com/item-type"] = rc_labels["flow.demo.redhat.com/item-type"]
+    if "flow.demo.redhat.com/cluster-ci" in rc_labels:
+        workshop_metadata["labels"]["flow.demo.redhat.com/cluster-ci"] = rc_labels["flow.demo.redhat.com/cluster-ci"]
+
     workshop_spec = {
         "displayName": workshop_display_name,
         "accessPassword": resourceclaim_payload["spec"].get("accessPassword", ""),
@@ -1102,17 +1372,27 @@ def build_workshop_provision_dict(
     if extra_parameters:
         merged_parameters.update(extra_parameters)
 
+    # Build labels with Flow tracking
+    provision_labels = {
+        "babylon.gpte.redhat.com/catalogItemName": ci,
+        "babylon.gpte.redhat.com/catalogItemNamespace": catalog_namespace,
+        "babylon.gpte.redhat.com/workshop": workshop_name,
+    }
+
+    # Copy Flow labels from ResourceClaim payload if present
+    rc_labels = resourceclaim_payload.get("metadata", {}).get("labels", {})
+    if "flow.demo.redhat.com/item-type" in rc_labels:
+        provision_labels["flow.demo.redhat.com/item-type"] = rc_labels["flow.demo.redhat.com/item-type"]
+    if "flow.demo.redhat.com/cluster-ci" in rc_labels:
+        provision_labels["flow.demo.redhat.com/cluster-ci"] = rc_labels["flow.demo.redhat.com/cluster-ci"]
+
     return {
         "apiVersion": "babylon.gpte.redhat.com/v1",
         "kind": "WorkshopProvision",
         "metadata": {
             "name": workshop_name,
             "namespace": namespace,
-            "labels": {
-                "babylon.gpte.redhat.com/catalogItemName": ci,
-                "babylon.gpte.redhat.com/catalogItemNamespace": catalog_namespace,
-                "babylon.gpte.redhat.com/workshop": workshop_name,
-            },
+            "labels": provision_labels,
             "annotations": {
                 "babylon.gpte.redhat.com/category": "Workshops",
             },

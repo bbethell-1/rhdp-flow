@@ -291,6 +291,113 @@ Workshop B,custom.workshop,user-bob,babylon-catalog-dev,...
 3. **Run dry-run mode** before deploying to catch namespace mismatches early
 4. **Clean up ghosts**: Delete stale WorkshopProvisions with `oc delete workshopprovision <name> -n <namespace>`
 
+---
+
+## Cluster-Tenant Workshops
+
+Some catalog items are available in **two variants** that differ in their infrastructure architecture:
+
+- **Cluster variant** (`-cluster` suffix): Provisions a dedicated OpenShift cluster with workloads pre-installed
+- **Tenant variant** (`-tenant` suffix): Provisions tenant workloads on a shared base cluster via Sandbox API
+
+### Architecture Pattern
+
+**Cluster deployment:**
+```
+ResourceClaim → Full OpenShift cluster → Workloads installed on cluster
+```
+
+**Tenant deployment:**
+```
+ResourceClaim → Shared cluster infrastructure (pre-provisioned)
+             → Sandbox API request → Tenant namespace + workloads
+```
+
+### When to Use Each Variant
+
+| Variant | Use Case | Cost | Provision Time | Resource Isolation |
+|---------|----------|------|----------------|-------------------|
+| **Cluster** | Full control, custom cluster config, production testing | Higher | 45-60 min | Complete (dedicated cluster) |
+| **Tenant** | Workshops, demos, quick starts, learning labs | Lower | 5-15 min | Namespace-level (shared cluster) |
+
+### Catalog Item Examples
+
+From the `ai-quickstarts` family:
+
+| Cluster Variant | Tenant Variant | Description |
+|----------------|----------------|-------------|
+| `ai-quickstarts.ai-qs-data-gov-cluster.event` | `ai-quickstarts.ai-qs-data-gov-tenant.event` | Data Governance Copilot |
+| `ai-quickstarts.ai-qs-it-self-service-cluster.event` | `ai-quickstarts.ai-qs-it-self-service-tenant.event` | IT Self-Service Chatbot |
+| `ai-quickstarts.ai-qs-product-rec-cluster.event` | `ai-quickstarts.ai-qs-product-rec-tenant.event` | Product Recommender |
+| `ai-quickstarts.ai-qs-rag-cluster.event` | `ai-quickstarts.ai-qs-rag-tenant.event` | RAG (Retrieval-Augmented Generation) |
+| `ai-quickstarts.ai-qs-ppe-comp-cluster.event` | `ai-quickstarts.ai-qs-ppe-comp-tenant.event` | PPE Monitoring with Computer Vision |
+
+### CSV Format
+
+Use the catalog item ID with the appropriate suffix. Flow treats them as standard catalog items—no special columns required.
+
+**Example - Tenant variant (recommended for workshops):**
+```csv
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC)
+Data Gov Demo,ai-quickstarts.ai-qs-data-gov-tenant.event,user-alice,1,True,demo123,Admin,QA,25/03/2026 10:00,25/03/2026 18:00,26/03/2026 10:00
+```
+
+**Example - Cluster variant (for full cluster testing):**
+```csv
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC)
+Data Gov Full,ai-quickstarts.ai-qs-data-gov-cluster.event,user-bob,1,True,cluster456,Admin,QA,25/03/2026 10:00,27/03/2026 18:00,28/03/2026 10:00
+```
+
+### Validation & Best Practices
+
+1. **Check catalog item existence** before deploying:
+   ```bash
+   oc get catalogitem ai-quickstarts.ai-qs-data-gov-tenant.event -n babylon-catalog-event
+   ```
+
+2. **Use tenant variants for events** (Summit, workshops, demos):
+   - Faster provisioning (5-15 min vs 45-60 min)
+   - Lower cost
+   - Sufficient isolation for learning environments
+
+3. **Use cluster variants when you need**:
+   - Custom cluster configuration
+   - Full cluster admin access
+   - Testing cluster-level features
+   - Production-like environments
+
+4. **Stagger tenant deployments** during events to avoid Sandbox API throttling:
+   ```csv
+   Provisioning Date (UTC)
+   07/05/2026 09:00
+   07/05/2026 09:05  ← 5-minute gap
+   07/05/2026 09:10  ← recommended: 5-10 minute intervals
+   ```
+
+### Troubleshooting
+
+| Problem | Cause | Fix |
+|---------|-------|-----|
+| Tenant provision stuck | Sandbox API quota exceeded | Stagger deployments with 5-10 min gaps |
+| Wrong variant deployed | Typo in CI suffix | Verify `-cluster` vs `-tenant` in CSV |
+| Cluster provision too slow | Full cluster takes 45-60 min | Use tenant variant for workshops |
+| Resource not found | Catalog item doesn't exist | Check `oc get catalogitem -n babylon-catalog-event` |
+
+### Resource Labels
+
+Flow automatically applies these labels to all workshops (both cluster and tenant):
+
+```yaml
+metadata:
+  labels:
+    rhdp-flow.gpte.redhat.com/scheduled: "true"
+    demo.redhat.com/lock-enabled: "true"  # when Resource Lock is on
+```
+
+Tenant-variant resources also get Sandbox API labels from the provisioner (not set by Flow).
+
+---
+
 ### Full header checklist
 
 ```

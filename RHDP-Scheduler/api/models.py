@@ -43,6 +43,8 @@ class WorkshopScheduleResponse(BaseModel):
     showroom_ref: str = ""
     showroom_novnc: bool = False
     showroom_zerotouch: bool = False
+    item_type: Optional[str] = None
+    cluster_ci_override: Optional[str] = None
 
 
 class CatalogItemParameter(BaseModel):
@@ -345,6 +347,36 @@ class CatalogNamespaceValidationResponse(BaseModel):
     not_found: List[dict] = Field(default_factory=list, description="CIs not found in any catalog namespace")
     checked: int = 0
     skipped: int = 0
+
+
+class ClusterTenantValidationError(BaseModel):
+    """A cluster-tenant ordering validation error."""
+
+    ci_name: str
+    tenant_ci: str
+    cluster_ci: str
+    tenant_date: str
+    cluster_date: str
+    namespace: str
+    message: str
+
+
+class ClusterTenantValidationWarning(BaseModel):
+    """A cluster-tenant validation warning."""
+
+    ci_name: str
+    tenant_ci: str
+    namespace: str
+    message: str
+
+
+class ClusterTenantValidationResponse(BaseModel):
+    """Response for POST /schedules/validate-cluster-tenant."""
+
+    errors: List[ClusterTenantValidationError] = Field(default_factory=list)
+    warnings: List[ClusterTenantValidationWarning] = Field(default_factory=list)
+    tenants_checked: int = 0
+    clusters_found: int = 0
 
 
 class ResourceStatus(BaseModel):
