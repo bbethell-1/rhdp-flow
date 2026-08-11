@@ -82,6 +82,7 @@ from api.models import (
     DiffResponse,
     DisableAutostopRequest,
     ExtendRequest,
+    FillMissingDatesRequest,
     HealthResponse,
     JobResponse,
     JobStatus,
@@ -567,6 +568,31 @@ def delete_schedule(index: int, _key=Depends(verify_api_key)):
             raise HTTPException(404, f"Schedule index {index} not found")
         deleted_schedule = _schedules.pop(index)
         return {"message": f"Deleted schedule: {deleted_schedule.ci_name}"}
+
+
+@router.patch("/schedules/fill-missing-dates")
+def fill_missing_dates(request: FillMissingDatesRequest, _key=Depends(verify_api_key)):
+    """Fill missing provisioning/stop/destroy dates in schedules.
+
+    Only updates schedules that have missing or empty date fields.
+    Preserves existing valid dates.
+    """
+    global _schedules
+    updated_count = 0
+
+    with _state_lock:
+        for schedule in _schedules:
+            if not schedule.provisioning_date or not schedule.provisioning_date.strip():
+                schedule.provisioning_date = request.provisioning_date
+                updated_count += 1
+            if not schedule.auto_stop or not schedule.auto_stop.strip():
+                schedule.auto_stop = request.auto_stop
+                updated_count += 1
+            if not schedule.auto_destroy or not schedule.auto_destroy.strip():
+                schedule.auto_destroy = request.auto_destroy
+                updated_count += 1
+
+    return {"message": f"Filled missing dates in {updated_count} field(s)", "updated_count": updated_count}
 
 
 # ---------------------------------------------------------------------------

@@ -238,4 +238,6 @@ export const api = {
     request<{ message: string }>('/schedules', { method: 'PUT', body: JSON.stringify(schedules) }),
   deleteSchedule: (index: number) =>
     request<{ message: string }>(`/schedules/${index}`, { method: 'DELETE' }),
+  fillMissingDates: (dates: { provisioning_date: string; auto_stop: string; auto_destroy: string }) =>
+    request<{ message: string; updated_count: number }>('/schedules/fill-missing-dates', { method: 'PATCH', body: JSON.stringify(dates) }),
 };

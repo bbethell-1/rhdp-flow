@@ -160,6 +160,12 @@ export const UploadTab: React.FC<Props> = ({
   const [showCatalogOverrideModal, setShowCatalogOverrideModal] = useState(false);
   const [catalogOverrideAction, setCatalogOverrideAction] = useState<'event' | 'prod' | 'dev' | 'clear' | null>(null);
 
+  // Fill missing dates modal
+  const [showFillDatesModal, setShowFillDatesModal] = useState(false);
+  const [fillProvDate, setFillProvDate] = useState('');
+  const [fillStopDate, setFillStopDate] = useState('');
+  const [fillDestroyDate, setFillDestroyDate] = useState('');
+
   // ── Schedule validation warnings ──
   const warnings = useMemo(() => {
     const warns: ScheduleWarning[] = [];
@@ -235,6 +241,15 @@ export const UploadTab: React.FC<Props> = ({
   }, [schedules, numUsersLimits]);
 
   const warningRowIndices = useMemo(() => new Set(warnings.map(w => w.index)), [warnings]);
+
+  // Detect if there are missing date warnings
+  const hasMissingDateWarnings = useMemo(() => {
+    return warnings.some(w =>
+      w.field === 'provisioning_date' && w.message.includes('missing') ||
+      w.field === 'auto_stop' && w.message.includes('missing') ||
+      w.field === 'auto_destroy' && w.message.includes('missing')
+    );
+  }, [warnings]);
 
   // Filtered schedules for preview search
   const filteredSchedules = useMemo(() => {
@@ -398,6 +413,31 @@ export const UploadTab: React.FC<Props> = ({
 
     setShowCatalogOverrideModal(false);
     setCatalogOverrideAction(null);
+  };
+
+  const handleFillMissingDates = async () => {
+    if (!fillProvDate || !fillStopDate || !fillDestroyDate) {
+      showToast('Please fill in all three dates', 'danger');
+      return;
+    }
+
+    try {
+      const result = await api.fillMissingDates({
+        provisioning_date: fillProvDate,
+        auto_stop: fillStopDate,
+        auto_destroy: fillDestroyDate,
+      });
+      // Refresh schedules from backend
+      const updated = await api.getSchedules();
+      setSchedules(updated);
+      showToast(result.message, 'success');
+      setShowFillDatesModal(false);
+      setFillProvDate('');
+      setFillStopDate('');
+      setFillDestroyDate('');
+    } catch (err) {
+      showToast(`Failed to fill missing dates: ${err}`, 'danger');
+    }
   };
 
   const handleUpload = async () => {
@@ -766,6 +806,16 @@ export const UploadTab: React.FC<Props> = ({
               <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
                 {warnings.map((w, i) => <li key={i}>{w.message}</li>)}
               </ul>
+              {hasMissingDateWarnings && (
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--pf-v6-global--BorderColor--100)' }}>
+                  <Button variant="secondary" onClick={() => setShowFillDatesModal(true)} size="sm">
+                    Fill Missing Dates Globally
+                  </Button>
+                  <span style={{ marginLeft: 12, fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)' }}>
+                    Set default dates for all schedules with missing provisioning, stop, or destroy dates
+                  </span>
+                </div>
+              )}
             </Alert>
           )}
 
@@ -1789,6 +1839,81 @@ export const UploadTab: React.FC<Props> = ({
             onClick={() => {
               setShowCatalogOverrideModal(false);
               setCatalogOverrideAction(null);
+            }}
+          >
+            Cancel
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Fill Missing Dates modal */}
+      <Modal
+        variant="small"
+        isOpen={showFillDatesModal}
+        onClose={() => {
+          setShowFillDatesModal(false);
+          setFillProvDate('');
+          setFillStopDate('');
+          setFillDestroyDate('');
+        }}
+        aria-labelledby="fill-dates-title"
+      >
+        <ModalHeader title="Fill Missing Dates" labelId="fill-dates-title" />
+        <ModalBody>
+          <p style={{ marginBottom: 16 }}>
+            Enter default dates to fill in for all schedules that are missing provisioning, auto-stop, or auto-destroy dates.
+            Only empty date fields will be updated.
+          </p>
+          <Alert variant="info" isInline title="Date format" style={{ marginBottom: 16 }}>
+            Use format: <code>DD/MM/YYYY HH:MM</code> (e.g., <code>15/05/2026 14:00</code>)
+          </Alert>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div>
+              <label htmlFor="fill-prov-date" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                Provisioning Date (UTC)
+              </label>
+              <TextInput
+                id="fill-prov-date"
+                value={fillProvDate}
+                onChange={(_e, value) => setFillProvDate(value)}
+                placeholder="DD/MM/YYYY HH:MM"
+              />
+            </div>
+            <div>
+              <label htmlFor="fill-stop-date" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                Auto-Stop Date (UTC)
+              </label>
+              <TextInput
+                id="fill-stop-date"
+                value={fillStopDate}
+                onChange={(_e, value) => setFillStopDate(value)}
+                placeholder="DD/MM/YYYY HH:MM"
+              />
+            </div>
+            <div>
+              <label htmlFor="fill-destroy-date" style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>
+                Auto-Destroy Date (UTC)
+              </label>
+              <TextInput
+                id="fill-destroy-date"
+                value={fillDestroyDate}
+                onChange={(_e, value) => setFillDestroyDate(value)}
+                placeholder="DD/MM/YYYY HH:MM"
+              />
+            </div>
+          </div>
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="primary" onClick={handleFillMissingDates}>
+            Apply
+          </Button>
+          <Button
+            variant="link"
+            onClick={() => {
+              setShowFillDatesModal(false);
+              setFillProvDate('');
+              setFillStopDate('');
+              setFillDestroyDate('');
             }}
           >
             Cancel

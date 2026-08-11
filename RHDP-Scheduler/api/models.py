@@ -477,3 +477,10 @@ class PoolLookupResponse(BaseModel):
     catalog_item: str
     pool: Optional[PoolInfo] = None
     has_pool: bool = False
+
+
+class FillMissingDatesRequest(BaseModel):
+    """Request to fill missing dates in schedules."""
+    provisioning_date: str
+    auto_stop: str
+    auto_destroy: str
