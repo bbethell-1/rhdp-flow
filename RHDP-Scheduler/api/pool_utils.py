@@ -5,12 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
-from typing import Dict, List, Optional
 
 logger = logging.getLogger("rhdp_flow.api.pools")
 
 
-def get_pool_for_catalog_item(catalog_item: str, namespace: str = "poolboy") -> Optional[Dict]:
+def get_pool_for_catalog_item(catalog_item: str, namespace: str = "poolboy") -> dict | None:
     """
     Lookup ResourcePool for a given catalog item.
 
@@ -69,7 +68,7 @@ def get_pool_for_catalog_item(catalog_item: str, namespace: str = "poolboy") -> 
         return None
 
 
-def list_all_pools(namespace: str = "poolboy") -> List[Dict]:
+def list_all_pools(namespace: str = "poolboy") -> list[dict]:
     """
     List all ResourcePools in the given namespace.
 

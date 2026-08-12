@@ -9,7 +9,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from sse_starlette import ServerSentEvent
 
@@ -35,9 +35,9 @@ class Job:
     status: Status = Status.pending
     progress: int = 0
     message: str = ""
-    results: Optional[List[Any]] = None
-    error: Optional[str] = None
-    log_path: Optional[str] = None
+    results: list[Any] | None = None
+    error: str | None = None
+    log_path: str | None = None
     created_at: float = field(default_factory=time.time)
     _events: asyncio.Queue = field(default_factory=asyncio.Queue, repr=False)
     _cancel_requested: bool = field(default=False, repr=False)
@@ -45,7 +45,7 @@ class Job:
 
 
 MAX_JOBS = int(os.environ.get("RHDP_MAX_JOBS", "100"))
-_jobs: Dict[str, Job] = {}
+_jobs: dict[str, Job] = {}
 _jobs_truncated: int = 0
 _jobs_lock = threading.Lock()
 
@@ -80,7 +80,7 @@ def create_job() -> Job:
     return job
 
 
-def get_job(job_id: str) -> Optional[Job]:
+def get_job(job_id: str) -> Job | None:
     """Return job by id, or None."""
     with _jobs_lock:
         return _jobs.get(job_id)
@@ -154,13 +154,13 @@ async def wait_if_paused(job_id: str) -> None:
 def update_job(
     job_id: str,
     *,
-    status: Optional[Status] = None,
-    progress: Optional[int] = None,
-    message: Optional[str] = None,
-    results: Optional[List[Any]] = None,
-    error: Optional[str] = None,
-    log_path: Optional[str] = None,
-) -> Optional[Job]:
+    status: Status | None = None,
+    progress: int | None = None,
+    message: str | None = None,
+    results: list[Any] | None = None,
+    error: str | None = None,
+    log_path: str | None = None,
+) -> Job | None:
     """Update fields on an existing job. Pushes an SSE event."""
     with _jobs_lock:
         job = _jobs.get(job_id)

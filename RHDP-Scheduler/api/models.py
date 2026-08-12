@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import List, Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -29,13 +29,13 @@ class WorkshopScheduleResponse(BaseModel):
     is_multi_asset: bool = False
     asset_cis: str = ""
     multi_workshop_name: str = ""
-    users: Optional[int] = None
-    instances: Optional[int] = None
-    concurrency: Optional[int] = None
+    users: int | None = None
+    instances: int | None = None
+    concurrency: int | None = None
     salesforce_ids: str = ""
     salesforce_type: str = "opportunity"
     aws_regions: str = ""
-    count: Optional[int] = None
+    count: int | None = None
     white_glove: bool = True
     redirect: bool = True
     catalog_namespace: str = ""
@@ -51,12 +51,12 @@ class CatalogItemParameter(BaseModel):
     """Summary of a single parameter from a CatalogItem spec (openAPIV3Schema)."""
 
     name: str
-    type: Optional[str] = None
-    default: Optional[object] = None
-    minimum: Optional[object] = None
-    maximum: Optional[object] = None
-    enum: Optional[List[object]] = None
-    description: Optional[str] = None
+    type: str | None = None
+    default: object | None = None
+    minimum: object | None = None
+    maximum: object | None = None
+    enum: list[object] | None = None
+    description: str | None = None
 
 
 class CatalogItemEntry(BaseModel):
@@ -67,7 +67,7 @@ class CatalogItemEntry(BaseModel):
     catalog_namespace: str = Field(description="Kubernetes namespace listing was read from")
     description: str = Field("", description="babylon.gpte.redhat.com/description annotation")
     category: str = Field("", description="babylon.gpte.redhat.com/category annotation")
-    parameters: List[CatalogItemParameter] = Field(default_factory=list, description="Parameter definitions from spec")
+    parameters: list[CatalogItemParameter] = Field(default_factory=list, description="Parameter definitions from spec")
 
 
 class DeploymentResultResponse(BaseModel):
@@ -98,7 +98,7 @@ class DeploymentResultResponse(BaseModel):
 class DeployRequest(BaseModel):
     """Body for POST /api/deploy and /api/deploy/dry-run."""
 
-    ci_filter: Optional[str] = Field(
+    ci_filter: str | None = Field(
         None, description="Optional Catalog Item ID to filter (process only this CI)"
     )
     dry_run: bool = Field(False, description="Override global dry-run toggle")
@@ -118,7 +118,7 @@ class DeployRequest(BaseModel):
 class LockRequest(BaseModel):
     """Body for POST /api/operations/lock."""
 
-    ci_filter: Optional[str] = None
+    ci_filter: str | None = None
 
 
 class ExtendRequest(BaseModel):
@@ -126,51 +126,51 @@ class ExtendRequest(BaseModel):
 
     days: int = Field(0, ge=0, le=30)
     hours: int = Field(0, ge=0, le=720)
-    ci_filter: Optional[str] = None
+    ci_filter: str | None = None
 
 
 class DisableAutostopRequest(BaseModel):
     """Body for POST /api/operations/disable-autostop."""
 
-    ci_filter: Optional[str] = None
+    ci_filter: str | None = None
 
 
 class ShowroomCleanupRequest(BaseModel):
     """Body for POST /api/operations/showroom-cleanup."""
 
-    ci_filter: Optional[str] = None
+    ci_filter: str | None = None
 
 
 class ShowroomHealthRequest(BaseModel):
     """Body for POST /api/operations/showroom-health."""
 
-    ci_filter: Optional[str] = None
+    ci_filter: str | None = None
 
 
 class ShowroomPreflightRequest(BaseModel):
     """Body for POST /api/operations/showroom-preflight (Demolition browser check)."""
 
-    ci_filter: Optional[str] = None
+    ci_filter: str | None = None
 
 
 class ShowroomAppSetRequest(BaseModel):
     """Body for POST /api/operations/showroom-applicationset."""
 
-    ci_filter: Optional[str] = None
-    seat_count: Optional[int] = Field(None, ge=1, le=500)
+    ci_filter: str | None = None
+    seat_count: int | None = Field(None, ge=1, le=500)
 
 
 class ScaleRequest(BaseModel):
     """Body for POST /api/operations/scale."""
 
     target_count: int = Field(..., ge=0, le=1000)
-    ci_filter: Optional[str] = None
+    ci_filter: str | None = None
 
 
 class RetryRequest(BaseModel):
     """Body for POST /api/deploy/retry — re-deploy specific CI names."""
 
-    ci_names: List[str] = Field(..., min_length=1, description="List of CI names to retry")
+    ci_names: list[str] = Field(..., min_length=1, description="List of CI names to retry")
     dry_run: bool = Field(False, description="Run in dry-run mode")
     resource_lock: bool = Field(True, description="Apply lock-enabled label")
     enable_resource_pools: bool = Field(False, description="Enable Poolboy resource pools")
@@ -188,19 +188,19 @@ class QAType(str, Enum):
 
 class QARequest(BaseModel):
     type: QAType = QAType.all
-    namespace: Optional[str] = Field(
+    namespace: str | None = Field(
         None,
         min_length=1,
         description="Optional namespace override for QA runs (can be comma-separated list); defaults to the loaded schedule namespace",
     )
-    namespaces: Optional[List[str]] = Field(
+    namespaces: list[str] | None = Field(
         None,
         description="Optional list of namespaces to scan for faster targeted QA",
     )
 
     @field_validator("namespace")
     @classmethod
-    def _strip_namespace(cls, value: Optional[str]) -> Optional[str]:
+    def _strip_namespace(cls, value: str | None) -> str | None:
         if value is None:
             return None
         value = value.strip()
@@ -208,7 +208,7 @@ class QARequest(BaseModel):
 
 
 class DestroyCheckRequest(BaseModel):
-    namespace: Optional[str] = Field(
+    namespace: str | None = Field(
         None,
         min_length=1,
         description="Optional namespace override for destroy checks; defaults to the loaded schedule namespace",
@@ -216,7 +216,7 @@ class DestroyCheckRequest(BaseModel):
 
     @field_validator("namespace")
     @classmethod
-    def _strip_namespace(cls, value: Optional[str]) -> Optional[str]:
+    def _strip_namespace(cls, value: str | None) -> str | None:
         if value is None:
             return None
         value = value.strip()
@@ -241,9 +241,9 @@ class JobResponse(BaseModel):
     status: JobStatus
     progress: int = Field(0, ge=0, le=100)
     message: str = ""
-    results: Optional[List[DeploymentResultResponse]] = None
-    error: Optional[str] = None
-    log_file: Optional[str] = None
+    results: list[DeploymentResultResponse] | None = None
+    error: str | None = None
+    log_file: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -270,13 +270,13 @@ class UploadResponse(BaseModel):
     count: int
     total_rows: int = 0
     skipped_rows: int = 0
-    schedules: List[WorkshopScheduleResponse]
+    schedules: list[WorkshopScheduleResponse]
 
 
 class OperationResponse(BaseModel):
     success: bool
     message: str
-    details: List[str] = Field(default_factory=list)
+    details: list[str] = Field(default_factory=list)
 
 
 class DiffEntry(BaseModel):
@@ -288,9 +288,9 @@ class DiffEntry(BaseModel):
 
 
 class DiffResponse(BaseModel):
-    added: List[DiffEntry]
-    removed: List[DiffEntry]
-    changed: List[DiffEntry]
+    added: list[DiffEntry]
+    removed: list[DiffEntry]
+    changed: list[DiffEntry]
     unchanged: int
 
 
@@ -302,8 +302,8 @@ class NumUsersViolation(BaseModel):
     namespace: str
     requested_users: int
     maximum: int
-    minimum: Optional[int] = None
-    default_value: Optional[int] = None
+    minimum: int | None = None
+    default_value: int | None = None
 
 
 class UsersNotInCatalogAdvisory(BaseModel):
@@ -314,7 +314,7 @@ class UsersNotInCatalogAdvisory(BaseModel):
     namespace: str
     users: int
     enable_workshop_interface: bool
-    instances: Optional[int] = None
+    instances: int | None = None
     severity: Literal["high", "medium"]
     message: str
 
@@ -322,8 +322,8 @@ class UsersNotInCatalogAdvisory(BaseModel):
 class NumUsersValidationResponse(BaseModel):
     """Response for POST /schedules/validate-num-users."""
 
-    violations: List[NumUsersViolation] = Field(default_factory=list)
-    users_not_in_catalog: List[UsersNotInCatalogAdvisory] = Field(
+    violations: list[NumUsersViolation] = Field(default_factory=list)
+    users_not_in_catalog: list[UsersNotInCatalogAdvisory] = Field(
         default_factory=list,
         description="Schedules with Users set where the catalog item does not define num_users",
     )
@@ -346,8 +346,8 @@ class CatalogNamespaceMismatch(BaseModel):
 class CatalogNamespaceValidationResponse(BaseModel):
     """Response for POST /schedules/validate-catalog-namespaces."""
 
-    mismatches: List[CatalogNamespaceMismatch] = Field(default_factory=list)
-    not_found: List[dict] = Field(default_factory=list, description="CIs not found in any catalog namespace")
+    mismatches: list[CatalogNamespaceMismatch] = Field(default_factory=list)
+    not_found: list[dict] = Field(default_factory=list, description="CIs not found in any catalog namespace")
     checked: int = 0
     skipped: int = 0
 
@@ -385,9 +385,9 @@ class ClusterTenantValidationResponse(BaseModel):
 class ResourceStatus(BaseModel):
     exists: bool
     status: str           # "not_found" | "active" | "overdue"
-    lifespan_end: Optional[str] = None
-    count: Optional[int] = None
-    healthy: Optional[bool] = None
+    lifespan_end: str | None = None
+    count: int | None = None
+    healthy: bool | None = None
 
 
 class DestroyCheckResult(BaseModel):
@@ -405,7 +405,7 @@ class DestroyCheckResult(BaseModel):
 
 class DestroyCheckResponse(BaseModel):
     count: int
-    results: List[DestroyCheckResult]
+    results: list[DestroyCheckResult]
 
 
 class QAResultItem(BaseModel):
@@ -419,20 +419,20 @@ class QAResultItem(BaseModel):
     status: str = ""
     matches_schedule: str = ""
     issues: str = ""
-    expected_users: Optional[int] = None
-    actual_count: Optional[int] = None
-    workshop_users_assigned: Optional[int] = None
-    total_seats: Optional[int] = None
+    expected_users: int | None = None
+    actual_count: int | None = None
+    workshop_users_assigned: int | None = None
+    total_seats: int | None = None
     provisioning_date: str = ""
     auto_stop: str = ""
     auto_destroy: str = ""
     resourceclaim_name: str = ""
-    resourceclaims: List[str] = Field(default_factory=list)
+    resourceclaims: list[str] = Field(default_factory=list)
     link_to_service: str = ""
     landing_page_url: str = ""
-    healthy: Optional[bool] = None
-    ready: Optional[bool] = None
-    lock_status: Optional[bool] = None
+    healthy: bool | None = None
+    ready: bool | None = None
+    lock_status: bool | None = None
     actual_start: str = ""
     actual_stop: str = ""
     actual_destroy: str = ""
@@ -449,8 +449,8 @@ class SessionSummary(BaseModel):
     result_count: int
     timestamp: str
     has_results: bool
-    deploy_log_file: Optional[str] = None
-    qa_log_file: Optional[str] = None
+    deploy_log_file: str | None = None
+    qa_log_file: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -462,7 +462,7 @@ class PoolInfo(BaseModel):
 
     pool_name: str
     min_available: int
-    max_available: Optional[int] = None
+    max_available: int | None = None
     ready: int = 0
     available: int = 0
     claimed: int = 0
@@ -478,7 +478,7 @@ class PoolLookupResponse(BaseModel):
     """Response for pool lookup by catalog item."""
 
     catalog_item: str
-    pool: Optional[PoolInfo] = None
+    pool: PoolInfo | None = None
     has_pool: bool = False
 
 

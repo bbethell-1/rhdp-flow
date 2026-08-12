@@ -13,7 +13,6 @@ import tempfile
 import threading
 from dataclasses import asdict
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
@@ -115,18 +114,18 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # In-memory state
 # ---------------------------------------------------------------------------
-_schedules: List[WorkshopSchedule] = []
-_deployment_results: List[DeploymentResult] = []
-_qa_results: List[QAResultItem] = []
-_csv_filepath: Optional[str] = None  # stashed for QA functions that need a path
+_schedules: list[WorkshopSchedule] = []
+_deployment_results: list[DeploymentResult] = []
+_qa_results: list[QAResultItem] = []
+_csv_filepath: str | None = None  # stashed for QA functions that need a path
 _current_filename: str = ""
-_asset_passwords: Optional[Dict[str, str]] = None
-_deploy_log_path: Optional[str] = None
-_qa_log_path: Optional[str] = None
-_destroy_check_results: List[dict] = []
+_asset_passwords: dict[str, str] | None = None
+_deploy_log_path: str | None = None
+_qa_log_path: str | None = None
+_destroy_check_results: list[dict] = []
 
 # Session history — each completed upload+deploy cycle gets archived here
-_sessions: List[dict] = []
+_sessions: list[dict] = []
 _session_counter: int = 0
 MAX_SESSIONS = 50
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
@@ -167,7 +166,7 @@ def _validate_export_yaml_dir(path: str) -> str:
 
 
 # Built-in schedule examples (files under docs/examples/)
-_SCHEDULE_EXAMPLES: Dict[str, tuple[str, str]] = {
+_SCHEDULE_EXAMPLES: dict[str, tuple[str, str]] = {
     "basic": ("basic_workshop.csv", "Basic workshop"),
     "full": ("full_featured.csv", "Full featured"),
     "minimal": ("minimal_workshop.csv", "Minimal"),
@@ -256,7 +255,7 @@ def _write_qa_csv_for_namespace(namespace: str) -> str:
     return tmp.name
 
 
-def _coerce_optional_int(val) -> Optional[int]:
+def _coerce_optional_int(val) -> int | None:
     if val is None or val == "":
         return None
     if isinstance(val, bool):
@@ -321,7 +320,7 @@ def _normalize_qa_result_dict(r: dict) -> dict:
 
 
 # Cached base domain derived from the connected cluster
-_cached_base_domain: Optional[str] = None
+_cached_base_domain: str | None = None
 
 # Thread-safe lock for global state mutations (sync endpoints run in threadpool)
 _state_lock = threading.Lock()
@@ -451,7 +450,7 @@ def _ingest_schedule_csv_text(text: str, filename: str) -> UploadResponse:
     )
 
 
-def _filter_schedules(ci_filter: Optional[str]) -> List[WorkshopSchedule]:
+def _filter_schedules(ci_filter: str | None) -> list[WorkshopSchedule]:
     if ci_filter:
         filtered = [s for s in _schedules if s.ci == ci_filter]
         if not filtered:
@@ -507,7 +506,7 @@ def clear_session(_key=Depends(verify_api_key)):
         return {"message": "Session cleared", "session_count": len(_sessions)}
 
 
-@router.get("/sessions", response_model=List[SessionSummary])
+@router.get("/sessions", response_model=list[SessionSummary])
 def list_sessions():
     """List all prior sessions."""
     return [
@@ -547,7 +546,7 @@ def get_session(session_id: str):
 # ---------------------------------------------------------------------------
 
 @router.put("/schedules")
-def update_schedules(schedules_data: List[WorkshopScheduleResponse], _key=Depends(verify_api_key)):
+def update_schedules(schedules_data: list[WorkshopScheduleResponse], _key=Depends(verify_api_key)):
     """Update the entire schedules list (Pydantic-validated)."""
     global _schedules
     new_schedules = [
@@ -702,7 +701,7 @@ async def health():
 # ---------------------------------------------------------------------------
 
 
-@router.get("/catalog/items", response_model=List[CatalogItemEntry])
+@router.get("/catalog/items", response_model=list[CatalogItemEntry])
 @_rate_limit("30/minute")
 def get_catalog_items_list(request: Request):
     """List CatalogItem resources from babylon-catalog-prod and babylon-catalog-event."""
@@ -864,7 +863,7 @@ async def upload_passwords(file: UploadFile = File(...), _key=Depends(verify_api
     return {"count": len(passwords), "message": f"Loaded {len(passwords)} asset password(s)"}
 
 
-@router.get("/schedules", response_model=List[WorkshopScheduleResponse])
+@router.get("/schedules", response_model=list[WorkshopScheduleResponse])
 def get_schedules():
     return [_schedule_to_response(s) for s in _schedules]
 
@@ -882,7 +881,7 @@ def validate_namespaces(_key=Depends(verify_api_key)):
     unique_ns = {s.namespace for s in _schedules}
     for ns in unique_ns:
         _validate_namespace(ns)
-    results: Dict[str, bool] = {}
+    results: dict[str, bool] = {}
     for ns in unique_ns:
         try:
             r = subprocess.run(
@@ -903,12 +902,12 @@ def validate_num_users(_key=Depends(verify_api_key)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     config = _get_config()
-    violations: List[NumUsersViolation] = []
-    users_not_in_catalog: List[UsersNotInCatalogAdvisory] = []
-    limits: Dict[str, int] = {}
+    violations: list[NumUsersViolation] = []
+    users_not_in_catalog: list[UsersNotInCatalogAdvisory] = []
+    limits: dict[str, int] = {}
     checked = 0
     skipped = 0
-    ci_cache: Dict[str, Optional[Dict]] = {}
+    ci_cache: dict[str, dict | None] = {}
     advisory_seen: set = set()
 
     def _check_ci(ci: str, schedule: WorkshopSchedule):
@@ -965,11 +964,11 @@ def validate_catalog_namespaces(_key=Depends(verify_api_key)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     config = _get_config()
-    mismatches: List[CatalogNamespaceMismatch] = []
-    not_found: List[dict] = []
+    mismatches: list[CatalogNamespaceMismatch] = []
+    not_found: list[dict] = []
     checked = 0
     skipped = 0
-    ci_cache: Dict[str, tuple] = {}  # Cache validation results
+    ci_cache: dict[str, tuple] = {}  # Cache validation results
 
     def _check_ci(ci: str, schedule: WorkshopSchedule):
         nonlocal checked, skipped
@@ -1113,8 +1112,8 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
     # Pre-deploy num_users limit check (live deploys only)
     if not body.dry_run:
         config_check = _get_config()
-        ci_cache: Dict[str, Optional[Dict]] = {}
-        limit_errors: List[str] = []
+        ci_cache: dict[str, dict | None] = {}
+        limit_errors: list[str] = []
         for s in schedules:
             if s.users is not None and s.users > 0:
                 if s.ci not in ci_cache:
@@ -1258,7 +1257,7 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
     return JobResponse(job_id=job.job_id, status=JobStatus(job.status.value), progress=job.progress)
 
 
-@router.post("/deploy/dry-run", response_model=List[DeploymentResultResponse])
+@router.post("/deploy/dry-run", response_model=list[DeploymentResultResponse])
 @_rate_limit("10/minute")
 def deploy_dry_run(request: Request, body: DeployRequest = DeployRequest(), _key=Depends(verify_api_key)):  # type: ignore
     global _deploy_log_path
@@ -1359,8 +1358,8 @@ def deploy_dry_run_yaml(request: Request, body: DeployRequest = DeployRequest(),
                 s.showroom_novnc = body.showroom_novnc
                 s.showroom_zerotouch = body.showroom_zerotouch
 
-        grouped_multi: Dict[str, List[WorkshopSchedule]] = {}
-        regular_schedules: List[WorkshopSchedule] = []
+        grouped_multi: dict[str, list[WorkshopSchedule]] = {}
+        regular_schedules: list[WorkshopSchedule] = []
         for s in schedules:
             if s.multi_workshop_name and s.is_multi_asset:
                 grouped_multi.setdefault(s.multi_workshop_name, []).append(s)
@@ -1516,7 +1515,7 @@ def deploy_resume(job_id: str, _key=Depends(verify_api_key)):
     raise HTTPException(404, "Job not found or not paused")
 
 
-@router.get("/deploy/results", response_model=List[DeploymentResultResponse])
+@router.get("/deploy/results", response_model=list[DeploymentResultResponse])
 def get_deploy_results():
     return [_result_to_response(r) for r in _deployment_results]
 
@@ -1579,7 +1578,7 @@ async def deploy_retry(request: Request, body: RetryRequest, _key=Depends(verify
     # Pre-deploy num_users limit check (live deploys only) - same as main deploy
     if not body.dry_run:
         config_check = _get_config()
-        ci_cache: Dict[str, Optional[Dict]] = {}
+        ci_cache: dict[str, dict | None] = {}
         limit_errors = []
         for s in matching:
             if s.users is not None and s.users > 0:
@@ -1870,7 +1869,7 @@ def op_import_namespace(request: Request, namespace: str, _key=Depends(verify_ap
         raise HTTPException(404, f"No workshops found in namespace {namespace}")
 
     def _iter():
-        with open(tmp.name, "r") as f:
+        with open(tmp.name) as f:
             yield f.read()
         os.unlink(tmp.name)
 
@@ -1917,11 +1916,11 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
         namespaces = list(dict.fromkeys(s.namespace for s in _schedules))
 
     handler, log_path = start_log_capture("qa")
-    temp_csv_paths: List[str] = []
+    temp_csv_paths: list[str] = []
     try:
-        all_qa1: List[dict] = []
-        all_qa2: List[dict] = []
-        all_qa3: List[dict] = []
+        all_qa1: list[dict] = []
+        all_qa2: list[dict] = []
+        all_qa3: list[dict] = []
 
         for ns in namespaces:
             # Always write a fresh temp CSV from in-memory schedules so that
@@ -1980,8 +1979,8 @@ def qa_destroy_check_endpoint(request: Request, body: DestroyCheckRequest = Dest
         raise HTTPException(400, "No schedules loaded.")
 
     config = _get_config()
-    all_results: List[dict] = []
-    temp_csv_paths: List[str] = []
+    all_results: list[dict] = []
+    temp_csv_paths: list[str] = []
 
     if body.namespace:
         namespaces = [body.namespace]
@@ -2043,7 +2042,7 @@ def download_log(filename: str):
     if not os.path.isfile(filepath):
         raise HTTPException(404, "Log file not found")
     return StreamingResponse(
-        open(filepath, "r", encoding="utf-8"),
+        open(filepath, encoding="utf-8"),
         media_type="text/plain",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
@@ -2173,7 +2172,7 @@ def export_students():
     export_student_landing_page_csv([item.model_dump() for item in _qa_results], tmp.name)
 
     def _iter():
-        with open(tmp.name, "r") as f:
+        with open(tmp.name) as f:
             yield f.read()
         os.unlink(tmp.name)
 

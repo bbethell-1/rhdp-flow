@@ -10,7 +10,6 @@ from __future__ import annotations
 import hmac
 import logging
 import os
-from typing import Optional
 
 from fastapi import HTTPException, Security
 from fastapi.security import APIKeyHeader
@@ -20,14 +19,14 @@ logger = logging.getLogger("rhdp_flow.api")
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
-def _get_required_key() -> Optional[str]:
+def _get_required_key() -> str | None:
     """Return the configured API key, or None if auth is disabled."""
     return os.environ.get("RHDP_API_KEY")
 
 
 async def verify_api_key(
-    api_key: Optional[str] = Security(_api_key_header),
-) -> Optional[str]:
+    api_key: str | None = Security(_api_key_header),
+) -> str | None:
     """Dependency that enforces API key auth when RHDP_API_KEY is set."""
     required = _get_required_key()
     if required is None:

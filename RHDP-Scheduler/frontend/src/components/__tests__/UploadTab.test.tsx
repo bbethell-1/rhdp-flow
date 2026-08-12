@@ -33,8 +33,8 @@ describe('UploadTab', () => {
       />
     );
     expect(screen.getByText(/Schedule Preview/)).toBeInTheDocument();
-    expect(screen.getByText('Test Workshop')).toBeInTheDocument();
-    expect(screen.getByText('vendor.test.prod')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Test Workshop')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('vendor.test.prod')).toBeInTheDocument();
   });
 
   it('renders upload and clear buttons', () => {
