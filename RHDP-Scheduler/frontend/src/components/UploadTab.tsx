@@ -123,6 +123,7 @@ export const UploadTab: React.FC<Props> = ({
   const [showroomNovnc, setShowroomNovnc] = useState(false);
   const [showroomZerotouch, setShowroomZerotouch] = useState(false);
   const [useCatalogLookup, setUseCatalogLookup] = useState(false);
+  const [ignoreCapacityWarnings, setIgnoreCapacityWarnings] = useState(false);
 
   // Namespace validation
   const [missingNamespaces, setMissingNamespaces] = useState<string[]>([]);
@@ -559,7 +560,7 @@ export const UploadTab: React.FC<Props> = ({
     setLogLines([]);
 
     try {
-      const job = await api.deploy({ dry_run: dryRun, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect, showroom_novnc: showroomNovnc, showroom_zerotouch: showroomZerotouch });
+      const job = await api.deploy({ dry_run: dryRun, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect, showroom_novnc: showroomNovnc, showroom_zerotouch: showroomZerotouch, ignore_capacity_warnings: ignoreCapacityWarnings });
       jobIdRef.current = job.job_id;
       const ws = api.deployWebSocket(job.job_id);
       wsRef.current = ws;
@@ -1418,6 +1419,16 @@ export const UploadTab: React.FC<Props> = ({
                       label="Use Catalog Lookup"
                       isChecked={useCatalogLookup}
                       onChange={(_e, checked) => setUseCatalogLookup(checked)}
+                    />
+                  </Tooltip>
+                </SplitItem>
+                <SplitItem>
+                  <Tooltip content="Skip tenant cluster capacity checks before deployment. Use when deploying to existing clusters with known availability.">
+                    <Switch
+                      id="ignore-capacity-warnings-switch"
+                      label="Ignore Cluster Capacity Warnings"
+                      isChecked={ignoreCapacityWarnings}
+                      onChange={(_e, checked) => setIgnoreCapacityWarnings(checked)}
                     />
                   </Tooltip>
                 </SplitItem>

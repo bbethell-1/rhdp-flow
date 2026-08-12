@@ -221,6 +221,8 @@ class DeploymentResult:
     showroom_url: str = ""
     showroom_status: str = ""
     password: str = ""  # Workshop access password from schedule (for downstream CSV consumers)
+    cluster_name: str = ""  # Tenant cluster name if deployed to existing cluster
+    cluster_capacity: str = ""  # Cluster capacity status (e.g., "75% utilized")
 
 # ============================================================================
 # CLUSTER/TENANT DETECTION HELPERS
@@ -1073,7 +1075,7 @@ def write_deployment_results(
             'ci_name', 'ci', 'namespace', 'guid', 'url', 'status',
             'provisioning_date', 'auto_stop', 'auto_destroy',
             'timestamp', 'error_message', 'showroom_url', 'showroom_status',
-            'password',
+            'password', 'cluster_name', 'cluster_capacity',
         ]
         
         with open(output_file, 'w', newline='', encoding='utf-8') as f:
@@ -4721,15 +4723,29 @@ def process_schedule(
 ) -> DeploymentResult:
     """
     Process a single workshop schedule.
-    
+
     Args:
         schedule: WorkshopSchedule object
         config: RHDPConfig object
-        
+
     Returns:
         DeploymentResult object
     """
     logger.info(f"Processing schedule: {schedule.ci_name} ({schedule.ci})")
+
+    # Check tenant cluster capacity for this deployment
+    cluster_name = ""
+    cluster_capacity_str = ""
+    try:
+        from tenant_cluster_capacity import check_cluster_capacity, is_tenant_catalog_item
+        if is_tenant_catalog_item(schedule.ci):
+            capacity = check_cluster_capacity(schedule.ci, schedule.namespace)
+            if capacity:
+                cluster_name = capacity.cluster_name
+                cluster_capacity_str = f"{capacity.utilization_percent}% utilized"
+                logger.debug(f"Tenant cluster {cluster_name}: {cluster_capacity_str}")
+    except Exception as e:
+        logger.debug(f"Capacity check failed (non-blocking): {e}")
 
     # num_users limit guard — refuse to deploy more than the catalog cap
     if not config.dry_run and _should_include_users(schedule) and schedule.users is not None:
@@ -4921,6 +4937,8 @@ def process_schedule(
             showroom_url=sr_url,
             showroom_status=sr_status,
             password=schedule.password,
+            cluster_name=cluster_name,
+            cluster_capacity=cluster_capacity_str,
         )
         
     except Exception as e:
@@ -6161,6 +6179,11 @@ Examples:
         action="store_true",
         help="Launch interactive CSV wizard to generate a workshop schedule file"
     )
+    parser.add_argument(
+        "--ignore-capacity-warnings",
+        action="store_true",
+        help="Skip tenant cluster capacity checks before deployment"
+    )
 
     return parser
 
@@ -6352,6 +6375,38 @@ def main():
         schedules = expanded
 
         logger.info(f"Processing {len(schedules)} schedule(s)")
+
+        # Check tenant cluster capacity warnings
+        if not args.ignore_capacity_warnings:
+            from tenant_cluster_capacity import check_schedules_capacity
+            capacity_check = check_schedules_capacity(schedules, ignore_warnings=args.ignore_capacity_warnings)
+
+            if capacity_check['errors']:
+                logger.error("=" * 70)
+                logger.error("CRITICAL: Tenant cluster capacity issues detected")
+                logger.error("=" * 70)
+                for err in capacity_check['errors']:
+                    logger.error(f"  {err['message']}")
+                logger.error("=" * 70)
+
+                if not config.dry_run:
+                    response = input("\nContinue deployment anyway? [y/N]: ")
+                    if response.lower() != 'y':
+                        logger.info("Deployment cancelled due to capacity issues")
+                        sys.exit(1)
+                else:
+                    logger.warning("Dry-run mode: would prompt user to continue")
+
+            if capacity_check['warnings']:
+                logger.warning("=" * 70)
+                logger.warning("Tenant cluster capacity warnings:")
+                logger.warning("=" * 70)
+                for warn in capacity_check['warnings']:
+                    logger.warning(f"  {warn['message']}")
+                logger.warning("=" * 70)
+
+            if capacity_check['checked_count'] > 0:
+                logger.info(f"Checked capacity for {capacity_check['checked_count']} tenant catalog item(s)")
 
         # Process each schedule
         results = []

@@ -87,6 +87,8 @@ class DeploymentResultResponse(BaseModel):
     showroom_url: str = ""
     showroom_status: str = ""
     password: str = ""
+    cluster_name: str = ""
+    cluster_capacity: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +108,7 @@ class DeployRequest(BaseModel):
     redirect: bool = Field(True, description="Enable workshop UI redirect (labUserInterface.redirect)")
     showroom_novnc: bool = Field(False, description="Enable noVNC remote desktop in Showroom")
     showroom_zerotouch: bool = Field(False, description="Use zerotouch Showroom chart with setup/runtime automation")
+    ignore_capacity_warnings: bool = Field(False, description="Skip tenant cluster capacity checks before deployment")
     export_yaml_dir: Optional[str] = Field(
         None,
         description="If set on dry-run deploy, write ResourceClaim / Workshop / WorkshopProvision YAMLs to this directory on the API host",
