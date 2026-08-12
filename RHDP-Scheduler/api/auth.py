@@ -12,7 +12,7 @@ import logging
 import os
 from typing import Optional
 
-from fastapi import Depends, HTTPException, Security
+from fastapi import HTTPException, Security
 from fastapi.security import APIKeyHeader
 
 logger = logging.getLogger("rhdp_flow.api")

@@ -15,8 +15,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timedelta, timezone
-from unittest.mock import patch, MagicMock, call
+from datetime import datetime, timezone
+from unittest.mock import patch, MagicMock
 
 # Import the module under test
 try:

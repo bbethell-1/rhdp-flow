@@ -1,10 +1,8 @@
 """Tests for derive_base_domain, build_resource_claim_payload, and related flow helpers."""
 
 import json
-import subprocess
 from unittest.mock import patch, MagicMock
 
-import pytest
 
 from pathlib import Path
 
@@ -14,8 +12,6 @@ from rhdp_flow import (
     export_dry_run_manifest_yaml,
     get_catalog_item_num_users_limit,
     get_catalog_item_parameter_defaults,
-    WorkshopSchedule,
-    RHDPConfig,
 )
 from tests.conftest import make_schedule, make_config
 

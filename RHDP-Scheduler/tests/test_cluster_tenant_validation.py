@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 from datetime import datetime, timedelta
 
 from cluster_tenant_validation import validate_cluster_before_tenant

@@ -21,7 +21,8 @@ from sse_starlette.sse import EventSourceResponse
 
 from api.auth import verify_api_key
 
-import sys, os
+import sys
+import os
 
 # Ensure parent directory is on sys.path so we can import rhdp_flow
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -33,7 +34,6 @@ from rhdp_flow import (
     read_csv_input,
     load_asset_passwords,
     process_schedule,
-    create_multi_workshop,
     create_multi_workshop_from_group,
     qa1_verify_setup,
     qa2_verify_deployment_status,
@@ -48,7 +48,6 @@ from rhdp_flow import (
     extend_destroy_time,
     disable_autostop,
     scale_workshops,
-    deploy_showroom,
     teardown_showroom,
     check_showroom_health,
     run_demolition_preflight,
@@ -341,7 +340,7 @@ _NAMESPACE_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
 def _validate_namespace(ns: str) -> str:
     """Validate a Kubernetes namespace name. Raises HTTPException on invalid input."""
     if not ns or len(ns) > 63 or not _NAMESPACE_RE.match(ns):
-        raise HTTPException(400, f"Invalid namespace: must match [a-z0-9-], 1-63 chars")
+        raise HTTPException(400, "Invalid namespace: must match [a-z0-9-], 1-63 chars")
     return ns
 
 
@@ -763,7 +762,6 @@ def lookup_pool_for_catalog_item(request: Request, catalog_item: str):
         PoolLookupResponse with pool info if found, or null if no pool exists
     """
     from api.pool_utils import get_pool_for_catalog_item
-    from api.models import PoolInfo, PoolLookupResponse
 
     config = _get_config()
     if not config.validate():
@@ -795,7 +793,6 @@ def list_all_pools(request: Request):
         List of PoolInfo objects
     """
     from api.pool_utils import list_all_pools as get_all_pools
-    from api.models import PoolInfo
 
     config = _get_config()
     if not config.validate():
@@ -1002,7 +999,7 @@ def validate_catalog_namespaces(_key=Depends(verify_api_key)):
                 "ci": ci,
                 "namespace": schedule.namespace,
                 "expected_catalog_namespace": expected_ns,
-                "message": suggestion or f"Not found in any catalog namespace",
+                "message": suggestion or "Not found in any catalog namespace",
             })
 
     for s in _schedules:

@@ -11,12 +11,11 @@ Requires: pip install rich
 import csv
 import os
 import random
-import re
 import string
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 try:
     from rich.console import Console

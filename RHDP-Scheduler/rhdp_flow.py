@@ -969,7 +969,7 @@ def dry_run_validate_schedules(
                     logger.info(f"  ✓ {schedule.ci_name}: Users={schedule.users}, Instances={schedule.instances} (num_users workshop with instances count)")
                 elif ci_expects_num_users is False:
                     logger.warning(f"  ⚠️  {schedule.ci_name}: Users={schedule.users}, Instances={schedule.instances} should be Users=0, Instances={schedule.instances} (instances-only workshop)")
-                    logger.warning(f"      Hint: This catalog item does not use num_users. Set Users=0 and only populate Instances column.")
+                    logger.warning("      Hint: This catalog item does not use num_users. Set Users=0 and only populate Instances column.")
             elif has_users and (not has_instances or schedule.instances == 1):
                 if ci_expects_num_users is True:
                     logger.info(f"  ✓ {schedule.ci_name}: Users={schedule.users}, Instances={schedule.instances or 1} (num_users workshop)")
@@ -989,7 +989,7 @@ def dry_run_validate_schedules(
             if ci_expects_num_users is True and has_users and schedule.enable_workshop_interface:
                 logger.error(f"  ❌ {schedule.ci_name}: Enable_workshop_interface=True BUT catalog expects num_users!")
                 logger.error(f"      This will deploy as instances-only Workshop instead of ResourceClaims with num_users={schedule.users}")
-                logger.error(f"      FIX: Set Enable_workshop_interface=False for num_users workshops")
+                logger.error("      FIX: Set Enable_workshop_interface=False for num_users workshops")
                 logger.error(f"      Current: Users={schedule.users}, Instances={schedule.instances or 1}, Enable_workshop_interface=True")
                 logger.error(f"      Correct: Users={schedule.users}, Instances={schedule.instances or 1}, Enable_workshop_interface=False")
 
@@ -1011,11 +1011,11 @@ def dry_run_validate_schedules(
             else:
                 logger.info(f"    • {asset_ci}: no num_users (uses multi-workshop Instances only), password={'set' if has_password else 'MISSING'}")
                 if ci_expects_num_users is True:
-                    logger.warning(f"      ⚠️  FLAG: Catalog item in cluster expects num_users but schedule/sheet does not set it (ordering may use default or fail)")
+                    logger.warning("      ⚠️  FLAG: Catalog item in cluster expects num_users but schedule/sheet does not set it (ordering may use default or fail)")
                 elif ci_expects_num_users is False and asset_num_users and asset_ci in asset_num_users:
-                    logger.warning(f"      ⚠️  FLAG: asset_users sheet sets num_users for this CI but catalog item may not use it")
+                    logger.warning("      ⚠️  FLAG: asset_users sheet sets num_users for this CI but catalog item may not use it")
             if not has_password:
-                logger.warning(f"      ⚠️  FLAG: No password for this asset (main CSV or _passwords.csv)")
+                logger.warning("      ⚠️  FLAG: No password for this asset (main CSV or _passwords.csv)")
         logger.info("")
     logger.info("=" * 70)
 
@@ -1784,7 +1784,7 @@ def create_workshop_with_ui(
                                 logger.info(f"✅ Successfully created Workshop: {actual_name} with UI enabled (labUserInterface.redirect: true)")
                                 return actual_name
                     # Fallback: try to get it from cluster
-                    logger.info(f"✅ Workshop created with generateName, determining actual name...")
+                    logger.info("✅ Workshop created with generateName, determining actual name...")
                     time.sleep(2)
                     # List workshops and find the one we just created
                     list_cmd = [
@@ -1800,7 +1800,7 @@ def create_workshop_with_ui(
                         logger.info(f"✅ Successfully created Workshop: {actual_name} with UI enabled (labUserInterface.redirect: true)")
                         return actual_name
                     else:
-                        logger.warning(f"Could not determine Workshop name")
+                        logger.warning("Could not determine Workshop name")
                         return None
                 else:
                     logger.info(f"✅ Successfully created Workshop: {expected_workshop_name} with UI enabled (labUserInterface.redirect: true)")
@@ -2703,7 +2703,7 @@ def create_multi_workshop(
                 }
                 logger.info("[DRY-RUN] Sample asset payload (first asset):")
                 logger.debug("Sample asset payload:\n%s", json.dumps(sample_payload, indent=2))
-        mock_name = schedule.multi_workshop_name or f"automation-dryrun"
+        mock_name = schedule.multi_workshop_name or "automation-dryrun"
         logger.info(f"[DRY-RUN] Would create MultiWorkshop and {len(asset_ci_list)} asset workshops (no resources created)")
         return mock_name
     
@@ -3073,7 +3073,7 @@ def enable_workshop_lab_interface(
                 continue
     
     logger.warning(f"⚠️  Could not enable labUserInterface for Workshop '{workshop_name}' (not found after {max_wait}s)")
-    logger.warning(f"   Workshop may still be provisioning. You can enable it manually later with:")
+    logger.warning("   Workshop may still be provisioning. You can enable it manually later with:")
     logger.warning(f"   oc patch workshop {workshop_name} -n {namespace} --type merge -p '{{\"spec\":{{\"labUserInterface\":{{\"redirect\":true}}}}}}'")
     return False
 
@@ -3716,7 +3716,7 @@ def qa1_verify_setup(
                             "ready": True
                         }
                         results.append(result)
-                        logger.info(f"✅ {schedule.ci_name} ({schedule.ci}) - Workshop: {workshop_name}" + (f" [LOCKED]" if locked else ""))
+                        logger.info(f"✅ {schedule.ci_name} ({schedule.ci}) - Workshop: {workshop_name}" + (" [LOCKED]" if locked else ""))
                         if issues:
                             for i in issues:
                                 logger.warning(f"   ⚠️  {i}")
@@ -4173,7 +4173,7 @@ def qa2_verify_deployment_status(
             logger.info(f"  Seats: {actual_seats}" + (f" (expected: {expected_seats})" if expected_seats is not None else " (users not configured)"))
             logger.info(f"  Healthy: {healthy}, Ready: {ready}, Provisioned: {provisioned}")
             if not seats_match:
-                logger.warning(f"  ⚠️  Seat count mismatch!")
+                logger.warning("  ⚠️  Seat count mismatch!")
             logger.info("")
     
     # Summary
@@ -4837,7 +4837,7 @@ def process_schedule(
 
         # If workshop UI is enabled, create Workshop directly without ResourceClaim to avoid duplicates
         if schedule.enable_workshop_interface:
-            logger.info(f"Workshop UI enabled - creating Workshop directly (skipping ResourceClaim to avoid duplicate entries)")
+            logger.info("Workshop UI enabled - creating Workshop directly (skipping ResourceClaim to avoid duplicate entries)")
             # Generate a name for the Workshop (similar to ResourceClaim naming)
             ci = schedule.ci
             generate_name = f"{ci}-"
@@ -4846,7 +4846,7 @@ def process_schedule(
             if workshop_name:
                 logger.info(f"✅ Successfully created Workshop: {workshop_name} with UI enabled")
                 # Create WorkshopProvision to manage the Workshop
-                logger.info(f"Creating WorkshopProvision to manage Workshop...")
+                logger.info("Creating WorkshopProvision to manage Workshop...")
                 create_workshop_provision(workshop_name, schedule.namespace, payload, config, enable_workshop_ui=False, concurrency=schedule.concurrency, count=schedule.instances)
                 # Use workshop name as guid for results
                 guid = workshop_name
@@ -5468,7 +5468,7 @@ def deploy_showroom(schedule, config, guid=""):
             if health["pod_ready"]:
                 logger.info(f"Showroom health: pods ready at {health['url']}")
             else:
-                logger.warning(f"Showroom deployed but pods not yet ready — run health check separately")
+                logger.warning("Showroom deployed but pods not yet ready — run health check separately")
         except Exception:
             pass
 

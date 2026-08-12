@@ -1,6 +1,6 @@
 """Tests for WorkshopSchedule and DeploymentResult dataclasses."""
 
-from rhdp_flow import WorkshopSchedule, DeploymentResult
+from rhdp_flow import DeploymentResult
 from tests.conftest import make_schedule
 
 

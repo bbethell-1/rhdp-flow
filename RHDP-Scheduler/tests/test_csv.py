@@ -235,7 +235,6 @@ Lower Row,lower-ci,lower-ns,5,True,secret,Admin,QA,Lower Workshop,15/02/2026 11:
 
     def test_read_from_stringio(self):
         """Test that read_csv_input accepts a file-like object (e.g. StringIO)."""
-        import io
         csv_text = BASIC_WORKSHOP_CSV
         f = io.StringIO(csv_text)
         schedules = read_csv_input(f)

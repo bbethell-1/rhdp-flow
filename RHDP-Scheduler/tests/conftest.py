@@ -13,7 +13,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from rhdp_flow import (
     WorkshopSchedule,
-    DeploymentResult,
     RHDPConfig,
 )
 

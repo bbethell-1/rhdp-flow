@@ -1,7 +1,6 @@
 """
 Tests for Flow labels (flow.demo.redhat.com) on ResourceClaims, Workshops, and WorkshopProvisions.
 """
-import pytest
 from rhdp_flow import (
     WorkshopSchedule,
     RHDPConfig,
