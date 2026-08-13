@@ -4742,7 +4742,7 @@ def process_schedule(
             capacity = check_cluster_capacity(schedule.ci, schedule.namespace)
             if capacity:
                 cluster_name = capacity.cluster_name
-                cluster_capacity_str = f"{capacity.utilization_percent}% utilized"
+                cluster_capacity_str = f"{capacity.pool_saturation_percent}% utilized"
                 logger.debug(f"Tenant cluster {cluster_name}: {cluster_capacity_str}")
     except Exception as e:
         logger.debug(f"Capacity check failed (non-blocking): {e}")

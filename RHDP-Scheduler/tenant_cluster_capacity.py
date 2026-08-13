@@ -17,29 +17,46 @@ logger = logging.getLogger("rhdp_flow.tenant_cluster_capacity")
 
 @dataclass
 class ClusterCapacity:
-    """Cluster capacity information."""
+    """Cluster capacity information with dual metrics.
+
+    Tracks both pool saturation (cluster allocation) and placement capacity
+    (actual workshop slot utilization).
+    """
     cluster_name: str
     total_clusters: int
     available_clusters: int
-    utilization_percent: int
+    pool_saturation_percent: int  # Renamed from utilization_percent
+    max_placements_per_cluster: int
+    workshops_deployed: int
+    placement_capacity_percent: int
 
     @property
     def status(self) -> str:
-        """Return status: healthy, warning, or critical."""
-        if self.utilization_percent >= 90:
+        """Return status: healthy, warning, or critical.
+
+        Uses placement capacity as primary metric when available,
+        falls back to pool saturation.
+        """
+        # Use placement capacity if workshop count is available
+        metric = self.placement_capacity_percent if self.workshops_deployed >= 0 else self.pool_saturation_percent
+
+        if metric >= 90:
             return "critical"
-        elif self.utilization_percent >= 70:
+        elif metric >= 70:
             return "warning"
         return "healthy"
 
     @property
     def message(self) -> str:
-        """Return human-readable message."""
+        """Return human-readable message showing both metrics."""
+        pool_msg = f"Pool: {self.pool_saturation_percent}% saturated ({self.total_clusters - self.available_clusters}/{self.total_clusters} clusters occupied)"
+        placement_msg = f"Placements: {self.placement_capacity_percent}% utilized ({self.workshops_deployed}/{self.total_clusters * self.max_placements_per_cluster} workshops)"
+
         if self.status == "critical":
-            return f"❌ Cluster {self.cluster_name} is at {self.utilization_percent}% capacity - deployment likely to fail"
+            return f"CRITICAL: Cluster {self.cluster_name} at capacity - {placement_msg}, {pool_msg}"
         elif self.status == "warning":
-            return f"⚠️  Warning: Cluster {self.cluster_name} is at {self.utilization_percent}% capacity - may be slow"
-        return f"✓ Cluster {self.cluster_name} has capacity ({self.utilization_percent}% utilized)"
+            return f"WARNING: Cluster {self.cluster_name} nearing capacity - {placement_msg}, {pool_msg}"
+        return f"OK: Cluster {self.cluster_name} has capacity - {placement_msg}, {pool_msg}"
 
 
 def is_tenant_catalog_item(ci: str) -> bool:
@@ -107,24 +124,55 @@ def check_cluster_capacity(catalog_item: str, namespace: str = None) -> Optional
         # For now, we just check if ANY tenant cluster pool exists and report its capacity
         for pool in pools.get("items", []):
             pool_name = pool.get("metadata", {}).get("name", "")
+            pool_namespace = pool.get("metadata", {}).get("namespace", "")
             status = pool.get("status", {})
+            spec = pool.get("spec", {})
             clusters = status.get("clusters", [])
 
             if not clusters:
                 continue
 
+            # Pool saturation (cluster allocation)
             total = len(clusters)
             available = sum(1 for c in clusters if c.get("sandboxApiState") == "available")
-            utilized = total - available
-            utilization_percent = int((utilized / total) * 100) if total > 0 else 0
+            occupied = total - available
+            pool_saturation_percent = int((occupied / total) * 100) if total > 0 else 0
 
-            logger.info(f"Found tenant cluster pool {pool_name}: {available}/{total} available ({utilization_percent}% utilized)")
+            # Placement capacity (workshop slots)
+            max_placements = spec.get("sandboxHost", {}).get("max_placements", 50)
+
+            # Count workshops in this pool (ResourceClaims with tenantClusterPoolName label)
+            workshops_deployed = 0
+            try:
+                core_v1 = client.CoreV1Api()
+                resource_claims = api.list_cluster_custom_object(
+                    group="poolboy.gpte.redhat.com",
+                    version="v1",
+                    plural="resourceclaims",
+                    label_selector=f"babylon.gpte.redhat.com/tenantClusterPoolName={pool_name}"
+                )
+                workshops_deployed = len(resource_claims.get("items", []))
+            except Exception as e:
+                logger.debug(f"Could not count workshops for pool {pool_name}: {e}")
+                # Non-fatal - continue with workshops_deployed = 0
+
+            max_total_placements = total * max_placements
+            placement_capacity_percent = int((workshops_deployed / max_total_placements) * 100) if max_total_placements > 0 else 0
+
+            logger.info(
+                f"Found tenant cluster pool {pool_name}: "
+                f"Pool saturation: {pool_saturation_percent}% ({occupied}/{total} clusters), "
+                f"Placement capacity: {placement_capacity_percent}% ({workshops_deployed}/{max_total_placements} workshops)"
+            )
 
             return ClusterCapacity(
                 cluster_name=pool_name,
                 total_clusters=total,
                 available_clusters=available,
-                utilization_percent=utilization_percent
+                pool_saturation_percent=pool_saturation_percent,
+                max_placements_per_cluster=max_placements,
+                workshops_deployed=workshops_deployed,
+                placement_capacity_percent=placement_capacity_percent
             )
 
         logger.debug(f"No tenant cluster pools found for {catalog_item}")
@@ -182,14 +230,16 @@ def check_schedules_capacity(schedules: List[Any], ignore_warnings: bool = False
                     "ci_name": schedule.ci_name,
                     "ci": ci,
                     "message": capacity.message,
-                    "utilization": capacity.utilization_percent
+                    "pool_saturation": capacity.pool_saturation_percent,
+                    "placement_capacity": capacity.placement_capacity_percent
                 })
             elif capacity.status == "warning":
                 warnings.append({
                     "ci_name": schedule.ci_name,
                     "ci": ci,
                     "message": capacity.message,
-                    "utilization": capacity.utilization_percent
+                    "pool_saturation": capacity.pool_saturation_percent,
+                    "placement_capacity": capacity.placement_capacity_percent
                 })
 
     return {
