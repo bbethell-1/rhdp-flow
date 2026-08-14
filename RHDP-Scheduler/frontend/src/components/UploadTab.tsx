@@ -43,10 +43,10 @@ interface ScheduleWarning {
   message: string;
 }
 
-/** Parse DD/MM/YYYY HH:MM (or DD/MM/YY HH:MM) into a Date, or null. */
+/** Parse DD/MM/YYYY HH:MM (or DD/MM/YY HH:MM) into a Date, or null. Accepts space or colon separator for Labugator compatibility. */
 function parseScheduleDate(dateStr: string): Date | null {
   if (!dateStr?.trim()) return null;
-  const m = dateStr.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})$/);
+  const m = dateStr.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})[\s:]+(\d{1,2}):(\d{2})$/);
   if (m) {
     const yr = m[3].length === 2 ? 2000 + parseInt(m[3]) : parseInt(m[3]);
     return new Date(Date.UTC(yr, parseInt(m[2]) - 1, parseInt(m[1]), parseInt(m[4]), parseInt(m[5])));
