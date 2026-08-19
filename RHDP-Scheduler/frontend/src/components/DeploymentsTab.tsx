@@ -26,12 +26,61 @@ import ExclamationTriangleIcon from '@patternfly/react-icons/dist/esm/icons/excl
 import ExclamationCircleIcon from '@patternfly/react-icons/dist/esm/icons/exclamation-circle-icon';
 import CopyIcon from '@patternfly/react-icons/dist/esm/icons/copy-icon';
 import RedoIcon from '@patternfly/react-icons/dist/esm/icons/redo-icon';
+import ExternalLinkAltIcon from '@patternfly/react-icons/dist/esm/icons/external-link-alt-icon';
 
 import { api } from '../services/api';
+import { generateServiceLinks } from '../utils/serviceLinks';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { AUTO_REFRESH_INTERVAL_MS, DEFAULT_PER_PAGE, RETRY_DELAY_MS } from '../constants';
 import { statusColorClass, statusIcon } from '../utils/statusColors';
 import type { DeploymentResult } from '../types';
+
+interface ServiceLinkButtonProps {
+  href?: string;
+  label: string;
+  icon?: React.ComponentType<any>;
+}
+
+const ServiceLinkButton: React.FC<ServiceLinkButtonProps> = ({ href, label, icon: Icon = ExternalLinkAltIcon }) => {
+  if (!href) return null;
+  return (
+    <Button
+      component="a"
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      variant="link"
+      icon={<Icon />}
+      iconPosition="right"
+      isInline
+      style={{ fontSize: '0.875rem', padding: '0 0.5rem' }}
+    >
+      {label}
+    </Button>
+  );
+};
+
+interface ServiceLinksCellProps {
+  result: DeploymentResult;
+}
+
+const ServiceLinksCell: React.FC<ServiceLinksCellProps> = ({ result }) => {
+  const links = generateServiceLinks(
+    result.namespace,
+    result.guid,
+    result.url,
+    result.showroom_url
+  );
+
+  return (
+    <Flex direction={{ default: 'column' }} spaceItems={{ default: 'spaceItemsXs' }}>
+      <ServiceLinkButton href={links.workshop} label="Workshop" />
+      <ServiceLinkButton href={links.showroom} label="Showroom" />
+      <ServiceLinkButton href={links.openshiftConsole} label="Console" />
+      <ServiceLinkButton href={links.resourceClaim} label="Claim" />
+    </Flex>
+  );
+};
 
 function isFailed(status: string): boolean {
   const s = (status || '').toLowerCase();
@@ -382,6 +431,7 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
                 <Th sort={getSortParams('namespace')} info={{ tooltip: 'OpenShift namespace where resources are deployed' }}>Namespace</Th>
                 <Th info={{ tooltip: 'Globally Unique Identifier for this deployment instance' }}>GUID</Th>
                 <Th sort={getSortParams('status')}>Status</Th>
+                <Th info={{ tooltip: 'Quick access links to workshop, showroom, OpenShift console, and ResourceClaim' }}>Services</Th>
                 <Th>URL</Th>
                 <Th>Prov. Date (UTC)</Th>
                 <Th>Auto-Stop (UTC)</Th>
@@ -406,6 +456,9 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
                   <Td dataLabel="Namespace">{r.namespace}</Td>
                   <Td dataLabel="GUID">{r.guid}</Td>
                   <Td dataLabel="Status"><span className={statusColorClass(r.status)}>{(() => { const Icon = statusIcon(r.status); return Icon ? <Icon style={{ marginRight: 4 }} /> : null; })()}{formatStatus(r.status)}</span></Td>
+                  <Td dataLabel="Services">
+                    <ServiceLinksCell result={r} />
+                  </Td>
                   <Td dataLabel="URL">
                     {r.url ? (
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
