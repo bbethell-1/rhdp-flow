@@ -1,0 +1,28 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: rhdp-flow-dev
+
+resources:
+  - ../../base
+  - namespace.yaml
+
+configMapGenerator:
+  - name: rhdp-scheduler-config  # Match base name for merge to work
+    behavior: merge
+    literals:
+      - CLUSTER_DOMAIN=ocpv-infra01.dal12.infra.demo.redhat.com
+      - ENVIRONMENT=dev
+      # LOG_FORMAT is in base, no need to duplicate
+
+commonLabels:
+  environment: dev
+
+patches:
+  - target:
+      kind: Route
+      name: rhdp-scheduler
+    patch: |-
+      - op: replace
+        path: /spec/host
+        value: rhdp-flow-dev.apps.ocpv-infra01.dal12.infra.demo.redhat.com
