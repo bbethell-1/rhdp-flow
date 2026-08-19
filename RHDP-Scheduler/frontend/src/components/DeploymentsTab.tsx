@@ -18,6 +18,7 @@ import {
   ToggleGroup,
   ToggleGroupItem,
   Tooltip,
+  Label,
 } from '@patternfly/react-core';
 import { Table, Thead, Tbody, Tr, Th, Td, ThProps } from '@patternfly/react-table';
 import CubesIcon from '@patternfly/react-icons/dist/esm/icons/cubes-icon';
@@ -32,7 +33,7 @@ import { api } from '../services/api';
 import { generateServiceLinks } from '../utils/serviceLinks';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { AUTO_REFRESH_INTERVAL_MS, DEFAULT_PER_PAGE, RETRY_DELAY_MS } from '../constants';
-import { statusColorClass, statusIcon } from '../utils/statusColors';
+import { statusColorClass, statusIcon, getStatusIndicator, STATUS_LABEL_TO_PF_COLOR } from '../utils/statusColors';
 import type { DeploymentResult } from '../types';
 
 interface ServiceLinkButtonProps {
@@ -81,6 +82,50 @@ const ServiceLinksCell: React.FC<ServiceLinksCellProps> = ({ result }) => {
     </Flex>
   );
 };
+
+interface StatusBadgeProps {
+  status: string;
+}
+
+const StatusBadge: React.FC<StatusBadgeProps> = ({ status }) => {
+  const indicator = getStatusIndicator(status);
+  const Icon = indicator.icon;
+
+  return (
+    <Label
+      color={STATUS_LABEL_TO_PF_COLOR[indicator.label] || 'grey'}
+      icon={<Icon />}
+    >
+      {indicator.label}
+    </Label>
+  );
+};
+
+interface StatusCardProps {
+  icon: React.ComponentType<any>;
+  color: string;
+  count: number;
+  label: string;
+  tooltip: string;
+}
+
+const StatusCard: React.FC<StatusCardProps> = ({ icon: Icon, color, count, label, tooltip }) => (
+  <Tooltip content={tooltip}>
+    <Card isCompact isPlain>
+      <CardBody>
+        <Flex direction={{ default: 'column' }} spaceItems={{ default: 'spaceItemsSm' }}>
+          <FlexItem>
+            <Title headingLevel="h4" size="lg">
+              <Icon style={{ color, marginRight: '0.5rem' }} />
+              {count}
+            </Title>
+          </FlexItem>
+          <FlexItem>{label}</FlexItem>
+        </Flex>
+      </CardBody>
+    </Card>
+  </Tooltip>
+);
 
 function isFailed(status: string): boolean {
   const s = (status || '').toLowerCase();
@@ -293,34 +338,31 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
             </Tooltip>
           </FlexItem>
           <FlexItem>
-            <Tooltip content="Deployed and confirmed healthy via QA verification">
-              <Card isCompact isPlain>
-                <CardBody>
-                  <div className="summary-card-value status-verified"><CheckCircleIcon style={{ marginRight: 4 }} />{statusCounts.verified}</div>
-                  <div className="summary-card-label">Verified</div>
-                </CardBody>
-              </Card>
-            </Tooltip>
+            <StatusCard
+              icon={CheckCircleIcon}
+              color="var(--pf-v6-global--success-color--100)"
+              count={statusCounts.verified}
+              label="Verified"
+              tooltip="Deployed and confirmed healthy via QA verification"
+            />
           </FlexItem>
           <FlexItem>
-            <Tooltip content="Deployed successfully but not yet verified by QA checks">
-              <Card isCompact isPlain>
-                <CardBody>
-                  <div className="summary-card-value status-deployed_unverified"><ExclamationTriangleIcon style={{ marginRight: 4 }} />{statusCounts.unverified}</div>
-                  <div className="summary-card-label">Unverified</div>
-                </CardBody>
-              </Card>
-            </Tooltip>
+            <StatusCard
+              icon={ExclamationTriangleIcon}
+              color="var(--pf-v6-global--warning-color--100)"
+              count={statusCounts.unverified}
+              label="Unverified"
+              tooltip="Deployed successfully but not yet verified by QA checks"
+            />
           </FlexItem>
           <FlexItem>
-            <Tooltip content="Deployment encountered an error — check the Error column for details">
-              <Card isCompact isPlain>
-                <CardBody>
-                  <div className="summary-card-value status-failed"><ExclamationCircleIcon style={{ marginRight: 4 }} />{statusCounts.failed}</div>
-                  <div className="summary-card-label">Failed</div>
-                </CardBody>
-              </Card>
-            </Tooltip>
+            <StatusCard
+              icon={ExclamationCircleIcon}
+              color="var(--pf-v6-global--danger-color--100)"
+              count={statusCounts.failed}
+              label="Failed"
+              tooltip="Deployment encountered an error — check the Error column for details"
+            />
           </FlexItem>
         </Flex>
       )}
@@ -455,7 +497,9 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
                   <Td dataLabel="CI">{r.ci}</Td>
                   <Td dataLabel="Namespace">{r.namespace}</Td>
                   <Td dataLabel="GUID">{r.guid}</Td>
-                  <Td dataLabel="Status"><span className={statusColorClass(r.status)}>{(() => { const Icon = statusIcon(r.status); return Icon ? <Icon style={{ marginRight: 4 }} /> : null; })()}{formatStatus(r.status)}</span></Td>
+                  <Td dataLabel="Status">
+                    <StatusBadge status={r.status} />
+                  </Td>
                   <Td dataLabel="Services">
                     <ServiceLinksCell result={r} />
                   </Td>
