@@ -7,10 +7,10 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "list"]
-  # Read/patch Babylon workshop resources
+  # Manage Babylon workshop resources (deploy creates, operations patch, cleanup deletes)
   - apiGroups: ["babylon.gpte.redhat.com"]
     resources: ["workshops", "workshopprovisions", "resourceclaims"]
-    verbs: ["get", "list", "patch"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
   # Read catalog items for num_users validation
   - apiGroups: ["babylon.gpte.redhat.com"]
     resources: ["catalogitems"]

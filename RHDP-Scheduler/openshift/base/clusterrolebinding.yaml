@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: rhdp-scheduler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: rhdp-scheduler
+subjects:
+  - kind: ServiceAccount
+    name: rhdp-scheduler
+    namespace: rhdp-scheduler

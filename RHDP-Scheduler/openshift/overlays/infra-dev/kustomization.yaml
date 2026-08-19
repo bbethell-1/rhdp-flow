@@ -26,3 +26,11 @@ patches:
       - op: replace
         path: /spec/host
         value: rhdp-flow-dev.apps.ocpv-infra01.dal12.infra.demo.redhat.com
+
+  - target:
+      kind: ClusterRoleBinding
+      name: rhdp-scheduler
+    patch: |-
+      - op: replace
+        path: /subjects/0/namespace
+        value: rhdp-flow-dev
