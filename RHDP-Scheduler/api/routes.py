@@ -1,7 +1,5 @@
 """API endpoints — thin wrappers around rhdp_flow functions."""
 
-from __future__ import annotations
-
 import asyncio
 import csv
 import io
@@ -13,6 +11,7 @@ import tempfile
 import threading
 from dataclasses import asdict
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
@@ -106,6 +105,7 @@ from api.models import (
 from api import jobs
 from api.log_capture import start_log_capture, stop_log_capture, get_log_dir
 from api.limiter import limiter as _route_limiter
+from api.services.labagator_import import transform_labagator_to_flow
 
 logger = logging.getLogger("rhdp_flow.api")
 
@@ -117,11 +117,11 @@ router = APIRouter()
 _schedules: list[WorkshopSchedule] = []
 _deployment_results: list[DeploymentResult] = []
 _qa_results: list[QAResultItem] = []
-_csv_filepath: str | None = None  # stashed for QA functions that need a path
+_csv_filepath: Optional[str] = None  # stashed for QA functions that need a path
 _current_filename: str = ""
-_asset_passwords: dict[str, str] | None = None
-_deploy_log_path: str | None = None
-_qa_log_path: str | None = None
+_asset_passwords: Optional[dict[str, str]] = None
+_deploy_log_path: Optional[str] = None
+_qa_log_path: Optional[str] = None
 _destroy_check_results: list[dict] = []
 
 # Session history — each completed upload+deploy cycle gets archived here
@@ -255,7 +255,7 @@ def _write_qa_csv_for_namespace(namespace: str) -> str:
     return tmp.name
 
 
-def _coerce_optional_int(val) -> int | None:
+def _coerce_optional_int(val) -> Optional[int]:
     if val is None or val == "":
         return None
     if isinstance(val, bool):
@@ -320,7 +320,7 @@ def _normalize_qa_result_dict(r: dict) -> dict:
 
 
 # Cached base domain derived from the connected cluster
-_cached_base_domain: str | None = None
+_cached_base_domain: Optional[str] = None
 
 # Thread-safe lock for global state mutations (sync endpoints run in threadpool)
 _state_lock = threading.Lock()
@@ -450,7 +450,7 @@ def _ingest_schedule_csv_text(text: str, filename: str) -> UploadResponse:
     )
 
 
-def _filter_schedules(ci_filter: str | None) -> list[WorkshopSchedule]:
+def _filter_schedules(ci_filter: Optional[str]) -> list[WorkshopSchedule]:
     if ci_filter:
         filtered = [s for s in _schedules if s.ci == ci_filter]
         if not filtered:
@@ -818,6 +818,33 @@ async def upload_csv(request: Request, file: UploadFile = File(...), _key=Depend
     return _ingest_schedule_csv_text(text, file.filename or "unknown.csv")
 
 
+@router.post("/schedules/import-labagator", response_model=UploadResponse)
+async def import_labagator_sessions(
+    file: UploadFile = File(...),
+    _key=Depends(verify_api_key)
+):
+    """Import Labagator session export CSV and convert to Flow schedules.
+
+    Accepts Labagator session CSV with fields:
+    - session_code, title, room, session_date, start_time, end_time, speakers, topics
+
+    Returns Flow workshop schedules ready for deployment.
+    """
+    # Read uploaded file
+    content = await file.read()
+    labagator_csv = io.StringIO(content.decode("utf-8"))
+
+    # Transform to Flow format
+    try:
+        flow_csv = transform_labagator_to_flow(labagator_csv)
+    except Exception as e:
+        logger.exception("Labagator transformation failed")
+        raise HTTPException(400, f"Import failed: {e}")
+
+    # Parse as Flow schedules (reuse existing upload logic)
+    return _ingest_schedule_csv_text(flow_csv, file.filename or "labagator-import.csv")
+
+
 @router.get("/schedules/examples")
 def list_schedule_examples():
     """Short labels for built-in schedule CSVs (see docs/examples/)."""
@@ -907,7 +934,7 @@ def validate_num_users(_key=Depends(verify_api_key)):
     limits: dict[str, int] = {}
     checked = 0
     skipped = 0
-    ci_cache: dict[str, dict | None] = {}
+    ci_cache: dict[str, Optional[dict]] = {}
     advisory_seen: set = set()
 
     def _check_ci(ci: str, schedule: WorkshopSchedule):
@@ -1112,7 +1139,7 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
     # Pre-deploy num_users limit check (live deploys only)
     if not body.dry_run:
         config_check = _get_config()
-        ci_cache: dict[str, dict | None] = {}
+        ci_cache: dict[str, Optional[dict]] = {}
         limit_errors: list[str] = []
         for s in schedules:
             if s.users is not None and s.users > 0:
@@ -1578,7 +1605,7 @@ async def deploy_retry(request: Request, body: RetryRequest, _key=Depends(verify
     # Pre-deploy num_users limit check (live deploys only) - same as main deploy
     if not body.dry_run:
         config_check = _get_config()
-        ci_cache: dict[str, dict | None] = {}
+        ci_cache: dict[str, Optional[dict]] = {}
         limit_errors = []
         for s in matching:
             if s.users is not None and s.users > 0:
