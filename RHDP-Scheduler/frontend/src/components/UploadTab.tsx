@@ -24,6 +24,8 @@ import {
   SearchInput,
   Tooltip,
   TextInput,
+  ToggleGroup,
+  ToggleGroupItem,
 } from '@patternfly/react-core';
 import { Table, Thead, Tbody, Tr, Th, Td, ExpandableRowContent } from '@patternfly/react-table';
 import UploadIcon from '@patternfly/react-icons/dist/esm/icons/upload-icon';
@@ -99,6 +101,7 @@ export const UploadTab: React.FC<Props> = ({
   const [validating, setValidating] = useState(false);
   const [yamlDownloading, setYamlDownloading] = useState(false);
   const [rowEditsLocked, setRowEditsLocked] = useState(false);
+  const [importMode, setImportMode] = useState<'flow' | 'labagator'>('flow');
   const [scheduleExamples, setScheduleExamples] = useState<ScheduleExampleMeta[]>([]);
   const [loadingExampleSlug, setLoadingExampleSlug] = useState<string | null>(null);
   const [passwordCount, setPasswordCount] = useState<number | null>(null);
@@ -444,13 +447,22 @@ export const UploadTab: React.FC<Props> = ({
   const handleUpload = async () => {
     if (!csvFile) { showToast('Please select a CSV file', 'danger'); return; }
     try {
-      const data = await api.uploadCSV(csvFile);
+      const data = importMode === 'labagator'
+        ? await api.importLabagatorCSV(csvFile)
+        : await api.uploadCSV(csvFile);
+
       setSchedules(data.schedules);
       setSkippedRows(data.skipped_rows ?? 0);
       setTotalRows(data.total_rows ?? 0);
-      const msg = data.skipped_rows
-        ? `Loaded ${data.count} of ${data.total_rows} row(s) — ${data.skipped_rows} row(s) skipped`
-        : `Loaded ${data.count} schedule(s)`;
+
+      const msg = importMode === 'labagator'
+        ? data.skipped_rows
+          ? `Imported ${data.count} of ${data.total_rows} session(s) — ${data.skipped_rows} skipped`
+          : `Imported ${data.count} Labagator session(s)`
+        : data.skipped_rows
+          ? `Loaded ${data.count} of ${data.total_rows} row(s) — ${data.skipped_rows} row(s) skipped`
+          : `Loaded ${data.count} schedule(s)`;
+
       showToast(msg, data.skipped_rows ? 'danger' : 'success');
       try {
         await refreshClusterValidation();
@@ -461,7 +473,7 @@ export const UploadTab: React.FC<Props> = ({
         console.warn('Post-upload cluster validation failed', e);
       }
     } catch (e) {
-      showToast(`Upload failed: ${e}`, 'danger');
+      showToast(`${importMode === 'labagator' ? 'Import' : 'Upload'} failed: ${e}`, 'danger');
     }
   };
 
@@ -676,6 +688,36 @@ export const UploadTab: React.FC<Props> = ({
 
   return (
     <PageSection>
+      {/* Import format toggle */}
+      <div style={{ marginBottom: 16 }}>
+        <ToggleGroup aria-label="Import format">
+          <ToggleGroupItem
+            text="Flow CSV"
+            buttonId="flow-format"
+            isSelected={importMode === 'flow'}
+            onChange={() => setImportMode('flow')}
+          />
+          <ToggleGroupItem
+            text="Labagator Sessions"
+            buttonId="labagator-format"
+            isSelected={importMode === 'labagator'}
+            onChange={() => setImportMode('labagator')}
+          />
+        </ToggleGroup>
+      </div>
+
+      {importMode === 'labagator' && (
+        <Alert
+          variant="info"
+          isInline
+          title="Labagator import mode"
+          style={{ marginBottom: 16 }}
+        >
+          Import a Labagator sessions CSV export. Only sessions with status=started will be converted to Flow schedules.
+          Required columns: workshop_name, account, guid, provisioning_time, stop_time, destroy_time.
+        </Alert>
+      )}
+
       {/* CSV Upload */}
       <Split hasGutter style={{ marginBottom: 16, alignItems: 'center' }}>
         <SplitItem isFilled>

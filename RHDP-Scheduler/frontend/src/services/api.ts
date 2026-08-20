@@ -100,6 +100,17 @@ export const api = {
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
+  importLabagatorCSV: async (file: File): Promise<UploadResponse> => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${API}/schedules/import-labagator`, {
+      method: 'POST',
+      body: form,
+      headers: getApiKeyHeader(),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
   uploadPasswordsCSV: async (file: File): Promise<{count: number; message: string}> => {
     const form = new FormData();
     form.append('file', file);
