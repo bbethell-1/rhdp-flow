@@ -1,0 +1,3 @@
+session_code,title,room,session_date,start_time,end_time,speakers,topics
+LAB-001,Getting Started with OpenShift,Room A,2026-08-20,09:00,11:00,Alice,openshift;containers
+LAB-002,Advanced Ansible Automation,Room B,2026-08-20,13:00,15:00,Bob,ansible;automation

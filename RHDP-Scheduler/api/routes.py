@@ -2225,7 +2225,7 @@ async def export_for_labagator(_key=Depends(verify_api_key)):
     for s in _schedules:
         # Parse Flow dates (DD/MM/YYYY HH:MM → YYYY-MM-DD, HH:MM)
         start_dt = datetime.strptime(s.provisioning_date, "%d/%m/%Y %H:%M")
-        stop_dt = datetime.strptime(s.auto_stop_date, "%d/%m/%Y %H:%M")
+        stop_dt = datetime.strptime(s.auto_stop, "%d/%m/%Y %H:%M")
 
         # Extract session code from CI name (assumes "CODE - Title" format)
         name_parts = s.ci_name.split(" - ", 1)
