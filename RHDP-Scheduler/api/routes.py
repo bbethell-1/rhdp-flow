@@ -2,6 +2,7 @@
 
 import asyncio
 import csv
+from datetime import datetime
 import io
 import logging
 import re
@@ -2207,4 +2208,45 @@ def export_students():
         _iter(),
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=student_landing_page.csv"},
+    )
+
+
+@router.get("/schedules/export-for-labagator")
+async def export_for_labagator(_key=Depends(verify_api_key)):
+    """Export current Flow schedules as Labagator-compatible CSV."""
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded")
+
+    output = io.StringIO()
+    fieldnames = ["session_code", "title", "room", "session_date", "start_time", "end_time", "speakers", "topics"]
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+
+    for s in _schedules:
+        # Parse Flow dates (DD/MM/YYYY HH:MM → YYYY-MM-DD, HH:MM)
+        start_dt = datetime.strptime(s.provisioning_date, "%d/%m/%Y %H:%M")
+        stop_dt = datetime.strptime(s.auto_stop_date, "%d/%m/%Y %H:%M")
+
+        # Extract session code from CI name (assumes "CODE - Title" format)
+        name_parts = s.ci_name.split(" - ", 1)
+        session_code = name_parts[0] if len(name_parts) > 1 else s.ci_name
+        title = name_parts[1] if len(name_parts) > 1 else ""
+
+        row = {
+            "session_code": session_code,
+            "title": title,
+            "room": "",
+            "session_date": start_dt.strftime("%Y-%m-%d"),
+            "start_time": start_dt.strftime("%H:%M"),
+            "end_time": stop_dt.strftime("%H:%M"),
+            "speakers": "",
+            "topics": s.purpose or "",
+        }
+        writer.writerow(row)
+
+    content = output.getvalue()
+    return Response(
+        content=content,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=flow-export-for-labagator.csv"},
     )

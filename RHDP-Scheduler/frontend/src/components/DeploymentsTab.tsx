@@ -420,6 +420,30 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
         <SplitItem>
           <Button
             variant="secondary"
+            onClick={async () => {
+              try {
+                const response = await fetch('/api/schedules/export-for-labagator');
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'flow-export-for-labagator.csv';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                showToast('Exported for Labagator', 'success');
+              } catch (e) {
+                showToast('Export failed', 'danger');
+              }
+            }}
+          >
+            Export for Labagator
+          </Button>
+        </SplitItem>
+        <SplitItem>
+          <Button
+            variant="secondary"
             component="a"
             href={deployLogFile ? api.logURL(deployLogFile) : '#'}
             isDisabled={!deployLogFile}
