@@ -1,5 +1,5 @@
 /**
- * RHDP-Flow Demo Video Recorder — Split into 6 chapter videos.
+ * RHDP-Flow Demo Video Recorder — Split into 7 chapter videos.
  *
  * Each chapter records to its own WebM file with:
  * - Enlarged viewport (1920×1120) to fix masthead clipping
@@ -17,6 +17,8 @@
  *   done
  */
 
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { chromium } from 'playwright';
 import {
   VIDEOS_DIR, CSV_PATH, BASE_URL, VIEWPORT, wait,
@@ -25,6 +27,8 @@ import {
   showTitleCard, hideTitleCard, scrollSection, uploadCSV,
   renameLatestWebm, cleanupStrayWebm,
 } from './recording-helpers.mjs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ─── Chapter runner ─────────────────────────────────────────────────────────
 
@@ -506,6 +510,104 @@ async function chapter06_extras(page, step) {
   await wait(500);
 }
 
+async function chapter07_labagatorIntegration(page, step) {
+  // Start on Upload tab (fresh state)
+  await showSection(page, 'Labagator');
+
+  // 1. Landing overview
+  await step(
+    'Labagator Integration',
+    'Import event sessions from Labagator planner, deploy as Flow workshops',
+    null
+  );
+  await wait(2500);
+  await hideCallout(page);
+
+  // 2. Toggle to Labagator mode
+  const labagatorBtn = page.locator('button:has-text("Labagator Sessions")');
+  if (await labagatorBtn.count() > 0) {
+    await step(
+      'Switch to Labagator mode',
+      'Import sessions from Labagator event CSV format',
+      'button:has-text("Labagator Sessions")',
+      { position: 'below' }
+    );
+    await clickWithCursor(page, 'button:has-text("Labagator Sessions")', { afterClick: 1200 });
+    await hideCallout(page);
+  }
+
+  // 3. Info alert explaining format
+  const infoAlert = page.locator('.pf-v6-c-alert.pf-m-info');
+  if (await infoAlert.count() > 0) {
+    await step(
+      'Labagator CSV format',
+      'Session code, title, room, dates — auto-converts to Flow format',
+      '.pf-v6-c-alert.pf-m-info',
+      { position: 'below' }
+    );
+    await highlight(page, '.pf-v6-c-alert.pf-m-info', 2000);
+    await hideCallout(page);
+  }
+
+  // 4. Upload Labagator CSV
+  const labagatorCsvPath = path.resolve(__dirname, '..', 'docs', 'examples', 'labagator_sample.csv');
+  await step(
+    'Upload Labagator session export',
+    'CSV with session_code, title, dates, room columns',
+    '#csv-file-upload',
+    { position: 'right' }
+  );
+  await uploadCSV(page, labagatorCsvPath);
+  await hideCallout(page);
+
+  // 5. Show transformed schedule
+  const table = page.locator('.pf-v6-c-table');
+  if (await table.count() > 0) {
+    await step(
+      'Sessions converted to workshops',
+      'CI names, namespaces, and date ranges auto-generated from Labagator data',
+      '.pf-v6-c-table',
+      { position: 'above' }
+    );
+    await highlight(page, '.pf-v6-c-table tbody tr:first-child', 2500);
+    await hideCallout(page);
+  }
+
+  // 6. Switch to Deployments tab
+  await hideSection(page);
+  await clickWithCursor(page, 'button[role="tab"]:has-text("Deployments")', { afterClick: 2000 });
+  await showSection(page, 'Export');
+
+  // 7. Export back to Labagator
+  const exportBtn = page.locator('button:has-text("Export for Labagator")');
+  if (await exportBtn.count() > 0) {
+    await step(
+      'Export for Labagator',
+      'Round-trip: Flow → Labagator CSV for session updates',
+      'button:has-text("Export for Labagator")',
+      { position: 'above' }
+    );
+    await clickWithCursor(page, 'button:has-text("Export for Labagator")', { afterClick: 2000 });
+    await hideCallout(page);
+  }
+
+  // 8. Success confirmation
+  const successAlert = page.locator('.pf-v6-c-alert--success');
+  if (await successAlert.count() > 0) {
+    await step(
+      'Round-trip complete',
+      'Labagator sessions deployed and exported back for event tracking',
+      '.pf-v6-c-alert--success',
+      { position: 'below' }
+    );
+    await wait(2500);
+    await hideCallout(page);
+  }
+
+  await hideSection(page);
+  await wait(500);
+}
+
 // ─── Main ───────────────────────────────────────────────────────────────────
 
 const CHAPTERS = [
@@ -545,10 +647,16 @@ const CHAPTERS = [
     sub: 'Live mode, dark mode, keyboard shortcuts, and diff view',
     fn: chapter06_extras,
   },
+  {
+    file: '07-labagator-integration.webm',
+    title: 'Labagator Integration',
+    sub: 'Import event sessions, deploy, and export back',
+    fn: chapter07_labagatorIntegration,
+  },
 ];
 
 (async () => {
-  console.log('RHDP-Flow Demo Recorder — 6-chapter split');
+  console.log('RHDP-Flow Demo Recorder — 7-chapter split');
   console.log(`Frontend: ${BASE_URL}`);
   console.log(`Viewport: ${VIEWPORT.width}×${VIEWPORT.height}`);
   console.log(`CSV: ${CSV_PATH}\n`);
@@ -562,7 +670,7 @@ const CHAPTERS = [
   await browser.close();
 
   // Clean up stray .webm files (keep chapter outputs)
-  cleanupStrayWebm(['01-', '02-', '03-', '04-', '05-', '06-', 'rhdp-flow-demo']);
+  cleanupStrayWebm(['01-', '02-', '03-', '04-', '05-', '06-', '07-', 'rhdp-flow-demo']);
 
   console.log('\n✓ All chapters recorded.');
   console.log('\nConvert to MP4:');

@@ -54,3 +54,34 @@ The Dockerfile temporarily has the `oc` CLI installation commented out due to ne
 - BuildConfig: `rhdp-scheduler`
 - ImageStream: `rhdp-scheduler`
 - NetworkPolicy: `rhdp-scheduler`
+
+## Labagator Integration
+
+Flow integrates with the Labagator event planning tool for seamless session-to-workshop handoff.
+
+### Import Workflow
+
+1. Export sessions from Labagator (CSV format)
+2. In Flow Upload tab, toggle "Labagator Sessions"
+3. Upload the Labagator CSV
+4. Sessions auto-convert to Flow workshop format
+5. Deploy as usual
+
+### Export Workflow
+
+1. Deploy workshops via Flow
+2. In Deployments tab, click "Export for Labagator"
+3. Import exported CSV back into Labagator for session updates
+
+### CSV Mapping
+
+- `session_code` → CI Name prefix (e.g., "LAB-001 - Title")
+- `session_date` + `start_time` → Provisioning Date
+- `session_date` + `end_time` → Auto-stop Date
+- Auto-destroy: 2 hours after stop time
+- Namespace: `labagator-{session-code}`
+
+### API Endpoints
+
+- Import: `POST /api/schedules/import-labagator`
+- Export: `GET /api/schedules/export-for-labagator`

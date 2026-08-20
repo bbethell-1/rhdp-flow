@@ -1,12 +1,12 @@
 # RHDP-Flow Demo Videos
 
-8 short demo videos: **6 for the Web UI** and **2 for the CLI**.
+9 short demo videos: **7 for the Web UI** and **2 for the CLI**.
 
 All videos are 1920x1120, H.264 MP4. Use any local video player or download from GitHub.
 
 ---
 
-## Web UI Demos (chapters 01–06)
+## Web UI Demos (chapters 01–07)
 
 Recorded from the React + PatternFly 6 frontend (`localhost:5173`).
 
@@ -18,6 +18,7 @@ Recorded from the React + PatternFly 6 frontend (`localhost:5173`).
 | 4 | `04-operations-tab.mp4` | Resource Lock, Extend Stop/Destroy, Scale, CI filter, history | ~32s |
 | 5 | `05-qa-and-students.mp4` | QA1/QA2 types, run QA, results, student URLs, export | ~31s |
 | 6 | `06-extras.mp4` | Live mode warning, dark mode, keyboard shortcuts, diff view | ~37s |
+| 7 | `07-labagator-integration.mp4` | Labagator import/export workflow, session conversion | ~35s |
 
 ## CLI Demos (chapters 07–08)
 
@@ -39,7 +40,7 @@ Recorded from a simulated terminal showing `rhdp_flow.py` commands and output.
 open videos/01-upload-and-schedule.mp4
 
 # macOS — play all Web UI demos
-for f in videos/0{1..6}*.mp4; do open "$f"; done
+for f in videos/0{1..7}*.mp4; do open "$f"; done
 
 # macOS — play all CLI demos
 for f in videos/0{7..8}*.mp4; do open "$f"; done
@@ -104,6 +105,14 @@ xdg-open videos/07-cli-deploy-and-qa.mp4
 - Keyboard shortcuts modal (? key)
 - Compare Schedules diff view
 
+#### 07 — Labagator Integration
+- Toggle to Labagator Sessions import mode
+- Labagator CSV format explanation (session code, title, dates, room)
+- Upload Labagator session export CSV
+- Auto-conversion to Flow workshop format
+- View transformed schedules
+- Export back to Labagator format for session updates
+
 ### CLI
 
 #### 07 — Deploy & QA
@@ -139,7 +148,7 @@ xdg-open videos/07-cli-deploy-and-qa.mp4
 uvicorn api.server:app --port 8000 &
 cd frontend && npm run dev &
 
-# Record 6 Web UI chapters
+# Record 7 Web UI chapters
 node videos/record-demo.mjs
 ```
 
