@@ -59,18 +59,21 @@ Labagator already exposes `GET /exports/deploy-handoff/{event_id}/flow-csv`, a m
 
 New "Import from Labagator" card, placed **alongside** the existing manual CSV upload (not replacing it) — if Labagator's API is ever unreachable, the manual export/upload path still works as a fallback.
 
+**Correction from initial design:** Flow's Deploy Settings panel does not have global fields for `namespace`, `concurrency`, `auto_stop_days`, `auto_destroy_days`, or `enable_workshop_interface` — in Flow's data model these are per-row CSV columns, not global settings. Only `white_glove` exists as a real Deploy Settings toggle today. So these fields can't be silently inherited; they need to be visible on the Import card itself, pre-filled with sane defaults (matching Labagator's own endpoint defaults) rather than pulled from settings that don't exist.
+
 **Default (common-case) flow:**
 1. Event dropdown, populated from `GET /api/labagator/events`, pre-filtered to this week, soonest first. If the list is empty, show "No Labagator events this week" instead of a blank dropdown.
-2. Single **Import** button. No other fields required — `namespace`, `enable_workshop_interface`, `concurrency`, `white_glove`, `auto_stop_days`, `auto_destroy_days` are all silently pulled from Flow's existing Deploy Settings panel state and sent as-is.
-3. Client-side validation blocks the click with an inline error if the effective namespace (from Deploy Settings) is blank or fails the same format check as the manual CSV path — before any network call.
-4. On click, Flow calls `GET /api/schedules/labagator-preview` with the event and effective Deploy Settings values.
-5. If `session_count` is 0, skip the confirm dialog and show an inline message instead: "No sessions found for this event this week." No further action.
-6. Otherwise, show a confirmation dialog: **"Import N sessions from [Event Name] into namespace [x]?"** with Cancel/Confirm, using `session_count`/`event_name` from the preview response and the namespace that was sent.
-7. **Confirm** → Flow calls `POST /api/schedules/import-from-labagator` with the `csv_text` from the preview response. The result is fed into the same schedule table / diff view manual CSV upload already produces. Nothing deploys automatically; the existing "review then hit Deploy" behavior is unchanged.
+2. Visible fields directly on the card, pre-filled with defaults matching Labagator's endpoint (`enable_workshop_interface=true`, `concurrency=10`, `auto_stop_days=7`, `auto_destroy_days=14`) — except **namespace**, which has no sane default (it's event-specific) and starts blank, required. `white_glove` is the one field genuinely pulled from Flow's existing Deploy Settings toggle, not shown again here.
+3. Single **Import** button, enabled once namespace is filled in.
+4. Client-side validation blocks the click with an inline error if namespace is blank or fails the same format check as the manual CSV path — before any network call.
+5. On click, Flow calls `GET /api/schedules/labagator-preview` with the event and the current field values.
+6. If `session_count` is 0, skip the confirm dialog and show an inline message instead: "No sessions found for this event this week." No further action.
+7. Otherwise, show a confirmation dialog: **"Import N sessions from [Event Name] into namespace [x]?"** with Cancel/Confirm, using `session_count`/`event_name` from the preview response and the namespace that was sent.
+8. **Confirm** → Flow calls `POST /api/schedules/import-from-labagator` with the `csv_text` from the preview response. The result is fed into the same schedule table / diff view manual CSV upload already produces. Nothing deploys automatically; the existing "review then hit Deploy" behavior is unchanged.
    **Cancel** → discard the fetched preview, no state change, no second network call.
 
 **Advanced (collapsed by default):**
-- Expandable section exposing the same fields as Deploy Settings (namespace override, concurrency, white_glove, auto_stop_days, auto_destroy_days, enable_workshop_interface) so a user can override per-fetch without changing global Deploy Settings. Only visible after expanding — never required for the default path.
+- `concurrency`, `auto_stop_days`, `auto_destroy_days`, and `enable_workshop_interface` all live in a collapsed "Advanced" section since their defaults cover the common case — only expand to override. `namespace` and `white_glove` stay outside Advanced since namespace is always required and white_glove already has prominent placement via the existing Deploy Settings toggle.
 
 **Error handling:**
 - Labagator unreachable / `GET /api/labagator/events` returns the `labagator_unreachable` error field → dropdown shows "Labagator is unavailable — use manual CSV export instead" and the Import button is disabled. No silent failure.
