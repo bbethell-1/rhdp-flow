@@ -613,21 +613,32 @@ def fill_missing_dates(request: FillMissingDatesRequest, _key=Depends(verify_api
     Preserves existing valid dates.
     """
     global _schedules
-    updated_count = 0
+    schedules_updated = 0
+    fields_updated = 0
 
     with _state_lock:
         for schedule in _schedules:
+            schedule_had_updates = False
             if not schedule.provisioning_date or not schedule.provisioning_date.strip():
                 schedule.provisioning_date = request.provisioning_date
-                updated_count += 1
+                fields_updated += 1
+                schedule_had_updates = True
             if not schedule.auto_stop or not schedule.auto_stop.strip():
                 schedule.auto_stop = request.auto_stop
-                updated_count += 1
+                fields_updated += 1
+                schedule_had_updates = True
             if not schedule.auto_destroy or not schedule.auto_destroy.strip():
                 schedule.auto_destroy = request.auto_destroy
-                updated_count += 1
+                fields_updated += 1
+                schedule_had_updates = True
+            if schedule_had_updates:
+                schedules_updated += 1
 
-    return {"message": f"Filled missing dates in {updated_count} field(s)", "updated_count": updated_count}
+    return {
+        "message": f"Filled {fields_updated} field(s) in {schedules_updated} schedule(s)",
+        "updated_count": fields_updated,
+        "schedules_updated": schedules_updated
+    }
 
 
 # ---------------------------------------------------------------------------
