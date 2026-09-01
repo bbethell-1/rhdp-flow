@@ -1126,21 +1126,32 @@ def validate_cluster_tenant_scheduling(_key=Depends(verify_api_key)):
 
 
 @router.post("/schedules/auto-fix-cluster-tenant")
-def auto_fix_cluster_tenant_timing(_key=Depends(verify_api_key)):
-    """Auto-fix cluster/tenant timing conflicts by adjusting cluster deploy times."""
+def auto_fix_cluster_tenant_timing(buffer_hours: float = 3.0, _key=Depends(verify_api_key)):
+    """Auto-fix cluster/tenant timing by ensuring clusters deploy BEFORE tenants.
+
+    Adjusts cluster provisioning dates to be X hours before tenant provisioning.
+    Skips clusters that will be provided by TenantClusterPools.
+
+    Args:
+        buffer_hours: Hours to deploy cluster before tenant (default: 3.0)
+    """
     global _schedules
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
 
     from cluster_tenant_validation import auto_fix_cluster_tenant_timing
 
-    result = auto_fix_cluster_tenant_timing(_schedules, buffer_minutes=30)
+    buffer_minutes = int(buffer_hours * 60)
+    result = auto_fix_cluster_tenant_timing(_schedules, buffer_minutes=buffer_minutes)
     _schedules = result["schedules"]
 
     return {
         "fixed_count": result["fixed_count"],
+        "skipped_count": result["skipped_count"],
         "fixed_items": result["fixed_items"],
-        "message": f"Adjusted {result['fixed_count']} cluster schedule(s) to deploy 30 minutes before their tenant variants.",
+        "skipped_items": result["skipped_items"],
+        "warnings": result["warnings"],
+        "message": result["message"],
     }
 
 
