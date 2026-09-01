@@ -369,6 +369,74 @@ def analyze_cluster_tenant_relationships(schedules: list[WorkshopSchedule]) -> N
             )
 
 
+def filter_pool_provided_clusters(schedules: list[WorkshopSchedule]) -> list[WorkshopSchedule]:
+    """
+    Filter out cluster schedules that will be provided by TenantClusterPools.
+
+    When a tenant catalog item has pool linkage, the pool provides the cluster.
+    Flow should skip deploying the explicit cluster row to avoid conflicts.
+
+    Strategy:
+    1. Find all tenant schedules
+    2. For each tenant, check if it will use a pool (via find_matching_pool or manual pool_name)
+    3. If pool exists, mark the associated cluster schedule for removal
+    4. Return filtered list
+
+    Args:
+        schedules: List of WorkshopSchedule objects
+
+    Returns:
+        Filtered list with pool-provided cluster rows removed
+    """
+    try:
+        from tenant_cluster_pool_linkage import find_matching_pool, is_tenant_catalog_item
+    except ImportError:
+        logger.debug("tenant_cluster_pool_linkage not available - skipping pool filter")
+        return schedules
+
+    # Map cluster CI to schedule for quick lookup
+    cluster_map = {}
+    for schedule in schedules:
+        if schedule.is_cluster:
+            cluster_map[schedule.ci] = schedule
+
+    # Find clusters that will be provided by pools
+    clusters_to_skip = set()
+
+    for schedule in schedules:
+        if not schedule.is_tenant:
+            continue
+
+        # Check if this tenant will use a pool
+        has_pool = False
+
+        # Manual pool override takes precedence
+        if schedule.pool_name:
+            has_pool = True
+            logger.debug(f"Tenant {schedule.ci} has manual pool override: {schedule.pool_name}")
+        # Auto-detect pool
+        elif is_tenant_catalog_item(schedule.ci):
+            try:
+                pool_match = find_matching_pool(schedule.ci, schedule.namespace)
+                if pool_match:
+                    has_pool = True
+                    logger.debug(f"Tenant {schedule.ci} will use auto-detected pool: {pool_match.pool_name}")
+            except Exception as e:
+                logger.debug(f"Pool detection failed for {schedule.ci}: {e}")
+
+        # If tenant has a pool, mark its cluster for removal
+        if has_pool and schedule.detected_cluster_ci:
+            if schedule.detected_cluster_ci in cluster_map:
+                clusters_to_skip.add(schedule.detected_cluster_ci)
+                logger.info(
+                    f"Marking cluster {schedule.detected_cluster_ci} for removal - "
+                    f"tenant {schedule.ci} will use TenantClusterPool"
+                )
+
+    # Filter out marked clusters
+    return [s for s in schedules if not (s.is_cluster and s.ci in clusters_to_skip)]
+
+
 def validate_cluster_before_tenant(schedules: list[WorkshopSchedule]) -> dict[str, Any]:
     """
     Validate that cluster schedules are provisioned before their tenant schedules.
@@ -867,7 +935,7 @@ def read_csv_input(filepath: str) -> list[WorkshopSchedule]:
                         cluster_ci_override=cluster_ci_override if cluster_ci_override else None,
                         pool_name=pool_name if pool_name else None,
                     )
-                    
+
                     schedules.append(schedule)
                     logger.debug(f"Loaded schedule: {schedule.ci_name} ({schedule.ci})")
                     
@@ -883,6 +951,13 @@ def read_csv_input(filepath: str) -> list[WorkshopSchedule]:
 
         # Analyze cluster/tenant relationships after CSV parsing
         analyze_cluster_tenant_relationships(schedules)
+
+        # Filter out cluster rows that will be provided by TenantClusterPools
+        original_count = len(schedules)
+        schedules = filter_pool_provided_clusters(schedules)
+        skipped_count = original_count - len(schedules)
+        if skipped_count > 0:
+            logger.info(f"Skipped {skipped_count} cluster row(s) - will be provided by TenantClusterPools")
 
         logger.info(f"Successfully read {len(schedules)} schedules from {filepath}")
         return schedules
