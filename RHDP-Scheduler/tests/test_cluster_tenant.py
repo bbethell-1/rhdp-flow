@@ -11,19 +11,18 @@ in workshop deployments. Covers:
 
 from __future__ import annotations
 
-import pytest
 from datetime import datetime, timedelta
-from typing import List
+
+import pytest
 
 from rhdp_flow import (
+    WorkshopSchedule,
+    analyze_cluster_tenant_relationships,
+    get_cluster_ci_for_tenant,
     is_cluster_ci,
     is_tenant_ci,
-    get_cluster_ci_for_tenant,
-    analyze_cluster_tenant_relationships,
     validate_cluster_before_tenant,
-    WorkshopSchedule,
 )
-
 
 # ============================================================================
 # Helper Functions
@@ -605,7 +604,7 @@ class TestBackwardCompatibility:
 
     def test_empty_schedules_list(self):
         """Empty schedules list doesn't crash."""
-        schedules: List[WorkshopSchedule] = []
+        schedules: list[WorkshopSchedule] = []
         analyze_cluster_tenant_relationships(schedules)
 
         result = validate_cluster_before_tenant(schedules)
@@ -635,8 +634,8 @@ class TestIntegrationFullWorkflow:
 
         schedules = [
             make_schedule(
-                "ocp4-cluster.prod",
-                ci_name="OCP4 Cluster",
+                "app-cluster.prod",
+                ci_name="Application Cluster",
                 provisioning_date=cluster_time,
             ),
             make_schedule(

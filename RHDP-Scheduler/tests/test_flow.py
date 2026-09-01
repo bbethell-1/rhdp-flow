@@ -1,19 +1,17 @@
 """Tests for derive_base_domain, build_resource_claim_payload, and related flow helpers."""
 
 import json
-from unittest.mock import patch, MagicMock
-
-
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from rhdp_flow import (
-    derive_base_domain,
     build_resource_claim_payload,
+    derive_base_domain,
     export_dry_run_manifest_yaml,
     get_catalog_item_num_users_limit,
     get_catalog_item_parameter_defaults,
 )
-from tests.conftest import make_schedule, make_config
+from tests.conftest import make_config, make_schedule
 
 
 class TestDeriveBaseDomain:

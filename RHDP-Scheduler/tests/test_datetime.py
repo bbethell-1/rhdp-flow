@@ -1,10 +1,10 @@
 """Tests for parse_date_time, format_iso8601, calculate_duration, utc_timestamp_str."""
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
-from rhdp_flow import parse_date_time, format_iso8601, calculate_duration, utc_timestamp_str
+from rhdp_flow import calculate_duration, format_iso8601, parse_date_time, utc_timestamp_str
 
 
 def test_parse_dd_mm_yyyy():
@@ -14,14 +14,14 @@ def test_parse_dd_mm_yyyy():
     assert dt.month == 2
     assert dt.day == 15
     assert dt.hour == 11
-    assert dt.tzinfo == timezone.utc
+    assert dt.tzinfo == UTC
 
 
 def test_parse_dd_mm_yy():
     dt = parse_date_time("15/02/26 11:00")
     assert dt is not None
     assert dt.year == 2026
-    assert dt.tzinfo == timezone.utc
+    assert dt.tzinfo == UTC
 
 
 def test_parse_iso8601_with_z():
@@ -52,19 +52,19 @@ def test_format_iso8601_naive():
 
 
 def test_format_iso8601_utc():
-    dt = datetime(2026, 2, 15, 11, 0, 0, tzinfo=timezone.utc)
+    dt = datetime(2026, 2, 15, 11, 0, 0, tzinfo=UTC)
     assert format_iso8601(dt) == "2026-02-15T11:00:00Z"
 
 
 def test_calculate_duration():
-    start = datetime(2026, 2, 15, 11, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 2, 15, 19, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 2, 15, 11, 0, tzinfo=UTC)
+    end = datetime(2026, 2, 15, 19, 0, tzinfo=UTC)
     assert calculate_duration(start, end) == "8h"
 
 
 def test_calculate_duration_multi_day():
-    start = datetime(2026, 2, 15, 11, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 2, 17, 11, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 2, 15, 11, 0, tzinfo=UTC)
+    end = datetime(2026, 2, 17, 11, 0, tzinfo=UTC)
     assert calculate_duration(start, end) == "48h"
 
 
@@ -75,7 +75,7 @@ def test_utc_timestamp_str_format():
 
 def test_utc_timestamp_str_is_utc():
     """Verify the timestamp uses UTC regardless of system timezone."""
-    fixed = datetime(2026, 7, 4, 15, 30, 45, tzinfo=timezone.utc)
+    fixed = datetime(2026, 7, 4, 15, 30, 45, tzinfo=UTC)
     with patch("rhdp_flow.datetime") as mock_dt:
         mock_dt.now.return_value = fixed
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)

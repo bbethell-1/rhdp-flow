@@ -2,17 +2,19 @@
 
 import asyncio
 import csv
-from datetime import datetime
 import io
+import json
 import logging
+import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 from dataclasses import asdict
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
@@ -20,57 +22,20 @@ from sse_starlette.sse import EventSourceResponse
 
 from api.auth import verify_api_key
 
-import sys
-import os
-
 # Ensure parent directory is on sys.path so we can import rhdp_flow
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from rhdp_flow import (
-    RHDPConfig,
-    WorkshopSchedule,
-    DeploymentResult,
-    read_csv_input,
-    load_asset_passwords,
-    process_schedule,
-    create_multi_workshop_from_group,
-    qa1_verify_setup,
-    qa2_verify_deployment_status,
-    qa3_verify_catalog_items_exist,
-    qa_destroy_check,
-    _merge_qa1_qa2,
-    _dedup_qa_results,
-    export_student_landing_page_csv,
-    lock_workshops,
-    unlock_workshops,
-    extend_stop_time,
-    extend_destroy_time,
-    disable_autostop,
-    scale_workshops,
-    teardown_showroom,
-    check_showroom_health,
-    run_demolition_preflight,
-    generate_showroom_applicationset,
-    update_passwords,
-    import_namespace_to_csv,
-    derive_base_domain,
-    utc_timestamp_str,
-    get_catalog_item_num_users_limit,
-    get_catalog_namespace,
-    validate_catalog_item_exists,
-    find_similar_catalog_items,
-    list_catalog_items,
-    users_column_ignored_by_catalog_advisory,
-)
-
+from api import jobs
+from api.limiter import limiter as _route_limiter
+from api.log_capture import get_log_dir, start_log_capture, stop_log_capture
 from api.models import (
     CatalogItemEntry,
     CatalogItemParameter,
     CatalogNamespaceMismatch,
     CatalogNamespaceValidationResponse,
     ClusterTenantValidationError,
-    ClusterTenantValidationWarning,
     ClusterTenantValidationResponse,
+    ClusterTenantValidationWarning,
     DeploymentResultResponse,
     DeployRequest,
     DestroyCheckRequest,
@@ -87,7 +52,6 @@ from api.models import (
     LockRequest,
     NumUsersValidationResponse,
     NumUsersViolation,
-    UsersNotInCatalogAdvisory,
     OperationResponse,
     PoolInfo,
     PoolLookupResponse,
@@ -101,12 +65,46 @@ from api.models import (
     ShowroomHealthRequest,
     ShowroomPreflightRequest,
     UploadResponse,
+    UsersNotInCatalogAdvisory,
     WorkshopScheduleResponse,
 )
-from api import jobs
-from api.log_capture import start_log_capture, stop_log_capture, get_log_dir
-from api.limiter import limiter as _route_limiter
 from api.services.labagator_import import transform_labagator_to_flow
+from rhdp_flow import (
+    DeploymentResult,
+    RHDPConfig,
+    WorkshopSchedule,
+    _dedup_qa_results,
+    _merge_qa1_qa2,
+    check_showroom_health,
+    create_multi_workshop_from_group,
+    derive_base_domain,
+    disable_autostop,
+    export_student_landing_page_csv,
+    extend_destroy_time,
+    extend_stop_time,
+    find_similar_catalog_items,
+    generate_showroom_applicationset,
+    get_catalog_item_num_users_limit,
+    get_catalog_namespace,
+    import_namespace_to_csv,
+    list_catalog_items,
+    load_asset_passwords,
+    lock_workshops,
+    process_schedule,
+    qa1_verify_setup,
+    qa2_verify_deployment_status,
+    qa3_verify_catalog_items_exist,
+    qa_destroy_check,
+    read_csv_input,
+    run_demolition_preflight,
+    scale_workshops,
+    teardown_showroom,
+    unlock_workshops,
+    update_passwords,
+    users_column_ignored_by_catalog_advisory,
+    utc_timestamp_str,
+    validate_catalog_item_exists,
+)
 
 logger = logging.getLogger("rhdp_flow.api")
 
@@ -116,14 +114,49 @@ router = APIRouter()
 # In-memory state
 # ---------------------------------------------------------------------------
 _schedules: list[WorkshopSchedule] = []
-_deployment_results: list[DeploymentResult] = []
 _qa_results: list[QAResultItem] = []
-_csv_filepath: Optional[str] = None  # stashed for QA functions that need a path
+_csv_filepath: str | None = None  # stashed for QA functions that need a path
 _current_filename: str = ""
-_asset_passwords: Optional[dict[str, str]] = None
-_deploy_log_path: Optional[str] = None
-_qa_log_path: Optional[str] = None
+_asset_passwords: dict[str, str] | None = None
+_deploy_log_path: str | None = None
+_qa_log_path: str | None = None
 _destroy_check_results: list[dict] = []
+
+# ---------------------------------------------------------------------------
+# Result persistence — survives server restarts
+# ---------------------------------------------------------------------------
+
+_RESULTS_PERSIST_FILE = Path(
+    os.environ.get(
+        "RHDP_RESULTS_FILE",
+        str(Path.home() / ".rhdp-flow" / "last_results.json"),
+    )
+)
+
+
+def _save_results(results: list[DeploymentResult]) -> None:
+    try:
+        _RESULTS_PERSIST_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _RESULTS_PERSIST_FILE.write_text(
+            json.dumps([asdict(r) for r in results], indent=2)
+        )
+    except OSError as exc:
+        logger.warning("Could not persist results: %s", exc)
+
+
+def _load_results() -> list[DeploymentResult]:
+    try:
+        if _RESULTS_PERSIST_FILE.exists():
+            data = json.loads(_RESULTS_PERSIST_FILE.read_text())
+            return [DeploymentResult(**r) for r in data]
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        logger.warning("Could not load persisted results: %s", exc)
+    return []
+
+
+_deployment_results: list[DeploymentResult] = _load_results()
+if _deployment_results:
+    logger.info("Restored %d deployment result(s) from previous session", len(_deployment_results))
 
 # Session history — each completed upload+deploy cycle gets archived here
 _sessions: list[dict] = []
@@ -256,7 +289,7 @@ def _write_qa_csv_for_namespace(namespace: str) -> str:
     return tmp.name
 
 
-def _coerce_optional_int(val) -> Optional[int]:
+def _coerce_optional_int(val) -> int | None:
     if val is None or val == "":
         return None
     if isinstance(val, bool):
@@ -321,7 +354,7 @@ def _normalize_qa_result_dict(r: dict) -> dict:
 
 
 # Cached base domain derived from the connected cluster
-_cached_base_domain: Optional[str] = None
+_cached_base_domain: str | None = None
 
 # Thread-safe lock for global state mutations (sync endpoints run in threadpool)
 _state_lock = threading.Lock()
@@ -451,7 +484,7 @@ def _ingest_schedule_csv_text(text: str, filename: str) -> UploadResponse:
     )
 
 
-def _filter_schedules(ci_filter: Optional[str]) -> list[WorkshopSchedule]:
+def _filter_schedules(ci_filter: str | None) -> list[WorkshopSchedule]:
     if ci_filter:
         filtered = [s for s in _schedules if s.ci == ci_filter]
         if not filtered:
@@ -935,7 +968,7 @@ def validate_num_users(_key=Depends(verify_api_key)):
     limits: dict[str, int] = {}
     checked = 0
     skipped = 0
-    ci_cache: dict[str, Optional[dict]] = {}
+    ci_cache: dict[str, dict | None] = {}
     advisory_seen: set = set()
 
     def _check_ci(ci: str, schedule: WorkshopSchedule):
@@ -1140,7 +1173,7 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
     # Pre-deploy num_users limit check (live deploys only)
     if not body.dry_run:
         config_check = _get_config()
-        ci_cache: dict[str, Optional[dict]] = {}
+        ci_cache: dict[str, dict | None] = {}
         limit_errors: list[str] = []
         for s in schedules:
             if s.users is not None and s.users > 0:
@@ -1250,6 +1283,7 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
             with _state_lock:
                 _deployment_results = results
                 _deploy_log_path = log_path
+            _save_results(results)
 
             if jobs.is_cancel_requested(job.job_id):
                 jobs.update_job(
@@ -1353,6 +1387,7 @@ def deploy_dry_run(request: Request, body: DeployRequest = DeployRequest(), _key
         with _state_lock:
             _deployment_results = results
             _deploy_log_path = log_path
+        _save_results(results)
         return [_result_to_response(r) for r in results]
     finally:
         stop_log_capture(handler)
@@ -1456,9 +1491,10 @@ async def deploy_ws(websocket: WebSocket, job_id: str):
 
     Requires API key authentication via query parameter when RHDP_API_KEY is set.
     """
-    import json as _json
-    from api.auth import _get_required_key
     import hmac
+    import json as _json
+
+    from api.auth import _get_required_key
 
     # Check API key auth before accepting connection
     required_key = _get_required_key()
@@ -1484,7 +1520,7 @@ async def deploy_ws(websocket: WebSocket, job_id: str):
                 await websocket.send_json(data)
                 if data.get("status") in (jobs.Status.completed.value, jobs.Status.failed.value, jobs.Status.cancelled.value):
                     return
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 await websocket.send_json({"keepalive": True})
         await websocket.send_json(jobs._job_to_dict(job))
 
@@ -1606,7 +1642,7 @@ async def deploy_retry(request: Request, body: RetryRequest, _key=Depends(verify
     # Pre-deploy num_users limit check (live deploys only) - same as main deploy
     if not body.dry_run:
         config_check = _get_config()
-        ci_cache: dict[str, Optional[dict]] = {}
+        ci_cache: dict[str, dict | None] = {}
         limit_errors = []
         for s in matching:
             if s.users is not None and s.users > 0:
@@ -1660,6 +1696,7 @@ async def deploy_retry(request: Request, body: RetryRequest, _key=Depends(verify
                     result_map.get(r.ci_name, r) for r in _deployment_results
                 ] + [r for r in results if r.ci_name not in {dr.ci_name for dr in _deployment_results}]
                 _deploy_log_path = log_path
+            _save_results(_deployment_results)
             jobs.update_job(
                 job.job_id,
                 status=jobs.Status.completed,
@@ -2090,7 +2127,7 @@ def export_results():
         "ci_name", "ci", "namespace", "guid", "url", "status",
         "provisioning_date", "auto_stop", "auto_destroy",
         "timestamp", "error_message", "showroom_url", "showroom_status",
-        "password",
+        "password", "cluster_name", "cluster_capacity",
         "log_url",
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames)

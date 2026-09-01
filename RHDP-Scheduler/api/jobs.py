@@ -205,7 +205,7 @@ async def event_generator(job_id: str):
             yield ServerSentEvent(data=_serialize_dict(data), event="status")
             if data.get("status") in (Status.completed.value, Status.failed.value):
                 return
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # Send keepalive
             yield ServerSentEvent(data="", event="keepalive")
     # Final state

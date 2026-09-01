@@ -2,11 +2,11 @@
 Tests for Flow labels (flow.demo.redhat.com) on ResourceClaims, Workshops, and WorkshopProvisions.
 """
 from rhdp_flow import (
-    WorkshopSchedule,
     RHDPConfig,
+    WorkshopSchedule,
     build_resource_claim_payload,
-    build_workshop_resource_dict,
     build_workshop_provision_dict,
+    build_workshop_resource_dict,
 )
 
 

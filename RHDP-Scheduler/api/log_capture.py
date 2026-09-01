@@ -2,7 +2,7 @@
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 _PROJECT_ROOT = os.path.join(os.path.dirname(__file__), "..")
 # Default to /app/logs in containers (matches emptyDir mount), fallback to ./logs locally
@@ -17,7 +17,7 @@ def get_log_dir():
 
 def start_log_capture(prefix, suffix=""):
     """Attach a FileHandler to the rhdp_flow logger and return (handler, filepath)."""
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
+    ts = datetime.now(UTC).strftime("%Y-%m-%d_%H-%M-%S")
     parts = [prefix, ts] + ([suffix] if suffix else [])
     filepath = os.path.join(get_log_dir(), "_".join(parts) + ".log")
     handler = logging.FileHandler(filepath, encoding="utf-8")

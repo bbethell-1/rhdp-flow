@@ -33,7 +33,7 @@ import { api } from '../services/api';
 import { generateServiceLinks } from '../utils/serviceLinks';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { AUTO_REFRESH_INTERVAL_MS, DEFAULT_PER_PAGE, RETRY_DELAY_MS } from '../constants';
-import { statusColorClass, statusIcon, getStatusIndicator, STATUS_LABEL_TO_PF_COLOR } from '../utils/statusColors';
+import { getStatusIndicator, STATUS_LABEL_TO_PF_COLOR } from '../utils/statusColors';
 import type { DeploymentResult } from '../types';
 
 interface ServiceLinkButtonProps {
@@ -137,19 +137,6 @@ interface Props {
   setResults: (r: DeploymentResult[]) => void;
   showToast: (msg: string, variant: 'success' | 'danger' | 'info') => void;
   deployLogFile?: string | null;
-}
-
-const STATUS_LABELS: Record<string, string> = {
-  verified: 'Verified',
-  deployed_unverified: 'Deployed (Unverified)',
-  deployed_no_url: 'Deployed (No URL)',
-  failed: 'Failed',
-  error: 'Error',
-};
-
-function formatStatus(raw: string) {
-  if (!raw) return '';
-  return STATUS_LABELS[raw.toLowerCase()] || raw.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
 type StatusFilter = 'all' | 'verified' | 'unverified' | 'failed';

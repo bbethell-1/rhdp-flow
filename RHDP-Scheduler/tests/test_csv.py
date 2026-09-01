@@ -5,24 +5,24 @@ import io
 import os
 import tempfile
 
+import pytest
+
 from rhdp_flow import (
+    DeploymentResult,
+    load_asset_num_users,
+    load_asset_passwords,
     read_csv_input,
     write_deployment_results,
-    DeploymentResult,
-    load_asset_passwords,
-    load_asset_num_users,
 )
 from tests.conftest import (
     BASIC_WORKSHOP_CSV,
-    MULTI_ASSET_OLD_CSV,
-    MULTI_ASSET_GROUPED_CSV,
     INSTANCES_AND_CONCURRENCY_CSV,
     MISSING_HEADERS_CSV,
+    MULTI_ASSET_GROUPED_CSV,
+    MULTI_ASSET_OLD_CSV,
     OLD_DATE_HEADERS_CSV,
     write_csv_tempfile,
 )
-
-import pytest
 
 
 class TestCSVParsing:

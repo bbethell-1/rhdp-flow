@@ -15,42 +15,41 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timezone
-from unittest.mock import patch, MagicMock
+from datetime import UTC, datetime
+from unittest.mock import MagicMock, patch
 
 # Import the module under test
 try:
     from rhdp_flow import (
-        WorkshopSchedule,
         DeploymentResult,
         RHDPConfig,
-        parse_date_time,
-        format_iso8601,
-        calculate_duration,
-        read_csv_input,
-        load_asset_passwords,
-        write_deployment_results,
+        WorkshopSchedule,
         build_resource_claim_payload,
-        create_resource_claim_via_oc,
-        create_workshop_with_ui,
-        create_workshop_provision,
+        calculate_duration,
+        construct_workshop_url,
+        create_multi_region_workshop,
         create_multi_workshop,
         create_multi_workshop_from_group,
-        create_multi_region_workshop,
-        lock_workshops,
-        unlock_workshops,
-        extend_stop_time,
-        extend_destroy_time,
-        scale_workshops,
-        process_schedule,
-        construct_workshop_url,
-        verify_deployment,
         create_parser,
+        create_resource_claim_via_oc,
+        create_workshop_provision,
+        create_workshop_with_ui,
+        derive_base_domain,
+        export_student_landing_page_csv,
+        extend_destroy_time,
+        extend_stop_time,
+        format_iso8601,
         get_landing_page_url,
         get_workshop_urls,
-        get_workshop_id,
-        export_student_landing_page_csv,
-        derive_base_domain,
+        load_asset_passwords,
+        lock_workshops,
+        parse_date_time,
+        process_schedule,
+        read_csv_input,
+        scale_workshops,
+        unlock_workshops,
+        verify_deployment,
+        write_deployment_results,
     )
 except ImportError:
     print("Error: Could not import rhdp_flow.py")
@@ -353,13 +352,13 @@ class TestDateTimeUtilities(unittest.TestCase):
         self.assertEqual(dt.month, 2)
         self.assertEqual(dt.day, 15)
         self.assertEqual(dt.hour, 11)
-        self.assertEqual(dt.tzinfo, timezone.utc)
+        self.assertEqual(dt.tzinfo, UTC)
 
     def test_parse_dd_mm_yy(self):
         dt = parse_date_time("15/02/26 11:00")
         self.assertIsNotNone(dt)
         self.assertEqual(dt.year, 2026)
-        self.assertEqual(dt.tzinfo, timezone.utc)
+        self.assertEqual(dt.tzinfo, UTC)
 
     def test_parse_iso8601_with_z(self):
         dt = parse_date_time("2026-02-15T11:00:00Z")
@@ -385,18 +384,18 @@ class TestDateTimeUtilities(unittest.TestCase):
         self.assertEqual(result, "2026-02-15T11:00:00Z")
 
     def test_format_iso8601_utc(self):
-        dt = datetime(2026, 2, 15, 11, 0, 0, tzinfo=timezone.utc)
+        dt = datetime(2026, 2, 15, 11, 0, 0, tzinfo=UTC)
         result = format_iso8601(dt)
         self.assertEqual(result, "2026-02-15T11:00:00Z")
 
     def test_calculate_duration(self):
-        start = datetime(2026, 2, 15, 11, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 2, 15, 19, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 2, 15, 11, 0, tzinfo=UTC)
+        end = datetime(2026, 2, 15, 19, 0, tzinfo=UTC)
         self.assertEqual(calculate_duration(start, end), "8h")
 
     def test_calculate_duration_multi_day(self):
-        start = datetime(2026, 2, 15, 11, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 2, 17, 11, 0, tzinfo=timezone.utc)
+        start = datetime(2026, 2, 15, 11, 0, tzinfo=UTC)
+        end = datetime(2026, 2, 17, 11, 0, tzinfo=UTC)
         self.assertEqual(calculate_duration(start, end), "48h")
 
 

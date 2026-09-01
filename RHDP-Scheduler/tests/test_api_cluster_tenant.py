@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
 from datetime import datetime, timedelta
+
+import pytest
 from fastapi.testclient import TestClient
 
 from api.server import app
-
 
 client = TestClient(app)
 

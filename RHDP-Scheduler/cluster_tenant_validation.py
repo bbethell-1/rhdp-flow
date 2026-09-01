@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Dict, List, Any
+from typing import Any
 
 logger = logging.getLogger("rhdp_flow.cluster_tenant_validation")
 
 
-def validate_cluster_before_tenant(schedules: List[Any]) -> Dict[str, Any]:
+def validate_cluster_before_tenant(schedules: list[Any]) -> dict[str, Any]:
     """
     Validate that cluster catalog items are deployed before tenant catalog items.
 

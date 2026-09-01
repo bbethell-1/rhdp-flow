@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import List, Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
-
 
 # ---------------------------------------------------------------------------
 # Mirror of rhdp_flow dataclasses
@@ -43,8 +42,8 @@ class WorkshopScheduleResponse(BaseModel):
     showroom_ref: str = ""
     showroom_novnc: bool = False
     showroom_zerotouch: bool = False
-    item_type: Optional[str] = None
-    cluster_ci_override: Optional[str] = None
+    item_type: str | None = None
+    cluster_ci_override: str | None = None
 
 
 class CatalogItemParameter(BaseModel):
@@ -109,7 +108,7 @@ class DeployRequest(BaseModel):
     showroom_novnc: bool = Field(False, description="Enable noVNC remote desktop in Showroom")
     showroom_zerotouch: bool = Field(False, description="Use zerotouch Showroom chart with setup/runtime automation")
     ignore_capacity_warnings: bool = Field(False, description="Skip tenant cluster capacity checks before deployment")
-    export_yaml_dir: Optional[str] = Field(
+    export_yaml_dir: str | None = Field(
         None,
         description="If set on dry-run deploy, write ResourceClaim / Workshop / WorkshopProvision YAMLs to this directory on the API host",
     )
@@ -376,8 +375,8 @@ class ClusterTenantValidationWarning(BaseModel):
 class ClusterTenantValidationResponse(BaseModel):
     """Response for POST /schedules/validate-cluster-tenant."""
 
-    errors: List[ClusterTenantValidationError] = Field(default_factory=list)
-    warnings: List[ClusterTenantValidationWarning] = Field(default_factory=list)
+    errors: list[ClusterTenantValidationError] = Field(default_factory=list)
+    warnings: list[ClusterTenantValidationWarning] = Field(default_factory=list)
     tenants_checked: int = 0
     clusters_found: int = 0
 

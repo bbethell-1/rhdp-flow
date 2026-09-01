@@ -75,7 +75,6 @@ def transform_labagator_to_flow(labagator_csv: TextIO) -> str:
         # Map fields
         session_code = row.get('session_code', '')
         title = row.get('title', '')
-        room = row.get('room', '')
 
         # Generate namespace from session code (user can edit later)
         namespace_base = session_code.lower().replace(" ", "-").replace("_", "-")

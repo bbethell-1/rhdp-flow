@@ -3,19 +3,18 @@
 import json
 import os
 import subprocess
+import sys
 import tempfile
 
 import pytest
-import sys
 
 # Ensure rhdp_flow is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from rhdp_flow import (
-    WorkshopSchedule,
     RHDPConfig,
+    WorkshopSchedule,
 )
-
 
 # ============================================================================
 # CSV Fixture Constants

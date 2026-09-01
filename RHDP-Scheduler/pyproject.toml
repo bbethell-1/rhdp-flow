@@ -1,0 +1,33 @@
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+# Legacy RHDP-Flow codebase — ignore noisy rules enforced repo-wide until refactored.
+ignore = [
+    "B008",     # FastAPI Depends() / Body() in defaults
+    "BLE001",   # broad except in CLI/API error paths
+    "DTZ001",   # naive datetime in tests
+    "DTZ005",   # datetime.now() without tz in tests
+    "DTZ007",   # strptime without tz — CSV dates are UTC strings
+    "EXE001",   # shebang scripts
+    "G201",     # logging.exception style
+    "LOG014",   # exc_info outside except
+    "PERF102",  # dict iteration style
+    "PLC0206",  # dict index iteration
+    "PLW0602",  # global without assignment
+    "PLW1510",  # subprocess.run check= — intentional returncode handling
+    "RUF012",   # mutable class defaults
+    "S110",     # try-except-pass in cleanup paths
+    "S112",     # try-except-continue
+    "SIM115",   # open() without context manager in legacy code
+    "SIM102",   # nested if in validation helpers
+    "RUF013",   # implicit Optional in legacy signatures
+    "RUF059",   # unused unpacked tuple elements
+    "F841",     # assigned but unused in legacy/tests
+    "FURB162",  # isoformat Z replacement style
+    "C408",     # dict() vs literal in test helpers
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

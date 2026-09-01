@@ -8,21 +8,22 @@ Authors: Josh Disraeli, Billy Bethell
 This script uses oc commands directly (no API authentication needed if already logged in).
 """
 
+import argparse
 import contextlib
 import csv
 import json
 import logging
+import os
+import re
 import subprocess
 import sys
 import time
-import argparse
 from argparse import ArgumentParser
-from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta, timezone
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, List, Dict, Optional, Tuple
-import os
-import re
+from typing import Any
+
 import yaml
 
 # ============================================================================
@@ -45,14 +46,14 @@ def _should_include_users(schedule: "WorkshopSchedule") -> bool:
     return schedule.users is not None and schedule.users > 0
 
 
-def _effective_users(schedule: "WorkshopSchedule") -> Optional[int]:
+def _effective_users(schedule: "WorkshopSchedule") -> int | None:
     """Return schedule user count when configured (> 0), else None (for QA: skip user check)."""
     if schedule.users is not None and schedule.users > 0:
         return schedule.users
     return None
 
 
-def _expected_total_seats(schedule: "WorkshopSchedule") -> Optional[int]:
+def _expected_total_seats(schedule: "WorkshopSchedule") -> int | None:
     """Expected total seats for UI (Workshop Users Assigned denominator). Instances (e.g. 30) or Users when set."""
     if getattr(schedule, 'instances', None) is not None and schedule.instances > 0:
         return schedule.instances
@@ -63,13 +64,13 @@ def _expected_total_seats(schedule: "WorkshopSchedule") -> Optional[int]:
 
 def _provider_parameter_values(
     schedule: "WorkshopSchedule", start_timestamp: str, stop_timestamp: str
-) -> Dict:
+) -> dict:
     """Build provider parameterValues; include num_users only when Users is set and > 0.
 
     When Enable_workshop_interface=True, num_users is NOT included because Workshop/WorkshopProvision
     handles instance count via spec.count (from Workshop_instance_count column), not via num_users parameter.
     """
-    pv: Dict = {
+    pv: dict = {
         "purpose": schedule.purpose,
         "start_timestamp": start_timestamp,
         "stop_timestamp": stop_timestamp,
@@ -87,7 +88,7 @@ def _provider_parameter_values(
 VALID_SALESFORCE_TYPES = {"opportunity", "campaign", "project", "cdh"}
 
 
-def get_catalog_namespace(ci: str, explicit_namespace: Optional[str] = None) -> str:
+def get_catalog_namespace(ci: str, explicit_namespace: str | None = None) -> str:
     """
     Determine the catalog namespace for a given catalog item.
 
@@ -150,9 +151,9 @@ def _salesforce_items(schedule: "WorkshopSchedule") -> str:
     return json.dumps(items) if items else "[]"
 
 
-def _workshop_provision_parameters(param_values: Dict, resourceclaim_payload: Dict) -> Dict:
+def _workshop_provision_parameters(param_values: dict, resourceclaim_payload: dict) -> dict:
     """Build WorkshopProvision parameters; include num_users only when present in payload."""
-    params: Dict = {
+    params: dict = {
         "purpose": param_values.get('purpose', 'QA'),
         "purpose_activity": resourceclaim_payload['metadata']['annotations'].get('demo.redhat.com/purpose-activity', 'Admin'),
         "purpose_explanation": None,
@@ -182,13 +183,13 @@ class WorkshopSchedule:
     is_multi_asset: bool = False  # True if this is a multi-asset workshop
     asset_cis: str = ""  # Comma-separated list of catalog items for multi-asset workshops (e.g., "ci1,ci2,ci3")
     multi_workshop_name: str = ""  # Optional custom name for multi-asset workshop (e.g., "automation-test" or "test-qvvdw")
-    users: Optional[int] = None  # Optional; when omitted/empty we don't set num_users
-    instances: Optional[int] = None  # Optional; WorkshopProvision spec.count / MultiWorkshop numberSeats when Users unset; not sent on ResourceClaim-only deploy (Enable_workshop_interface False)
-    concurrency: Optional[int] = None  # Optional; WorkshopProvision concurrency (default 1)
+    users: int | None = None  # Optional; when omitted/empty we don't set num_users
+    instances: int | None = None  # Optional; WorkshopProvision spec.count / MultiWorkshop numberSeats when Users unset; not sent on ResourceClaim-only deploy (Enable_workshop_interface False)
+    concurrency: int | None = None  # Optional; WorkshopProvision concurrency (default 1)
     salesforce_ids: str = ""  # Semicolon-separated salesforce items, e.g. "opportunity:71456169;campaign:701Pe;project:P144" or plain ID
     salesforce_type: str = "opportunity"  # Default type when salesforce_ids has no type prefix (opportunity, campaign, project, cdh)
     aws_regions: str = ""  # Optional comma-separated AWS regions for multi-region deployment (e.g., "us-east-1,eu-west-1")
-    count: Optional[int] = None  # Optional deployment count (from Count CSV column); distinct from instances
+    count: int | None = None  # Optional deployment count (from Count CSV column); distinct from instances
     white_glove: bool = True  # Optional white-glove mode flag (default: enabled)
     redirect: bool = True  # labUserInterface.redirect (default: enabled)
     catalog_namespace: str = ""  # Optional explicit catalog namespace override (e.g., "babylon-catalog-event"); auto-detected if empty
@@ -197,11 +198,11 @@ class WorkshopSchedule:
     showroom_novnc: bool = False  # Enable noVNC remote desktop in Showroom
     showroom_zerotouch: bool = False  # Use zerotouch chart variant with setup/runtime automation
     # Cluster/tenant detection fields
-    item_type: Optional[str] = None  # CSV: cluster, tenant, workshop (or None if not specified)
-    cluster_ci_override: Optional[str] = None  # CSV: Cluster_CI column - explicit override for tenant's cluster
+    item_type: str | None = None  # CSV: cluster, tenant, workshop (or None if not specified)
+    cluster_ci_override: str | None = None  # CSV: Cluster_CI column - explicit override for tenant's cluster
     is_cluster: bool = False  # Detected as cluster CI (either via naming or explicit label)
     is_tenant: bool = False  # Detected as tenant CI (either via naming or explicit label)
-    detected_cluster_ci: Optional[str] = None  # For tenants: the associated cluster CI (from override or naming)
+    detected_cluster_ci: str | None = None  # For tenants: the associated cluster CI (from override or naming)
     detection_method: str = "none"  # How the type was detected: "csv_label", "naming", "none"
 
 @dataclass
@@ -236,9 +237,12 @@ def is_cluster_ci(ci: str) -> bool:
         ci: Catalog item identifier (e.g., "ocp4-cluster.prod")
 
     Returns:
-        True if CI contains "-cluster." in the name
+        True if CI contains "-cluster." or ends with "-cluster" after a catalog dot
     """
-    return "-cluster." in ci.lower()
+    lower = ci.lower()
+    if "-cluster." in lower:
+        return True
+    return lower.endswith("-cluster") and "." in lower
 
 
 def is_tenant_ci(ci: str) -> bool:
@@ -249,12 +253,15 @@ def is_tenant_ci(ci: str) -> bool:
         ci: Catalog item identifier (e.g., "ocp4-tenant.prod")
 
     Returns:
-        True if CI contains "-tenant." in the name
+        True if CI contains "-tenant." or ends with "-tenant" after a catalog dot
     """
-    return "-tenant." in ci.lower()
+    lower = ci.lower()
+    if "-tenant." in lower:
+        return True
+    return lower.endswith("-tenant") and "." in lower
 
 
-def get_cluster_ci_for_tenant(tenant_ci: str, override: Optional[str] = None) -> Optional[str]:
+def get_cluster_ci_for_tenant(tenant_ci: str, override: str | None = None) -> str | None:
     """
     Determine the cluster CI for a given tenant CI.
 
@@ -283,19 +290,17 @@ def get_cluster_ci_for_tenant(tenant_ci: str, override: Optional[str] = None) ->
     if not is_tenant_ci(tenant_ci):
         return None
 
-    # Replace -tenant. with -cluster. (case-preserving)
-    # Find the position case-insensitively
+    # Replace -tenant. / -tenant suffix with cluster equivalent (case-preserving)
     lower_ci = tenant_ci.lower()
-    tenant_pos = lower_ci.find("-tenant.")
-    if tenant_pos == -1:
-        return None
+    tenant_dot = lower_ci.find("-tenant.")
+    if tenant_dot != -1:
+        return tenant_ci[:tenant_dot] + "-cluster." + tenant_ci[tenant_dot + 8:]
+    if lower_ci.endswith("-tenant"):
+        return tenant_ci[: -len("-tenant")] + "-cluster"
+    return None
 
-    # Build cluster CI preserving original case for the prefix
-    cluster_ci = tenant_ci[:tenant_pos] + "-cluster." + tenant_ci[tenant_pos + 8:]
-    return cluster_ci
 
-
-def analyze_cluster_tenant_relationships(schedules: List[WorkshopSchedule]) -> None:
+def analyze_cluster_tenant_relationships(schedules: list[WorkshopSchedule]) -> None:
     """
     Analyze and populate cluster/tenant detection fields for all schedules.
 
@@ -363,7 +368,7 @@ def analyze_cluster_tenant_relationships(schedules: List[WorkshopSchedule]) -> N
             )
 
 
-def validate_cluster_before_tenant(schedules: List[WorkshopSchedule]) -> Dict[str, Any]:
+def validate_cluster_before_tenant(schedules: list[WorkshopSchedule]) -> dict[str, Any]:
     """
     Validate that cluster schedules are provisioned before their tenant schedules.
 
@@ -389,7 +394,7 @@ def validate_cluster_before_tenant(schedules: List[WorkshopSchedule]) -> Dict[st
     relationships = []
 
     # Build cluster CI -> schedule mapping
-    cluster_map: Dict[str, WorkshopSchedule] = {}
+    cluster_map: dict[str, WorkshopSchedule] = {}
     for schedule in schedules:
         if schedule.is_cluster:
             cluster_map[schedule.ci] = schedule
@@ -471,7 +476,7 @@ class RHDPConfig:
     
     def __init__(self):
         self.dry_run = False
-        self.kubeconfig_path: Optional[str] = None
+        self.kubeconfig_path: str | None = None
         self.timeout = 60
         self.retry_attempts = 3
         self.retry_delay = 5
@@ -482,7 +487,7 @@ class RHDPConfig:
         self.redirect = True
         self.base_domain = "integration.demo.redhat.com"
         # When set with dry_run, write ResourceClaim / Workshop / WorkshopProvision YAMLs here
-        self.dry_run_export_yaml_dir: Optional[str] = None
+        self.dry_run_export_yaml_dir: str | None = None
         self.dry_run_yaml_export_seq: int = 0
 
     def validate(self) -> bool:
@@ -522,8 +527,7 @@ def derive_base_domain(cluster_url: str) -> str:
         host = cluster_url.split("://", 1)[-1]   # strip scheme
         host = host.split(":")[0]                  # strip port
         host = host.rstrip("/")
-        if host.startswith("api."):
-            host = host[4:]
+        host = host.removeprefix("api.")
         # ocp-<env>.infra.open.redhat.com → <env>.demo.redhat.com
         m = re.match(r'^ocp-(.+?)\.infra\.open\.redhat\.com$', host)
         if m:
@@ -540,7 +544,7 @@ def derive_base_domain(cluster_url: str) -> str:
 # DATE/TIME UTILITIES
 # ============================================================================
 
-def parse_date_time(date_str: str, default_format: str = "%d/%m/%Y %H:%M", assume_utc: bool = True) -> Optional[datetime]:
+def parse_date_time(date_str: str, default_format: str = "%d/%m/%Y %H:%M", assume_utc: bool = True) -> datetime | None:
     """
     Parse date string with multiple format support.
     All dates are assumed to be in UTC (Zulu time).
@@ -575,7 +579,7 @@ def parse_date_time(date_str: str, default_format: str = "%d/%m/%Y %H:%M", assum
             dt = datetime.strptime(date_str.strip(), fmt)
             # If datetime is naive and assume_utc is True, add UTC timezone
             if assume_utc and dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
+                dt = dt.replace(tzinfo=UTC)
             return dt
         except ValueError:
             continue
@@ -595,9 +599,9 @@ def format_iso8601(dt: datetime) -> str:
     """
     # Ensure datetime is in UTC
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    elif dt.tzinfo != timezone.utc:
-        dt = dt.astimezone(timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
+    elif dt.tzinfo != UTC:
+        dt = dt.astimezone(UTC)
     
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -609,13 +613,13 @@ def calculate_duration(start: datetime, end: datetime) -> str:
 
 def utc_timestamp_str() -> str:
     """Return current UTC time as 'YYYY-MM-DD HH:MM:SS UTC'."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 # ============================================================================
 # CSV INPUT/OUTPUT HANDLERS
 # ============================================================================
 
-def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
+def read_csv_input(filepath: str) -> list[WorkshopSchedule]:
     """
     Read workshop schedules from CSV file.
     
@@ -753,7 +757,7 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                     auto_destroy_key = None
                     
                     # Find provisioning date key (case-insensitive, with or without UTC)
-                    for key in header_map.keys():
+                    for key in header_map:
                         if 'provisioning date' in key:
                             provisioning_date_key = header_map[key]
                             break
@@ -761,7 +765,7 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                         provisioning_date_key = 'Provisioning Date'
                     
                     # Find auto-stop key
-                    for key in header_map.keys():
+                    for key in header_map:
                         if 'auto-stop' in key:
                             auto_stop_key = header_map[key]
                             break
@@ -769,7 +773,7 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                         auto_stop_key = 'Auto-stop'
                     
                     # Find auto-destroy key
-                    for key in header_map.keys():
+                    for key in header_map:
                         if 'auto-destroy' in key:
                             auto_destroy_key = header_map[key]
                             break
@@ -786,7 +790,7 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                         continue
                     
                     # Parse users (optional: empty = no override, use effective default when creating)
-                    users: Optional[int] = None
+                    users: int | None = None
                     if users_str:
                         try:
                             users = int(users_str)
@@ -795,21 +799,21 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
                             users = None
                     
                     # Optional workshop instance count (None if no numeric value above)
-                    instances: Optional[int] = None
+                    instances: int | None = None
                     if instances_str:
                         try:
                             instances = int(instances_str)
                         except ValueError:
                             logger.warning(f"Row {row_num}: Invalid instances value '{instances_str}', treating as unspecified")
                     # Parse optional Concurrency (WorkshopProvision concurrency)
-                    concurrency: Optional[int] = None
+                    concurrency: int | None = None
                     if concurrency_str:
                         try:
                             concurrency = int(concurrency_str)
                         except ValueError:
                             logger.warning(f"Row {row_num}: Invalid concurrency value '{concurrency_str}', treating as unspecified")
                     # Parse optional Count (deployment count, distinct from instances)
-                    count: Optional[int] = None
+                    count: int | None = None
                     if count_str:
                         try:
                             count = int(count_str)
@@ -888,13 +892,13 @@ def read_csv_input(filepath: str) -> List[WorkshopSchedule]:
         raise
 
 
-def load_asset_passwords(filepath: Optional[str]) -> Dict[str, str]:
+def load_asset_passwords(filepath: str | None) -> dict[str, str]:
     """
     Load per-CI passwords from a CSV file (CI, Password columns).
     Used for multi-asset workshops so each asset can have its own password.
     Returns dict mapping CI -> password (e.g. "zt-ansiblebu.ansible-network-automation-basics-lab-2.prod" -> "facts1").
     """
-    result: Dict[str, str] = {}
+    result: dict[str, str] = {}
     if not filepath:
         return result
     path = Path(filepath)
@@ -921,9 +925,9 @@ def load_asset_passwords(filepath: Optional[str]) -> Dict[str, str]:
 
 
 def dry_run_validate_schedules(
-    schedules: List[WorkshopSchedule],
-    asset_passwords: Dict[str, str],
-    asset_num_users: Dict[str, int],
+    schedules: list[WorkshopSchedule],
+    asset_passwords: dict[str, str],
+    asset_num_users: dict[str, int],
     input_path: Path,
     config: RHDPConfig,
 ) -> None:
@@ -1022,13 +1026,13 @@ def dry_run_validate_schedules(
     logger.info("=" * 70)
 
 
-def load_asset_num_users(filepath: str) -> Dict[str, int]:
+def load_asset_num_users(filepath: str) -> dict[str, int]:
     """
     Load per-CI num_users from a CSV file (CI, num_users or CI, Users columns).
     Used for multi-asset workshops when only some assets should have num_users set.
     Returns dict mapping CI -> num_users (e.g. "agd-v2.aap-multiinstance-workshop.event" -> 30).
     """
-    result: Dict[str, int] = {}
+    result: dict[str, int] = {}
     path = Path(filepath)
     if not path.exists():
         return result
@@ -1056,7 +1060,7 @@ def load_asset_num_users(filepath: str) -> Dict[str, int]:
 
 
 def write_deployment_results(
-    results: List[DeploymentResult],
+    results: list[DeploymentResult],
     output_file: str = "deployment_results.csv"
 ) -> None:
     """
@@ -1097,9 +1101,9 @@ def write_deployment_results(
 
 def build_resource_claim_payload(
     schedule: WorkshopSchedule,
-    config: Optional[RHDPConfig] = None,
+    config: RHDPConfig | None = None,
     requester_email: str = ""
-) -> Dict:
+) -> dict:
     """
     Build JSON payload for ResourceClaim based on actual cluster structure.
     
@@ -1127,7 +1131,7 @@ def build_resource_claim_payload(
     auto_destroy_dt = parse_date_time(schedule.auto_destroy)
     
     # Use current time as defaults if dates not provided (in UTC)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if not provisioning_dt:
         provisioning_dt = now
     if not auto_stop_dt:
@@ -1137,11 +1141,11 @@ def build_resource_claim_payload(
     
     # Ensure all dates are in UTC
     if provisioning_dt.tzinfo is None:
-        provisioning_dt = provisioning_dt.replace(tzinfo=timezone.utc)
+        provisioning_dt = provisioning_dt.replace(tzinfo=UTC)
     if auto_stop_dt.tzinfo is None:
-        auto_stop_dt = auto_stop_dt.replace(tzinfo=timezone.utc)
+        auto_stop_dt = auto_stop_dt.replace(tzinfo=UTC)
     if auto_destroy_dt.tzinfo is None:
-        auto_destroy_dt = auto_destroy_dt.replace(tzinfo=timezone.utc)
+        auto_destroy_dt = auto_destroy_dt.replace(tzinfo=UTC)
     
     # Calculate timestamps
     start_timestamp = format_iso8601(provisioning_dt)
@@ -1231,12 +1235,12 @@ def build_resource_claim_payload(
     return payload
 
 
-def _strip_internal_manifest_keys(manifest: Dict) -> Dict:
+def _strip_internal_manifest_keys(manifest: dict) -> dict:
     """Remove rhdp-flow-only top-level keys (e.g. _white_glove) before writing YAML."""
     return {k: v for k, v in manifest.items() if not (isinstance(k, str) and k.startswith("_"))}
 
 
-def export_dry_run_manifest_yaml(config: RHDPConfig, filename_stem: str, manifest: Dict) -> Optional[str]:
+def export_dry_run_manifest_yaml(config: RHDPConfig, filename_stem: str, manifest: dict) -> str | None:
     """
     Write a Kubernetes manifest as YAML when dry-run export directory is configured.
 
@@ -1267,11 +1271,11 @@ def export_dry_run_manifest_yaml(config: RHDPConfig, filename_stem: str, manifes
 def build_workshop_resource_dict(
     workshop_name_or_prefix: str,
     namespace: str,
-    resourceclaim_payload: Dict,
+    resourceclaim_payload: dict,
     config: RHDPConfig,
     redirect: bool,
     catalog_namespace_override: str = "",
-) -> Dict:
+) -> dict:
     """Build the Workshop object as applied to the cluster (shared by create + dry-run YAML export)."""
     ci = resourceclaim_payload["spec"]["provider"]["name"]
     ci_name = resourceclaim_payload["metadata"]["annotations"].get(
@@ -1285,7 +1289,7 @@ def build_workshop_resource_dict(
 
     use_generate_name = workshop_name_or_prefix.endswith("-")
     if use_generate_name:
-        workshop_metadata: Dict = {
+        workshop_metadata: dict = {
             "generateName": workshop_name_or_prefix,
             "namespace": namespace,
         }
@@ -1351,14 +1355,14 @@ def build_workshop_resource_dict(
 def build_workshop_provision_dict(
     workshop_name: str,
     namespace: str,
-    resourceclaim_payload: Dict,
+    resourceclaim_payload: dict,
     config: RHDPConfig,
-    concurrency: Optional[int],
-    count: Optional[int],
-    extra_parameters: Optional[Dict],
+    concurrency: int | None,
+    count: int | None,
+    extra_parameters: dict | None,
     *,
     fetch_catalog_defaults: bool,
-) -> Dict:
+) -> dict:
     """Build the WorkshopProvision object (shared by create + dry-run YAML export)."""
     count_val = count if count is not None and count > 0 else 1
     concurrency_val = concurrency if concurrency is not None else 1
@@ -1367,7 +1371,7 @@ def build_workshop_provision_dict(
     catalog_namespace = resourceclaim_payload["spec"]["provider"].get("namespace", "babylon-catalog-prod")
 
     explicit_params = _workshop_provision_parameters(param_values, resourceclaim_payload)
-    catalog_defaults: Dict = {}
+    catalog_defaults: dict = {}
     if fetch_catalog_defaults:
         catalog_defaults = get_catalog_item_parameter_defaults(ci, config, catalog_namespace)
     merged_parameters = {**catalog_defaults, **explicit_params}
@@ -1424,9 +1428,9 @@ def build_workshop_provision_dict(
 
 
 def create_resource_claim_via_oc(
-    payload: Dict,
+    payload: dict,
     config: RHDPConfig
-) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+) -> tuple[str | None, str | None, str | None]:
     """
     Create ResourceClaim using oc command.
     
@@ -1526,7 +1530,7 @@ def create_resource_claim_via_oc(
         logger.error(error_msg)
         return (None, None, error_msg)
     except Exception as e:
-        error_msg = f"Unexpected error: {str(e)}"
+        error_msg = f"Unexpected error: {e!s}"
         logger.error(f"Error creating ResourceClaim: {error_msg}")
         return (None, None, error_msg)
 
@@ -1535,7 +1539,7 @@ def wait_for_workshop_from_resourceclaim(
     namespace: str,
     config: RHDPConfig,
     max_wait: int = 300
-) -> Optional[str]:
+) -> str | None:
     """
     Wait for Workshop to be created by ResourceClaim.
     
@@ -1694,11 +1698,11 @@ def delete_duplicate_workshop(
 def create_workshop_with_ui(
     workshop_name_or_prefix: str,
     namespace: str,
-    resourceclaim_payload: Dict,
+    resourceclaim_payload: dict,
     config: RHDPConfig,
-    redirect: Optional[bool] = None,
+    redirect: bool | None = None,
     catalog_namespace_override: str = "",
-) -> Optional[str]:
+) -> str | None:
     """
     Create Workshop resource directly with UI enabled and annotation.
 
@@ -1829,14 +1833,14 @@ def create_workshop_with_ui(
 def create_workshop_provision(
     workshop_name: str,
     namespace: str,
-    resourceclaim_payload: Dict,
+    resourceclaim_payload: dict,
     config: RHDPConfig,
     enable_workshop_ui: bool = True,
-    concurrency: Optional[int] = None,
-    count: Optional[int] = None,
-    provision_name_suffix: Optional[str] = None,
-    extra_parameters: Optional[Dict] = None,
-) -> Optional[str]:
+    concurrency: int | None = None,
+    count: int | None = None,
+    provision_name_suffix: str | None = None,
+    extra_parameters: dict | None = None,
+) -> str | None:
     """
     Create WorkshopProvision to enable workshop UI.
 
@@ -1942,7 +1946,7 @@ def create_workshop_provision(
         logger.warning(f"Error creating WorkshopProvision: {e}")
         return None
 
-def get_workshop_id(workshop_name: str, namespace: str, config: RHDPConfig) -> Optional[str]:
+def get_workshop_id(workshop_name: str, namespace: str, config: RHDPConfig) -> str | None:
     """
     Get the workshopId from a Workshop resource.
     The workshopId is stored in the label: babylon.gpte.redhat.com/workshop-id
@@ -2004,7 +2008,7 @@ def get_workshop_id(workshop_name: str, namespace: str, config: RHDPConfig) -> O
         logger.warning(f"Error getting workshopId for {workshop_name}: {e}")
         return None
 
-def wait_for_workshop_id(workshop_name: str, namespace: str, config: RHDPConfig, max_wait: int = 120) -> Optional[str]:
+def wait_for_workshop_id(workshop_name: str, namespace: str, config: RHDPConfig, max_wait: int = 120) -> str | None:
     """
     Wait for a Workshop to be created and return its workshopId.
     
@@ -2091,7 +2095,7 @@ def wait_for_workshop_id(workshop_name: str, namespace: str, config: RHDPConfig,
     
     return None
 
-def get_catalog_item_has_num_users(ci: str, config: RHDPConfig) -> Optional[bool]:
+def get_catalog_item_has_num_users(ci: str, config: RHDPConfig) -> bool | None:
     """
     Check if the catalog item in the cluster expects a num_users parameter (for dry-run validation).
     Returns True if CI has num_users, False if not, None if cannot determine (e.g. not connected).
@@ -2129,7 +2133,7 @@ def get_catalog_item_has_num_users(ci: str, config: RHDPConfig) -> Optional[bool
         return None
 
 
-def get_catalog_item_num_users_limit(ci: str, config: RHDPConfig) -> Optional[Dict]:
+def get_catalog_item_num_users_limit(ci: str, config: RHDPConfig) -> dict | None:
     """
     Query the cluster for the num_users parameter limits of a catalog item.
 
@@ -2178,14 +2182,14 @@ def get_catalog_item_num_users_limit(ci: str, config: RHDPConfig) -> Optional[Di
         return None
 
 
-def list_catalog_items(config: RHDPConfig) -> List[Dict]:
+def list_catalog_items(config: RHDPConfig) -> list[dict]:
     """
     List CatalogItem resources from babylon-catalog-prod, babylon-catalog-event, and babylon-catalog-dev.
 
     Returns sorted list of dicts with keys: id, display_name, catalog_namespace,
     description, category, and a list of parameter summaries extracted from the spec.
     """
-    out: List[Dict] = []
+    out: list[dict] = []
     env = os.environ.copy()
     if config.kubeconfig_path:
         env["KUBECONFIG"] = config.kubeconfig_path
@@ -2219,7 +2223,7 @@ def list_catalog_items(config: RHDPConfig) -> List[Dict]:
                 category = (ann.get("babylon.gpte.redhat.com/category") or "").strip()
 
                 params = _extract_catalog_item_parameters(item.get("spec") or {})
-                entry: Dict = {
+                entry: dict = {
                     "id": name,
                     "display_name": disp,
                     "catalog_namespace": ns,
@@ -2234,13 +2238,13 @@ def list_catalog_items(config: RHDPConfig) -> List[Dict]:
     return out
 
 
-def _extract_catalog_item_parameters(spec: Dict) -> List[Dict]:
+def _extract_catalog_item_parameters(spec: dict) -> list[dict]:
     """Build a compact list of parameter summaries from a CatalogItem spec."""
     by_name = _catalog_item_parameter_defs_by_name(spec)
-    out: List[Dict] = []
+    out: list[dict] = []
     for name, p in by_name.items():
         schema = p.get("openAPIV3Schema") or {}
-        entry: Dict = {"name": name}
+        entry: dict = {"name": name}
         if schema.get("type"):
             entry["type"] = schema["type"]
         if "default" in schema:
@@ -2260,8 +2264,8 @@ def _extract_catalog_item_parameters(spec: Dict) -> List[Dict]:
 def users_column_ignored_by_catalog_advisory(
     schedule: WorkshopSchedule,
     catalog_ci: str,
-    catalog_limit_info: Optional[Dict],
-) -> Optional[Dict[str, Any]]:
+    catalog_limit_info: dict | None,
+) -> dict[str, Any] | None:
     """
     When Users > 0 but the catalog CatalogItem has no num_users parameter, return advisory fields.
 
@@ -2317,10 +2321,10 @@ def users_column_ignored_by_catalog_advisory(
     }
 
 
-def _catalog_item_parameter_defs_by_name(spec: Dict) -> Dict[str, Dict]:
+def _catalog_item_parameter_defs_by_name(spec: dict) -> dict[str, dict]:
     """Merge parameter definitions from all known CatalogItem spec locations; later sources win."""
-    by_name: Dict[str, Dict] = {}
-    sources: List[List[Any]] = []
+    by_name: dict[str, dict] = {}
+    sources: list[list[Any]] = []
     params = spec.get("parameters", [])
     if isinstance(params, list):
         sources.append(params)
@@ -2338,9 +2342,9 @@ def _catalog_item_parameter_defs_by_name(spec: Dict) -> Dict[str, Dict]:
     return by_name
 
 
-def _parameter_defaults_from_catalog_spec(spec: Dict) -> Dict:
+def _parameter_defaults_from_catalog_spec(spec: dict) -> dict:
     """Map parameter name -> openAPIV3Schema default for WorkshopProvision / ResourceClaim merging."""
-    out: Dict = {}
+    out: dict = {}
     for name, p in _catalog_item_parameter_defs_by_name(spec).items():
         schema = p.get("openAPIV3Schema")
         if isinstance(schema, dict) and "default" in schema:
@@ -2348,7 +2352,7 @@ def _parameter_defaults_from_catalog_spec(spec: Dict) -> Dict:
     return out
 
 
-def _try_get_catalog_item_json(ci: str, namespace: str, config: RHDPConfig) -> Optional[Dict]:
+def _try_get_catalog_item_json(ci: str, namespace: str, config: RHDPConfig) -> dict | None:
     try:
         cmd = [
             config.oc_command,
@@ -2370,8 +2374,8 @@ def _try_get_catalog_item_json(ci: str, namespace: str, config: RHDPConfig) -> O
 def get_catalog_item_parameter_defaults(
     ci: str,
     config: RHDPConfig,
-    catalog_namespace: Optional[str] = None,
-) -> Dict:
+    catalog_namespace: str | None = None,
+) -> dict:
     """
     Load CatalogItem from the cluster and return parameter defaults (openAPIV3Schema.default).
 
@@ -2382,7 +2386,7 @@ def get_catalog_item_parameter_defaults(
     secondary = (
         "babylon-catalog-event" if primary == "babylon-catalog-prod" else "babylon-catalog-prod"
     )
-    to_try: List[str] = []
+    to_try: list[str] = []
     if catalog_namespace:
         to_try.append(catalog_namespace)
     if primary not in to_try:
@@ -2396,7 +2400,7 @@ def get_catalog_item_parameter_defaults(
     return {}
 
 
-def find_similar_catalog_items(ci: str, namespace: str, config: RHDPConfig, limit: int = 5) -> List[str]:
+def find_similar_catalog_items(ci: str, namespace: str, config: RHDPConfig, limit: int = 5) -> list[str]:
     """
     Find catalog items with similar names (fuzzy match).
 
@@ -2448,7 +2452,7 @@ def find_similar_catalog_items(ci: str, namespace: str, config: RHDPConfig, limi
         return []
 
 
-def validate_catalog_item_exists(ci: str, expected_namespace: str, config: RHDPConfig) -> Tuple[bool, Optional[str], Optional[str]]:
+def validate_catalog_item_exists(ci: str, expected_namespace: str, config: RHDPConfig) -> tuple[bool, str | None, str | None]:
     """
     Validate that a catalog item exists in the expected namespace.
 
@@ -2500,7 +2504,7 @@ def validate_catalog_item_exists(ci: str, expected_namespace: str, config: RHDPC
     return (False, None, suggestion)
 
 
-def get_catalog_item_info(ci: str, config: RHDPConfig) -> Dict[str, str]:
+def get_catalog_item_info(ci: str, config: RHDPConfig) -> dict[str, str]:
     """
     Get catalog item information (namespace, displayName) from the catalog.
 
@@ -2578,9 +2582,9 @@ def get_catalog_item_info(ci: str, config: RHDPConfig) -> Dict[str, str]:
         }
 
 def create_multi_workshop_from_group(
-    group_schedules: List[WorkshopSchedule],
+    group_schedules: list[WorkshopSchedule],
     config: RHDPConfig,
-) -> Optional[str]:
+) -> str | None:
     """
     Create a MultiWorkshop from a group of schedules sharing the same
     multi_workshop_name.  Each schedule in the group represents one asset CI.
@@ -2597,9 +2601,9 @@ def create_multi_workshop_from_group(
 
     # Collect per-asset passwords, num_users, and concurrencies from individual rows
     asset_cis = ",".join(s.ci for s in group_schedules)
-    asset_passwords: Dict[str, str] = {}
-    asset_num_users: Dict[str, int] = {}
-    asset_concurrencies: Dict[str, int] = {}
+    asset_passwords: dict[str, str] = {}
+    asset_num_users: dict[str, int] = {}
+    asset_concurrencies: dict[str, int] = {}
     for s in group_schedules:
         if s.password:
             asset_passwords[s.ci] = s.password
@@ -2641,10 +2645,10 @@ def create_multi_workshop_from_group(
 def create_multi_workshop(
     schedule: WorkshopSchedule,
     config: RHDPConfig,
-    asset_passwords: Optional[Dict[str, str]] = None,
-    asset_num_users: Optional[Dict[str, int]] = None,
-    asset_concurrencies: Optional[Dict[str, int]] = None
-) -> Optional[str]:
+    asset_passwords: dict[str, str] | None = None,
+    asset_num_users: dict[str, int] | None = None,
+    asset_concurrencies: dict[str, int] | None = None
+) -> str | None:
     """
     Create a MultiWorkshop resource with multiple asset workshops.
     
@@ -2688,7 +2692,7 @@ def create_multi_workshop(
                 sample_ci = asset_ci_list[0]
                 catalog_info = get_catalog_item_info(sample_ci, config)
                 catalog_ns = catalog_info.get('namespace', 'babylon-catalog-prod')
-                pv: Dict = {
+                pv: dict = {
                     'start_timestamp': start_iso,
                     'stop_timestamp': format_iso8601(parse_date_time(schedule.auto_stop)) if schedule.auto_stop else end_iso,
                 }
@@ -2774,7 +2778,7 @@ def create_multi_workshop(
             asset_workshop_prefix = f"{multi_workshop_name}-{asset_ci_safe}-"
             
             # Build a minimal ResourceClaim payload for this asset
-            asset_param_values: Dict = {
+            asset_param_values: dict = {
                 'start_timestamp': start_iso,
                 'stop_timestamp': format_iso8601(parse_date_time(schedule.auto_stop)) if schedule.auto_stop else end_iso,
             }
@@ -2927,7 +2931,7 @@ def create_multi_workshop(
 def create_multi_region_workshop(
     schedule: WorkshopSchedule,
     config: RHDPConfig,
-) -> Optional[str]:
+) -> str | None:
     """
     Create a single Workshop with multiple WorkshopProvisions, one per AWS region.
 
@@ -2978,7 +2982,7 @@ def enable_workshop_lab_interface(
     namespace: str,
     config: RHDPConfig,
     max_wait: int = 120,
-    redirect: Optional[bool] = None,
+    redirect: bool | None = None,
 ) -> bool:
     """
     Enable labUserInterface.redirect in the Workshop resource.
@@ -3084,7 +3088,7 @@ def get_resourceclaim_name_from_cluster(
     namespace: str,
     config: RHDPConfig,
     max_wait: int = 10
-) -> Optional[str]:
+) -> str | None:
     """
     Get ResourceClaim name from cluster by matching generateName.
     
@@ -3190,7 +3194,7 @@ def get_landing_page_url(workshop_id: str, base_domain: str = "integration.demo.
         return ""
     return f"https://{base_domain}/workshop/{workshop_id}"
 
-def get_workshop_urls(workshop_name: str, namespace: str, ci: str, config: RHDPConfig) -> Tuple[str, str]:
+def get_workshop_urls(workshop_name: str, namespace: str, ci: str, config: RHDPConfig) -> tuple[str, str]:
     """
     Get both the full workshop URL and the short catalog URL.
     
@@ -3219,7 +3223,7 @@ def verify_deployment(
     namespace: str,
     ci: str,
     config: RHDPConfig
-) -> Tuple[bool, Optional[str], str]:
+) -> tuple[bool, str | None, str]:
     """
     Verify deployment by checking ResourceClaim status.
 
@@ -3306,8 +3310,8 @@ def verify_deployment(
 def list_scheduled_resourceclaims(
     namespace: str,
     config: RHDPConfig,
-    ci_filter: Optional[str] = None
-) -> List[Dict]:
+    ci_filter: str | None = None
+) -> list[dict]:
     """
     List all ResourceClaims scheduled by rhdp-flow in a namespace.
     If ci_filter is provided, also includes ResourceClaims matching that CI.
@@ -3388,7 +3392,7 @@ def list_scheduled_resourceclaims(
         logger.error(f"Error listing scheduled ResourceClaims: {e}")
         return []
 
-def _parse_cluster_timestamp(ts: str) -> Optional[datetime]:
+def _parse_cluster_timestamp(ts: str) -> datetime | None:
     """Parse an ISO 8601 / Zulu timestamp from the cluster into a tz-aware datetime."""
     if not ts:
         return None
@@ -3397,7 +3401,7 @@ def _parse_cluster_timestamp(ts: str) -> Optional[datetime]:
             return datetime.fromisoformat(ts.replace("Z", "+00:00"))
         dt = datetime.fromisoformat(ts)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
         return dt
     except Exception:
         return None
@@ -3407,7 +3411,7 @@ def _compare_timestamps(
     label: str,
     expected_raw: str,
     actual_raw: str,
-    issues: List[str],
+    issues: list[str],
     tolerance_seconds: int = 300,
 ) -> bool:
     """Compare an expected CSV timestamp against an actual cluster timestamp.
@@ -3430,8 +3434,8 @@ def _compare_timestamps(
 
 
 def _get_workshop_lock_status(
-    workshop_obj: Optional[Dict],
-) -> Optional[bool]:
+    workshop_obj: dict | None,
+) -> bool | None:
     """Return True if Workshop has lock-enabled=true, False if false, None if unknown."""
     if workshop_obj is None:
         return None
@@ -3450,8 +3454,8 @@ def _get_workshop_for_ci(
     namespace: str,
     ci: str,
     config: "RHDPConfig",
-    rc_name: Optional[str] = None,
-) -> Optional[Dict]:
+    rc_name: str | None = None,
+) -> dict | None:
     """Fetch the Workshop resource for a given CI. Returns the raw dict or None."""
     try:
         env = os.environ.copy()
@@ -3482,7 +3486,7 @@ def qa1_verify_setup(
     csv_file: str,
     namespace: str,
     config: RHDPConfig
-) -> List[Dict]:
+) -> list[dict]:
     """
     QA Function 1: Verify deployments are set up as per the schedule sheet.
     Checks: times, user counts, dates match the CSV schedule.
@@ -3684,7 +3688,7 @@ def qa1_verify_setup(
                         locked = _get_workshop_lock_status(workshop)
 
                         matches_schedule = True
-                        issues: List[str] = []
+                        issues: list[str] = []
                         if not _compare_timestamps("Start time", schedule.provisioning_date, actual_start, issues):
                             matches_schedule = False
                         if not _compare_timestamps("Stop time", schedule.auto_stop, actual_stop, issues):
@@ -3862,7 +3866,7 @@ def qa2_verify_deployment_status(
     csv_file: str,
     namespace: str,
     config: RHDPConfig
-) -> List[Dict]:
+) -> list[dict]:
     """
     QA Function 2: Verify deployments are actually deployed and seat counts match.
     This is triggered later to check if workshops are provisioned and ready.
@@ -4201,7 +4205,7 @@ def qa2_verify_deployment_status(
 def qa3_verify_catalog_items_exist(
     csv_file: str,
     config: RHDPConfig
-) -> List[Dict]:
+) -> list[dict]:
     """
     QA Function 3: Verify all catalog items in CSV exist in the cluster.
 
@@ -4233,7 +4237,7 @@ def qa3_verify_catalog_items_exist(
     schedules = read_csv_input(csv_file)
 
     # Deduplicate catalog items
-    ci_map: Dict[str, WorkshopSchedule] = {}
+    ci_map: dict[str, WorkshopSchedule] = {}
     for schedule in schedules:
         if schedule.is_multi_asset:
             # For multi-asset, check each asset CI
@@ -4285,7 +4289,7 @@ def qa3_verify_catalog_items_exist(
             "status": status,
             "matches_schedule": "",
             "issues": issues,
-            "catalog_namespace": catalog_namespace,
+            "catalog_namespace": expected_ns,
             "exists": exists_str,
         }
         results.append(result)
@@ -4313,7 +4317,7 @@ def qa_destroy_check(
     csv_file: str,
     namespace: str,
     config: RHDPConfig
-) -> List[Dict]:
+) -> list[dict]:
     """
     Destroy QA: Read-only check whether deployments have been properly
     destroyed/stopped after their scheduled times.
@@ -4335,7 +4339,7 @@ def qa_destroy_check(
     logger.info("=" * 70)
 
     schedules = read_csv_input(csv_file)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     results = []
 
     env = os.environ.copy()
@@ -4494,14 +4498,14 @@ def qa_destroy_check(
     return results
 
 
-def _dedup_qa_results(results: List[Dict]) -> List[Dict]:
+def _dedup_qa_results(results: list[dict]) -> list[dict]:
     """Collapse multiple results for the same (ci_name, ci, namespace) into one.
 
     QA1 returns one row per ResourceClaim, which can mean 5 rows for one CI.
     We keep the first entry as the base and aggregate issues/counts from the rest.
     """
-    by_key: Dict[tuple, Dict] = {}
-    order: List[tuple] = []
+    by_key: dict[tuple, dict] = {}
+    order: list[tuple] = []
     for r in results:
         k = (r.get("ci_name"), r.get("ci"), r.get("namespace"))
         if k not in by_key:
@@ -4525,13 +4529,13 @@ def _dedup_qa_results(results: List[Dict]) -> List[Dict]:
     return [by_key[k] for k in order]
 
 
-def _merge_qa1_qa2(qa1: List[Dict], qa2: List[Dict]) -> List[Dict]:
+def _merge_qa1_qa2(qa1: list[dict], qa2: list[dict]) -> list[dict]:
     """One row per workshop: QA2 deployment truth enriched with QA1 setup checks."""
     deduped_qa1 = _dedup_qa_results(qa1)
     r1_by_key = {(r.get("ci_name"), r.get("ci"), r.get("namespace")): r for r in deduped_qa1}
     r2_by_key = {(r.get("ci_name"), r.get("ci"), r.get("namespace")): r for r in qa2}
 
-    all_keys: List[tuple] = []
+    all_keys: list[tuple] = []
     seen: set = set()
     for r in deduped_qa1 + qa2:
         k = (r.get("ci_name"), r.get("ci"), r.get("namespace"))
@@ -4539,7 +4543,7 @@ def _merge_qa1_qa2(qa1: List[Dict], qa2: List[Dict]) -> List[Dict]:
             all_keys.append(k)
             seen.add(k)
 
-    merged: List[Dict] = []
+    merged: list[dict] = []
     qa1_carry_fields = ("issues", "matches_schedule", "actual_start", "actual_stop",
                         "actual_destroy", "lock_status")
 
@@ -4569,7 +4573,7 @@ def _merge_qa1_qa2(qa1: List[Dict], qa2: List[Dict]) -> List[Dict]:
 
 
 def qa_export_results(
-    results: List[Dict],
+    results: list[dict],
     output_file: str = "qa_results.csv"
 ) -> None:
     """
@@ -4588,7 +4592,7 @@ def qa_export_results(
         fieldnames = set()
         for result in results:
             fieldnames.update(result.keys())
-        fieldnames = sorted(list(fieldnames))
+        fieldnames = sorted(fieldnames)
         
         with open(output_file, 'w', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -4604,7 +4608,7 @@ def qa_export_results(
         raise
 
 def export_student_landing_page_csv(
-    results: List[Dict],
+    results: list[dict],
     output_file: str = "student_landing_page.csv"
 ) -> None:
     """
@@ -4718,8 +4722,8 @@ def export_student_landing_page_csv(
 def process_schedule(
     schedule: WorkshopSchedule,
     config: RHDPConfig,
-    asset_passwords: Optional[Dict[str, str]] = None,
-    asset_num_users: Optional[Dict[str, int]] = None
+    asset_passwords: dict[str, str] | None = None,
+    asset_num_users: dict[str, int] | None = None
 ) -> DeploymentResult:
     """
     Process a single workshop schedule.
@@ -6250,8 +6254,8 @@ def main():
             logger.info(f"Checking namespace(s): {', '.join(namespaces)}")
             logger.info("=" * 70)
             
-            results1_all: List[Dict] = []
-            results2_all: List[Dict] = []
+            results1_all: list[dict] = []
+            results2_all: list[dict] = []
             
             for namespace in namespaces:
                 # Run QA1: Verify Setup

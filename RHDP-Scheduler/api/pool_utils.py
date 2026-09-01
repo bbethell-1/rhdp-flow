@@ -36,6 +36,7 @@ def get_pool_for_catalog_item(catalog_item: str, namespace: str = "poolboy") -> 
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
 
         if result.returncode != 0:
@@ -63,7 +64,7 @@ def get_pool_for_catalog_item(catalog_item: str, namespace: str = "poolboy") -> 
             "exists": True,
         }
 
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception) as e:
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
         logger.warning(f"Failed to lookup pool for {catalog_item}: {e}")
         return None
 
@@ -80,6 +81,7 @@ def list_all_pools(namespace: str = "poolboy") -> list[dict]:
             capture_output=True,
             text=True,
             timeout=30,
+            check=False,
         )
 
         if result.returncode != 0:
@@ -111,6 +113,6 @@ def list_all_pools(namespace: str = "poolboy") -> list[dict]:
 
         return sorted(pools, key=lambda p: p["pool_name"])
 
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception) as e:
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
         logger.error(f"Failed to list pools: {e}")
         return []

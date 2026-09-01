@@ -8,9 +8,8 @@ Fresh cluster deployments are skipped.
 from __future__ import annotations
 
 import logging
-import os
-from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger("rhdp_flow.tenant_cluster_capacity")
 
@@ -64,7 +63,7 @@ def is_tenant_catalog_item(ci: str) -> bool:
     return ci.endswith("-tenant")
 
 
-def check_cluster_capacity(catalog_item: str, namespace: str = None) -> Optional[ClusterCapacity]:
+def check_cluster_capacity(catalog_item: str, namespace: str = None) -> ClusterCapacity | None:
     """
     Check tenant cluster capacity for a catalog item (read-only).
 
@@ -184,7 +183,7 @@ def check_cluster_capacity(catalog_item: str, namespace: str = None) -> Optional
         return None
 
 
-def check_schedules_capacity(schedules: List[Any], ignore_warnings: bool = False) -> Dict[str, Any]:
+def check_schedules_capacity(schedules: list[Any], ignore_warnings: bool = False) -> dict[str, Any]:
     """
     Check capacity for all tenant catalog items in schedules (read-only).
 

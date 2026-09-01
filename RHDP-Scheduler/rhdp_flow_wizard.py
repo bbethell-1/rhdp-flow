@@ -13,16 +13,14 @@ import os
 import random
 import string
 import subprocess
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import List, Dict
 
 try:
     from rich.console import Console
     from rich.panel import Panel
-    from rich.prompt import Prompt, Confirm, IntPrompt
+    from rich.prompt import Confirm, IntPrompt, Prompt
     from rich.table import Table
-    from rich.text import Text
 except ImportError:
     raise ImportError(
         "The wizard requires the 'rich' library. Install with: pip install rich>=13.0.0"
@@ -43,7 +41,7 @@ class RHDPWizard:
     def __init__(self, config=None):
         self.console = Console()
         self.config = config
-        self.workshops: List[Dict[str, str]] = []
+        self.workshops: list[dict[str, str]] = []
 
     def run(self):
         """Main wizard entry point."""
@@ -64,7 +62,7 @@ class RHDPWizard:
         self._preview_csv()
         self._save_csv()
 
-    def _collect_workshop(self) -> Dict[str, str]:
+    def _collect_workshop(self) -> dict[str, str]:
         """Collect all fields for a single workshop."""
         self.console.print("\n[bold]--- New Workshop ---[/bold]")
 
@@ -82,7 +80,7 @@ class RHDPWizard:
         enable_ui = Confirm.ask("Enable Workshop UI?", default=True)
 
         # 5. Workshop Name
-        default_name = f"{ci_name} - {datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
+        default_name = f"{ci_name} - {datetime.now(UTC).strftime('%Y-%m-%d')}"
         workshop_name = Prompt.ask("Workshop Name", default=default_name)
 
         # 6. Dates
@@ -177,7 +175,7 @@ class RHDPWizard:
         else:
             return Prompt.ask("Enter Catalog Item ID (e.g., openshift-cnv.ocp-virt-roadshow-multi-user.prod)")
 
-    def _query_catalog_items(self) -> List[tuple]:
+    def _query_catalog_items(self) -> list[tuple]:
         """Query cluster for available catalog items."""
         try:
             cmd = [
@@ -250,7 +248,7 @@ class RHDPWizard:
         """Collect provisioning, stop, and destroy dates."""
         self.console.print("\n[bold]Scheduling (all times in UTC):[/bold]")
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Provisioning date
         default_prov = (now + timedelta(hours=1)).strftime("%d/%m/%Y %H:%M")
@@ -258,7 +256,7 @@ class RHDPWizard:
 
         # Parse provisioning to suggest stop/destroy
         try:
-            prov_dt = datetime.strptime(prov_date.strip(), "%d/%m/%Y %H:%M").replace(tzinfo=timezone.utc)
+            prov_dt = datetime.strptime(prov_date.strip(), "%d/%m/%Y %H:%M").replace(tzinfo=UTC)
         except ValueError:
             prov_dt = now + timedelta(hours=1)
 
