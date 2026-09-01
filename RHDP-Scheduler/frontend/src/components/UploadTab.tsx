@@ -451,7 +451,17 @@ export const UploadTab: React.FC<Props> = ({
         ? await api.importLabagatorCSV(csvFile)
         : await api.uploadCSV(csvFile);
 
-      setSchedules(data.schedules);
+      // Apply global redirect setting to uploaded schedules
+      const schedulesWithRedirect = data.schedules.map(s => ({ ...s, redirect }));
+      setSchedules(schedulesWithRedirect);
+
+      // Update backend with redirect setting
+      try {
+        await api.updateSchedules(schedulesWithRedirect);
+      } catch (err) {
+        console.warn('Failed to apply redirect setting to backend:', err);
+      }
+
       setSkippedRows(data.skipped_rows ?? 0);
       setTotalRows(data.total_rows ?? 0);
 
@@ -481,7 +491,17 @@ export const UploadTab: React.FC<Props> = ({
     setLoadingExampleSlug(slug);
     try {
       const data = await api.loadScheduleExample(slug);
-      setSchedules(data.schedules);
+      // Apply global redirect setting to example schedules
+      const schedulesWithRedirect = data.schedules.map(s => ({ ...s, redirect }));
+      setSchedules(schedulesWithRedirect);
+
+      // Update backend with redirect setting
+      try {
+        await api.updateSchedules(schedulesWithRedirect);
+      } catch (err) {
+        console.warn('Failed to apply redirect setting to backend:', err);
+      }
+
       setSkippedRows(data.skipped_rows ?? 0);
       setTotalRows(data.total_rows ?? 0);
       const msg = data.skipped_rows
