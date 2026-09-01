@@ -105,6 +105,11 @@ export const UploadTab: React.FC<Props> = ({
   const [scheduleExamples, setScheduleExamples] = useState<ScheduleExampleMeta[]>([]);
   const [loadingExampleSlug, setLoadingExampleSlug] = useState<string | null>(null);
   const [passwordCount, setPasswordCount] = useState<number | null>(null);
+
+  // Labagator import settings
+  const [labagatorDefaultCI, setLabagatorDefaultCI] = useState('');
+  const [labagatorDefaultUsers, setLabagatorDefaultUsers] = useState(25);
+  const [labagatorBufferHours, setLabagatorBufferHours] = useState(2);
   const [progress, setProgress] = useState(0);
   const [progressMsg, setProgressMsg] = useState('');
   const [logLines, setLogLines] = useState<string[]>([]);
@@ -448,7 +453,13 @@ export const UploadTab: React.FC<Props> = ({
     if (!csvFile) { showToast('Please select a CSV file', 'danger'); return; }
     try {
       const data = importMode === 'labagator'
-        ? await api.importLabagatorCSV(csvFile)
+        ? await api.importLabagatorCSV(csvFile, {
+            default_ci: labagatorDefaultCI || undefined,
+            default_users: labagatorDefaultUsers,
+            default_redirect: redirect,
+            default_white_glove: whiteGlove,
+            buffer_hours: labagatorBufferHours,
+          })
         : await api.uploadCSV(csvFile);
 
       // Apply global redirect setting to uploaded schedules
@@ -727,15 +738,75 @@ export const UploadTab: React.FC<Props> = ({
       </div>
 
       {importMode === 'labagator' && (
-        <Alert
-          variant="info"
-          isInline
-          title="Labagator import mode"
-          style={{ marginBottom: 16 }}
-        >
-          Import a Labagator sessions CSV export. Only sessions with status=started will be converted to Flow schedules.
-          Required columns: workshop_name, account, guid, provisioning_time, stop_time, destroy_time.
-        </Alert>
+        <>
+          <Alert
+            variant="info"
+            isInline
+            title="Labagator import mode"
+            style={{ marginBottom: 12 }}
+          >
+            Import a Labagator sessions CSV export. Settings below will be applied to all imported sessions.
+          </Alert>
+          <Card style={{ marginBottom: 16 }}>
+            <CardTitle>Labagator Import Settings</CardTitle>
+            <CardBody>
+              <Split hasGutter style={{ marginBottom: 12 }}>
+                <SplitItem>
+                  <label htmlFor="labagator-ci">Default Catalog Item:</label>
+                  <TextInput
+                    id="labagator-ci"
+                    value={labagatorDefaultCI}
+                    onChange={(_e, value) => setLabagatorDefaultCI(value)}
+                    placeholder="e.g., ocp4-cluster.prod"
+                    style={{ width: '300px' }}
+                  />
+                </SplitItem>
+                <SplitItem>
+                  <label htmlFor="labagator-users">Default Users:</label>
+                  <TextInput
+                    id="labagator-users"
+                    type="number"
+                    value={labagatorDefaultUsers.toString()}
+                    onChange={(_e, value) => setLabagatorDefaultUsers(parseInt(value) || 25)}
+                    style={{ width: '100px' }}
+                  />
+                </SplitItem>
+                <SplitItem>
+                  <label htmlFor="labagator-buffer">Destroy Buffer (hours):</label>
+                  <TextInput
+                    id="labagator-buffer"
+                    type="number"
+                    value={labagatorBufferHours.toString()}
+                    onChange={(_e, value) => setLabagatorBufferHours(parseInt(value) || 2)}
+                    style={{ width: '100px' }}
+                  />
+                </SplitItem>
+              </Split>
+              <Split hasGutter>
+                <SplitItem>
+                  <Tooltip content="Apply global redirect setting to imported sessions">
+                    <Switch
+                      id="labagator-redirect-inherit"
+                      label="Use global redirect setting"
+                      isChecked={true}
+                      isDisabled
+                    />
+                  </Tooltip>
+                </SplitItem>
+                <SplitItem>
+                  <Tooltip content="Apply global white glove setting to imported sessions">
+                    <Switch
+                      id="labagator-whiteglove-inherit"
+                      label="Use global white glove setting"
+                      isChecked={true}
+                      isDisabled
+                    />
+                  </Tooltip>
+                </SplitItem>
+              </Split>
+            </CardBody>
+          </Card>
+        </>
       )}
 
       {/* CSV Upload */}
@@ -999,8 +1070,9 @@ export const UploadTab: React.FC<Props> = ({
             </Alert>
           )}
 
-          <Alert variant="info" isInline isPlain title="All schedule times are in UTC" style={{ marginBottom: 8 }}>
-            Your local timezone: {Intl.DateTimeFormat().resolvedOptions().timeZone}. Ensure CSV dates are entered in UTC.
+          <Alert variant="info" isInline isPlain title="⏰ Schedule times are in UTC" style={{ marginBottom: 8 }}>
+            Your local timezone: <strong>{Intl.DateTimeFormat().resolvedOptions().timeZone}</strong> (UTC{new Date().getTimezoneOffset() === 0 ? '' : new Date().getTimezoneOffset() > 0 ? '-' : '+' + Math.abs(new Date().getTimezoneOffset() / 60).toString()}).
+            Enter dates in <strong>DD/MM/YYYY HH:MM</strong> format. Example: 25/12/2026 14:30
           </Alert>
 
           <div className="table-sticky-wrapper">
@@ -1053,6 +1125,11 @@ export const UploadTab: React.FC<Props> = ({
                   <Th>Instances</Th>
                   <Th>UI</Th>
                   <Th>Redirect</Th>
+                  <Th>
+                    <Tooltip content="Workshop password. Leave blank to auto-generate on deploy.">
+                      <span>Password</span>
+                    </Tooltip>
+                  </Th>
                   <Th>Prov. Date (UTC)</Th>
                   <Th>Auto-Stop (UTC)</Th>
                   <Th>Auto-Destroy (UTC)</Th>
@@ -1314,6 +1391,41 @@ export const UploadTab: React.FC<Props> = ({
                           isReversed
                           isDisabled={rowEditsLocked}
                         />
+                      </Td>
+                      <Td dataLabel="Password">
+                        <Split hasGutter style={{ alignItems: 'center' }}>
+                          <SplitItem isFilled>
+                            <TextInput
+                              id={`password-${i}`}
+                              value={s.password || ''}
+                              onChange={(_e, value) => {
+                                const updated = schedules.map((sc, idx) => idx === i ? { ...sc, password: value } : sc);
+                                setSchedules(updated);
+                                api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
+                              }}
+                              placeholder="auto"
+                              style={{ minWidth: '100px' }}
+                              readOnly={rowEditsLocked}
+                              type="text"
+                            />
+                          </SplitItem>
+                          <SplitItem>
+                            <Button
+                              variant="plain"
+                              aria-label="Generate password"
+                              onClick={() => {
+                                const newPass = Math.random().toString(36).slice(-8);
+                                const updated = schedules.map((sc, idx) => idx === i ? { ...sc, password: newPass } : sc);
+                                setSchedules(updated);
+                                api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
+                                showToast('Password generated', 'success');
+                              }}
+                              isDisabled={rowEditsLocked}
+                            >
+                              🎲
+                            </Button>
+                          </SplitItem>
+                        </Split>
                       </Td>
                       <Td dataLabel="Prov. Date (UTC)" className="date-cell">
                         <TextInput

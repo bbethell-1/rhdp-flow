@@ -855,6 +855,11 @@ async def upload_csv(request: Request, file: UploadFile = File(...), _key=Depend
 @router.post("/schedules/import-labagator", response_model=UploadResponse)
 async def import_labagator_sessions(
     file: UploadFile = File(...),
+    default_ci: str = "PLACEHOLDER_CATALOG_ITEM",
+    default_users: int = 25,
+    default_redirect: bool = True,
+    default_white_glove: bool = True,
+    buffer_hours: int = 2,
     _key=Depends(verify_api_key)
 ):
     """Import Labagator session export CSV and convert to Flow schedules.
@@ -862,15 +867,29 @@ async def import_labagator_sessions(
     Accepts Labagator session CSV with fields:
     - session_code, title, room, session_date, start_time, end_time, speakers, topics
 
+    Global settings (applied to all imported sessions):
+    - default_ci: Catalog item ID (can be edited per session after import)
+    - default_users: Number of users per workshop (default: 25)
+    - default_redirect: Enable redirect after login (default: True)
+    - default_white_glove: Enable white glove mode (default: True)
+    - buffer_hours: Hours between session end and auto-destroy (default: 2)
+
     Returns Flow workshop schedules ready for deployment.
     """
     # Read uploaded file
     content = await file.read()
     labagator_csv = io.StringIO(content.decode("utf-8"))
 
-    # Transform to Flow format
+    # Transform to Flow format with global settings
     try:
-        flow_csv = transform_labagator_to_flow(labagator_csv)
+        flow_csv = transform_labagator_to_flow(
+            labagator_csv,
+            default_ci=default_ci,
+            default_users=default_users,
+            default_redirect=default_redirect,
+            default_white_glove=default_white_glove,
+            buffer_hours=buffer_hours,
+        )
     except Exception as e:
         logger.exception("Labagator transformation failed")
         raise HTTPException(400, f"Import failed: {e}")

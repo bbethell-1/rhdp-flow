@@ -100,10 +100,29 @@ export const api = {
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
-  importLabagatorCSV: async (file: File): Promise<UploadResponse> => {
+  importLabagatorCSV: async (
+    file: File,
+    options?: {
+      default_ci?: string;
+      default_users?: number;
+      default_redirect?: boolean;
+      default_white_glove?: boolean;
+      buffer_hours?: number;
+    }
+  ): Promise<UploadResponse> => {
     const form = new FormData();
     form.append('file', file);
-    const res = await fetch(`${API}/schedules/import-labagator`, {
+
+    // Build query params from options
+    const params = new URLSearchParams();
+    if (options?.default_ci) params.append('default_ci', options.default_ci);
+    if (options?.default_users !== undefined) params.append('default_users', options.default_users.toString());
+    if (options?.default_redirect !== undefined) params.append('default_redirect', options.default_redirect.toString());
+    if (options?.default_white_glove !== undefined) params.append('default_white_glove', options.default_white_glove.toString());
+    if (options?.buffer_hours !== undefined) params.append('buffer_hours', options.buffer_hours.toString());
+
+    const url = params.toString() ? `${API}/schedules/import-labagator?${params}` : `${API}/schedules/import-labagator`;
+    const res = await fetch(url, {
       method: 'POST',
       body: form,
       headers: getApiKeyHeader(),

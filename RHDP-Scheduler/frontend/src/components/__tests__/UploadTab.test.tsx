@@ -118,7 +118,7 @@ describe('UploadTab', () => {
         onClear={noop}
       />
     );
-    expect(screen.getByText(/All schedule times are in UTC/)).toBeInTheDocument();
+    expect(screen.getByText(/Schedule times are in UTC/)).toBeInTheDocument();
   });
 
   it('shows download CSV template link', () => {
