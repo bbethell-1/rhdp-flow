@@ -148,6 +148,10 @@ export const UploadTab: React.FC<Props> = ({
   // Cluster-tenant validation
   const [clusterTenantValidation, setClusterTenantValidation] = useState<any>(null);
 
+  // Pool capacity validation
+  const [poolCapacityWarnings, setPoolCapacityWarnings] = useState<import('../types').PoolCapacityWarning[]>([]);
+  const [poolsNotFound, setPoolsNotFound] = useState<import('../types').PoolNotFoundWarning[]>([]);
+
   // Confirmation modal state
   const [showDeployConfirm, setShowDeployConfirm] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -310,7 +314,7 @@ export const UploadTab: React.FC<Props> = ({
     fetchPoolData();
   }, [usePoolLookup, schedules]);
 
-  /** Re-fetch namespace + catalog num_users + catalog namespace checks from the server (uses loaded schedules). */
+  /** Re-fetch namespace + catalog num_users + catalog namespace + pool capacity checks from the server (uses loaded schedules). */
   const refreshClusterValidation = useCallback(async () => {
     setMissingNamespaces([]);
     setNumUsersViolations([]);
@@ -318,10 +322,13 @@ export const UploadTab: React.FC<Props> = ({
     setNumUsersLimits({});
     setCatalogNamespaceMismatches([]);
     setCatalogNotFound([]);
-    const [nsRes, nuRes, cnRes] = await Promise.all([
+    setPoolCapacityWarnings([]);
+    setPoolsNotFound([]);
+    const [nsRes, nuRes, cnRes, pcRes] = await Promise.all([
       api.validateNamespaces(),
       api.validateNumUsers(),
       api.validateCatalogNamespaces(),
+      api.validatePoolCapacity().catch(() => ({ warnings: [], not_found: [], tenant_items_checked: 0, pools_queried: 0 })),
     ]);
     if (nsRes.missing.length) setMissingNamespaces(nsRes.missing);
     if (nuRes.violations.length) setNumUsersViolations(nuRes.violations);
@@ -329,7 +336,9 @@ export const UploadTab: React.FC<Props> = ({
     if (Object.keys(nuRes.limits).length) setNumUsersLimits(nuRes.limits);
     if (cnRes.mismatches.length) setCatalogNamespaceMismatches(cnRes.mismatches);
     if (cnRes.not_found.length) setCatalogNotFound(cnRes.not_found);
-    return { nsRes, nuRes, cnRes };
+    if (pcRes.warnings?.length) setPoolCapacityWarnings(pcRes.warnings);
+    if (pcRes.not_found?.length) setPoolsNotFound(pcRes.not_found);
+    return { nsRes, nuRes, cnRes, pcRes };
   }, []);
 
   const handleValidate = async () => {
@@ -972,6 +981,48 @@ export const UploadTab: React.FC<Props> = ({
                 ))}
               </ul>
               Deployment will be blocked until user counts are reduced below the catalog limit.
+            </Alert>
+          )}
+
+          {/* Pool capacity warnings */}
+          {(poolCapacityWarnings.length > 0 || poolsNotFound.length > 0) && (
+            <Alert
+              variant={poolCapacityWarnings.some(w => w.severity === 'critical') ? 'danger' : 'warning'}
+              isInline
+              title={`TenantClusterPool capacity check: ${poolCapacityWarnings.length} warning(s), ${poolsNotFound.length} pool(s) not found`}
+              style={{ marginBottom: 12 }}
+            >
+              {poolCapacityWarnings.length > 0 && (
+                <>
+                  <div style={{ marginBottom: 8, fontWeight: 600 }}>Capacity warnings:</div>
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+                    {poolCapacityWarnings.map((w, i) => (
+                      <li key={i} style={{ color: w.severity === 'critical' ? 'var(--pf-v6-global--danger-color--100)' : undefined }}>
+                        <strong>{w.ci_name}</strong> ({w.pool_name}):
+                        Pool {w.pool_saturation_percent}% saturated, {w.placement_capacity_percent}% utilized
+                        {w.severity === 'critical' && ' — CRITICAL: at capacity!'}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {poolsNotFound.length > 0 && (
+                <>
+                  <div style={{ marginTop: poolCapacityWarnings.length > 0 ? 12 : 0, marginBottom: 8, fontWeight: 600 }}>
+                    Pools not found:
+                  </div>
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+                    {poolsNotFound.map((p, i) => (
+                      <li key={i}>
+                        <strong>{p.ci_name}</strong> ({p.ci}): No TenantClusterPool found for base CI "{p.base_ci}"
+                      </li>
+                    ))}
+                  </ul>
+                  <div style={{ marginTop: 8, fontSize: '0.85rem', fontStyle: 'italic' }}>
+                    Workshops will deploy to fresh clusters instead of tenant pools.
+                  </div>
+                </>
+              )}
             </Alert>
           )}
 

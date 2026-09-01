@@ -53,8 +53,11 @@ from api.models import (
     NumUsersValidationResponse,
     NumUsersViolation,
     OperationResponse,
+    PoolCapacityValidationResponse,
+    PoolCapacityWarning,
     PoolInfo,
     PoolLookupResponse,
+    PoolNotFoundWarning,
     QARequest,
     QAResultItem,
     RetryRequest,
@@ -856,23 +859,30 @@ async def upload_csv(request: Request, file: UploadFile = File(...), _key=Depend
 async def import_labagator_sessions(
     file: UploadFile = File(...),
     default_ci: str = "PLACEHOLDER_CATALOG_ITEM",
-    default_users: int = 25,
+    default_users: int | None = None,
     default_redirect: bool = True,
     default_white_glove: bool = True,
-    buffer_hours: int = 2,
+    buffer_hours: int | None = None,
+    timezone_offset_hours: int = 0,
     _key=Depends(verify_api_key)
 ):
     """Import Labagator session export CSV and convert to Flow schedules.
 
     Accepts Labagator session CSV with fields:
-    - session_code, title, room, session_date, start_time, end_time, speakers, topics
+    - Required: session_code, title, session_date, start_time, end_time
+    - Optional: room, speakers, topics, audience_level, expected_attendees, track
 
     Global settings (applied to all imported sessions):
     - default_ci: Catalog item ID (can be edited per session after import)
-    - default_users: Number of users per workshop (default: 25)
+    - default_users: Number of users (None = smart estimation from metadata)
     - default_redirect: Enable redirect after login (default: True)
     - default_white_glove: Enable white glove mode (default: True)
-    - buffer_hours: Hours between session end and auto-destroy (default: 2)
+    - buffer_hours: Hours between session end and auto-destroy (None = smart calculation)
+    - timezone_offset_hours: Hours to add for timezone conversion (e.g., 4 for EDT to UTC)
+
+    Smart defaults:
+    - User count estimated from audience_level or expected_attendees if available
+    - Buffer hours calculated from session length (1h for <1h sessions, 2h for 1-2h, 3h for >2h)
 
     Returns Flow workshop schedules ready for deployment.
     """
@@ -880,7 +890,7 @@ async def import_labagator_sessions(
     content = await file.read()
     labagator_csv = io.StringIO(content.decode("utf-8"))
 
-    # Transform to Flow format with global settings
+    # Transform to Flow format with enhanced settings
     try:
         flow_csv = transform_labagator_to_flow(
             labagator_csv,
@@ -889,6 +899,7 @@ async def import_labagator_sessions(
             default_redirect=default_redirect,
             default_white_glove=default_white_glove,
             buffer_hours=buffer_hours,
+            timezone_offset_hours=timezone_offset_hours,
         )
     except Exception as e:
         logger.exception("Labagator transformation failed")
@@ -1131,6 +1142,92 @@ def auto_fix_cluster_tenant_timing(_key=Depends(verify_api_key)):
         "fixed_items": result["fixed_items"],
         "message": f"Adjusted {result['fixed_count']} cluster schedule(s) to deploy 30 minutes before their tenant variants.",
     }
+
+
+@router.post("/schedules/validate-pool-capacity", response_model=PoolCapacityValidationResponse)
+def validate_pool_capacity(_key=Depends(verify_api_key)):
+    """Check TenantClusterPool capacity for tenant catalog items.
+
+    For each -tenant catalog item in loaded schedules:
+    - Find matching TenantClusterPool
+    - Check pool saturation and placement capacity
+    - Warn if capacity is high (>70%) or critical (>90%)
+    - Report if no matching pool found
+
+    Returns:
+        PoolCapacityValidationResponse with warnings and not_found lists
+    """
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+
+    warnings: list[PoolCapacityWarning] = []
+    not_found: list[PoolNotFoundWarning] = []
+    tenant_items_checked = 0
+    pools_queried = 0
+
+    try:
+        from tenant_cluster_capacity import check_schedules_capacity
+        from tenant_cluster_pool_linkage import get_catalog_item_base, is_tenant_catalog_item
+
+        # Check capacity for all schedules
+        capacity_result = check_schedules_capacity(_schedules, ignore_warnings=False)
+
+        tenant_items_checked = capacity_result["checked_count"]
+        pools_queried = len(capacity_result.get("capacity_info", {}))
+
+        # Convert capacity warnings to API model
+        for warning in capacity_result.get("warnings", []):
+            warnings.append(PoolCapacityWarning(
+                ci_name=warning["ci_name"],
+                ci=warning["ci"],
+                namespace="",  # Not available in warning dict
+                pool_name=capacity_result["capacity_info"][warning["ci_name"]].cluster_name,
+                pool_saturation_percent=warning["pool_saturation"],
+                placement_capacity_percent=warning["placement_capacity"],
+                message=warning["message"],
+                severity="warning"
+            ))
+
+        # Convert capacity errors (critical) to API model
+        for error in capacity_result.get("errors", []):
+            warnings.append(PoolCapacityWarning(
+                ci_name=error["ci_name"],
+                ci=error["ci"],
+                namespace="",
+                pool_name=capacity_result["capacity_info"][error["ci_name"]].cluster_name,
+                pool_saturation_percent=error["pool_saturation"],
+                placement_capacity_percent=error["placement_capacity"],
+                message=error["message"],
+                severity="critical"
+            ))
+
+        # Check for tenant items without matching pools
+        for schedule in _schedules:
+            if is_tenant_catalog_item(schedule.ci):
+                base_ci = get_catalog_item_base(schedule.ci)
+                # If not in capacity_info, no pool was found
+                if schedule.ci_name not in capacity_result.get("capacity_info", {}):
+                    not_found.append(PoolNotFoundWarning(
+                        ci_name=schedule.ci_name,
+                        ci=schedule.ci,
+                        namespace=schedule.namespace,
+                        base_ci=base_ci,
+                        message=f"No TenantClusterPool found for {schedule.ci} (base: {base_ci})"
+                    ))
+
+    except ImportError as e:
+        logger.warning(f"Pool capacity validation unavailable: {e}")
+        # Return empty result if dependencies not available
+    except Exception as e:
+        logger.exception("Pool capacity validation failed")
+        # Non-blocking: return partial results
+
+    return PoolCapacityValidationResponse(
+        warnings=warnings,
+        not_found=not_found,
+        tenant_items_checked=tenant_items_checked,
+        pools_queried=pools_queried,
+    )
 
 
 @router.post("/schedules/diff", response_model=DiffResponse)

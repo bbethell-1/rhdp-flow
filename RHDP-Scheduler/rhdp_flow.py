@@ -200,6 +200,7 @@ class WorkshopSchedule:
     # Cluster/tenant detection fields
     item_type: str | None = None  # CSV: cluster, tenant, workshop (or None if not specified)
     cluster_ci_override: str | None = None  # CSV: Cluster_CI column - explicit override for tenant's cluster
+    pool_name: str | None = None  # CSV: Pool_Name column - manual TenantClusterPool override
     is_cluster: bool = False  # Detected as cluster CI (either via naming or explicit label)
     is_tenant: bool = False  # Detected as tenant CI (either via naming or explicit label)
     detected_cluster_ci: str | None = None  # For tenants: the associated cluster CI (from override or naming)
@@ -744,6 +745,7 @@ def read_csv_input(filepath: str) -> list[WorkshopSchedule]:
                     catalog_namespace = row.get(header_map.get('catalog_namespace', 'Catalog_Namespace'), '').strip()
                     item_type = row.get(header_map.get('item_type', 'Item_Type'), '').strip()
                     cluster_ci_override = row.get(header_map.get('cluster_ci', 'Cluster_CI'), '').strip()
+                    pool_name = row.get(header_map.get('pool_name', 'Pool_Name'), '').strip()
                     showroom_repo = row.get(header_map.get('showroom_repo', 'Showroom_Repo'), '').strip()
                     showroom_ref = row.get(header_map.get('showroom_ref', 'Showroom_Ref'), '').strip()
                     showroom_novnc_str = row.get(header_map.get('showroom_novnc', 'Showroom_NoVNC'), '').strip()
@@ -863,6 +865,7 @@ def read_csv_input(filepath: str) -> list[WorkshopSchedule]:
                         showroom_zerotouch=showroom_zerotouch_val,
                         item_type=item_type if item_type else None,
                         cluster_ci_override=cluster_ci_override if cluster_ci_override else None,
+                        pool_name=pool_name if pool_name else None,
                     )
                     
                     schedules.append(schedule)
@@ -1231,6 +1234,13 @@ def build_resource_claim_payload(
     # Thread white-glove flag through payload for downstream functions
     if schedule.white_glove:
         payload["_white_glove"] = True
+
+    # Add TenantClusterPool linkage for tenant catalog items
+    try:
+        from tenant_cluster_pool_linkage import add_pool_linkage_to_payload
+        payload = add_pool_linkage_to_payload(payload, schedule.ci, schedule.namespace, schedule.pool_name)
+    except Exception as e:
+        logger.debug(f"Pool linkage failed (non-blocking): {e}")
 
     return payload
 

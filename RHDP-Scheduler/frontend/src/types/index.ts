@@ -231,6 +231,32 @@ export interface NumUsersValidationResponse {
   limits: Record<string, number>;
 }
 
+export interface PoolCapacityWarning {
+  ci_name: string;
+  ci: string;
+  namespace: string;
+  pool_name: string;
+  pool_saturation_percent: number;
+  placement_capacity_percent: number;
+  message: string;
+  severity: 'warning' | 'critical';
+}
+
+export interface PoolNotFoundWarning {
+  ci_name: string;
+  ci: string;
+  namespace: string;
+  base_ci: string;
+  message: string;
+}
+
+export interface PoolCapacityValidationResponse {
+  warnings: PoolCapacityWarning[];
+  not_found: PoolNotFoundWarning[];
+  tenant_items_checked: number;
+  pools_queried: number;
+}
+
 export interface CatalogNamespaceMismatch {
   ci_name: string;
   ci: string;

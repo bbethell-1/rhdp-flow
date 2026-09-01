@@ -381,6 +381,38 @@ class ClusterTenantValidationResponse(BaseModel):
     clusters_found: int = 0
 
 
+class PoolCapacityWarning(BaseModel):
+    """A pool capacity warning (approaching full)."""
+
+    ci_name: str
+    ci: str
+    namespace: str
+    pool_name: str
+    pool_saturation_percent: int
+    placement_capacity_percent: int
+    message: str
+    severity: Literal["warning", "critical"]
+
+
+class PoolNotFoundWarning(BaseModel):
+    """A tenant catalog item with no matching pool."""
+
+    ci_name: str
+    ci: str
+    namespace: str
+    base_ci: str
+    message: str
+
+
+class PoolCapacityValidationResponse(BaseModel):
+    """Response for POST /schedules/validate-pool-capacity."""
+
+    warnings: list[PoolCapacityWarning] = Field(default_factory=list)
+    not_found: list[PoolNotFoundWarning] = Field(default_factory=list)
+    tenant_items_checked: int = 0
+    pools_queried: int = 0
+
+
 class ResourceStatus(BaseModel):
     exists: bool
     status: str           # "not_found" | "active" | "overdue"

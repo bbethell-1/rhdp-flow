@@ -17,6 +17,7 @@ import type {
   QAResponse,
   RetryRequest,
   NumUsersValidationResponse,
+  PoolCapacityValidationResponse,
   SessionSummary,
   SessionDetail,
   ScheduleExampleMeta,
@@ -158,6 +159,8 @@ export const api = {
     request<any>('/schedules/validate-cluster-tenant', { method: 'POST', body: '{}' }),
   autoFixClusterTenantTiming: () =>
     request<{ fixed_count: number; fixed_items: any[]; message: string }>('/schedules/auto-fix-cluster-tenant', { method: 'POST', body: '{}' }),
+  validatePoolCapacity: () =>
+    request<PoolCapacityValidationResponse>('/schedules/validate-pool-capacity', { method: 'POST', body: '{}' }),
   diffSchedules: async (file: File): Promise<import('../types').DiffResponse> => {
     const form = new FormData();
     form.append('file', file);
