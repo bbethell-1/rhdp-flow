@@ -137,6 +137,8 @@ export const api = {
     request<import('../types').CatalogNamespaceValidationResponse>('/schedules/validate-catalog-namespaces', { method: 'POST', body: '{}' }),
   validateClusterTenant: () =>
     request<any>('/schedules/validate-cluster-tenant', { method: 'POST', body: '{}' }),
+  autoFixClusterTenantTiming: () =>
+    request<{ fixed_count: number; fixed_items: any[]; message: string }>('/schedules/auto-fix-cluster-tenant', { method: 'POST', body: '{}' }),
   diffSchedules: async (file: File): Promise<import('../types').DiffResponse> => {
     const form = new FormData();
     form.append('file', file);

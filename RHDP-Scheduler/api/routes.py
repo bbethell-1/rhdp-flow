@@ -1095,6 +1095,25 @@ def validate_cluster_tenant_scheduling(_key=Depends(verify_api_key)):
     )
 
 
+@router.post("/schedules/auto-fix-cluster-tenant")
+def auto_fix_cluster_tenant_timing(_key=Depends(verify_api_key)):
+    """Auto-fix cluster/tenant timing conflicts by adjusting cluster deploy times."""
+    global _schedules
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+
+    from cluster_tenant_validation import auto_fix_cluster_tenant_timing
+
+    result = auto_fix_cluster_tenant_timing(_schedules, buffer_minutes=30)
+    _schedules = result["schedules"]
+
+    return {
+        "fixed_count": result["fixed_count"],
+        "fixed_items": result["fixed_items"],
+        "message": f"Adjusted {result['fixed_count']} cluster schedule(s) to deploy 30 minutes before their tenant variants.",
+    }
+
+
 @router.post("/schedules/diff", response_model=DiffResponse)
 async def diff_schedules(file: UploadFile = File(...), _key=Depends(verify_api_key)):
     """Compare a new CSV against the currently loaded schedules."""

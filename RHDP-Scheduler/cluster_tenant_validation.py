@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 logger = logging.getLogger("rhdp_flow.cluster_tenant_validation")
@@ -89,4 +89,77 @@ def validate_cluster_before_tenant(schedules: list[Any]) -> dict[str, Any]:
         "warnings": warnings,
         "tenants_checked": tenants_checked,
         "clusters_found": clusters_found,
+    }
+
+
+def auto_fix_cluster_tenant_timing(schedules: list[Any], buffer_minutes: int = 30) -> dict[str, Any]:
+    """
+    Auto-fix cluster/tenant timing conflicts by adjusting cluster deploy times.
+
+    When a tenant variant is scheduled before its cluster variant, this function
+    automatically adjusts the cluster's provisioning date to be `buffer_minutes`
+    before the tenant's provisioning date.
+
+    Args:
+        schedules: List of WorkshopSchedule objects to fix
+        buffer_minutes: Minutes buffer between cluster and tenant deploy (default: 30)
+
+    Returns:
+        Dict with:
+        - fixed_count: Number of cluster schedules adjusted
+        - fixed_items: List of {ci_name, cluster_ci, tenant_ci, old_date, new_date}
+        - schedules: Updated list of schedules with fixes applied
+    """
+    fixed_items = []
+
+    # Group schedules by catalog item base name
+    cluster_items = {}  # base_ci -> schedule
+    tenant_items = {}   # base_ci -> schedule
+
+    for schedule in schedules:
+        ci = schedule.ci
+
+        if ci.endswith("-tenant"):
+            base_ci = ci[:-len("-tenant")]
+            tenant_items[base_ci] = schedule
+        elif ci.endswith("-cluster"):
+            base_ci = ci[:-len("-cluster")]
+            cluster_items[base_ci] = schedule
+        else:
+            # Base catalog item (no suffix) counts as cluster
+            cluster_items[ci] = schedule
+
+    # Fix timing conflicts
+    for base_ci, tenant_schedule in tenant_items.items():
+        if base_ci in cluster_items:
+            cluster_schedule = cluster_items[base_ci]
+
+            try:
+                tenant_date = datetime.strptime(tenant_schedule.provisioning_date, "%d/%m/%Y %H:%M")
+                cluster_date = datetime.strptime(cluster_schedule.provisioning_date, "%d/%m/%Y %H:%M")
+
+                # Fix if tenant is scheduled before cluster
+                if tenant_date < cluster_date:
+                    # Set cluster to be buffer_minutes before tenant
+                    new_cluster_date = tenant_date - timedelta(minutes=buffer_minutes)
+                    old_date_str = cluster_schedule.provisioning_date
+                    new_date_str = new_cluster_date.strftime("%d/%m/%Y %H:%M")
+
+                    cluster_schedule.provisioning_date = new_date_str
+
+                    fixed_items.append({
+                        "ci_name": cluster_schedule.ci_name,
+                        "cluster_ci": cluster_schedule.ci,
+                        "tenant_ci": tenant_schedule.ci,
+                        "old_date": old_date_str,
+                        "new_date": new_date_str,
+                        "namespace": cluster_schedule.namespace,
+                    })
+            except ValueError as e:
+                logger.warning(f"Error parsing dates for {base_ci} during auto-fix: {e}")
+
+    return {
+        "fixed_count": len(fixed_items),
+        "fixed_items": fixed_items,
+        "schedules": schedules,
     }

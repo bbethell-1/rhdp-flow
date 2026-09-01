@@ -960,7 +960,27 @@ export const UploadTab: React.FC<Props> = ({
 
           {/* Cluster-tenant validation errors */}
           {clusterTenantValidation?.errors?.length > 0 && (
-            <Alert variant="danger" isInline title={`${clusterTenantValidation.errors.length} cluster-tenant error(s)`} style={{ marginBottom: 12 }}>
+            <Alert variant="danger" isInline title={`${clusterTenantValidation.errors.length} cluster-tenant error(s)`} style={{ marginBottom: 12 }}
+              actionClose={
+                <Button
+                  variant="link"
+                  onClick={async () => {
+                    try {
+                      const result = await api.autoFixClusterTenantTiming();
+                      showToast(result.message, 'success');
+                      const updated = await api.getSchedules();
+                      setSchedules(updated);
+                      const ctRes = await api.validateClusterTenant();
+                      setClusterTenantValidation(ctRes);
+                    } catch (err) {
+                      showToast(`Auto-fix failed: ${err}`, 'danger');
+                    }
+                  }}
+                >
+                  Auto-fix timing
+                </Button>
+              }
+            >
               <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
                 {clusterTenantValidation.errors.map((e: any, i: number) => (
                   <li key={i}>
