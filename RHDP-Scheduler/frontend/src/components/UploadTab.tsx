@@ -148,6 +148,11 @@ export const UploadTab: React.FC<Props> = ({
   // Cluster-tenant validation
   const [clusterTenantValidation, setClusterTenantValidation] = useState<any>(null);
 
+  // Auto-timing settings
+  const [enableAutoTiming, setEnableAutoTiming] = useState(true);
+  const [timingWarnings, setTimingWarnings] = useState<string[]>([]);
+  const [showTimingWarnings, setShowTimingWarnings] = useState(false);
+
   // Pool capacity validation
   const [poolCapacityWarnings, setPoolCapacityWarnings] = useState<import('../types').PoolCapacityWarning[]>([]);
   const [poolsNotFound, setPoolsNotFound] = useState<import('../types').PoolNotFoundWarning[]>([]);
@@ -458,6 +463,22 @@ export const UploadTab: React.FC<Props> = ({
     }
   };
 
+  const handleAutoTiming = async () => {
+    try {
+      const result = await api.autoFixClusterTenantTiming();
+      if (result.fixed_count > 0 || result.skipped_count > 0) {
+        setTimingWarnings(result.warnings || []);
+        setShowTimingWarnings(true);
+        // Refresh schedules to show updated times
+        const updated = await api.getSchedules();
+        setSchedules(updated);
+        showToast(result.message, 'success');
+      }
+    } catch (err) {
+      console.warn('Auto-timing adjustment failed:', err);
+    }
+  };
+
   const handleUpload = async () => {
     if (!csvFile) { showToast('Please select a CSV file', 'danger'); return; }
     try {
@@ -499,6 +520,11 @@ export const UploadTab: React.FC<Props> = ({
         // Validate cluster-tenant relationships
         const ctRes = await api.validateClusterTenant();
         setClusterTenantValidation(ctRes);
+
+        // Auto-adjust cluster timing if enabled
+        if (enableAutoTiming) {
+          await handleAutoTiming();
+        }
       } catch (e) {
         console.warn('Post-upload cluster validation failed', e);
       }
@@ -1113,6 +1139,29 @@ export const UploadTab: React.FC<Props> = ({
             </Alert>
           )}
 
+          {/* Timing adjustment warnings */}
+          {showTimingWarnings && timingWarnings.length > 0 && (
+            <Alert
+              variant="success"
+              isInline
+              title="⚙️ Auto-Adjusted Cluster Timing"
+              style={{ marginBottom: 12 }}
+              actionClose={<Button variant="plain" onClick={() => setShowTimingWarnings(false)}><i className="fas fa-times" /></Button>}
+            >
+              <div style={{ fontSize: '0.875rem', marginBottom: 8 }}>
+                Clusters adjusted to deploy <strong>3 hours before</strong> their tenants:
+              </div>
+              <ul style={{ margin: '0 0 4px', paddingLeft: 20, fontSize: '0.85rem', maxHeight: '200px', overflowY: 'auto' }}>
+                {timingWarnings.map((w, i) => (
+                  <li key={i} style={{ marginBottom: 4 }}>{w}</li>
+                ))}
+              </ul>
+              <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)', marginTop: 8 }}>
+                💡 Toggle "Auto-Adjust Cluster Timing" in Deploy Settings to disable this feature.
+              </div>
+            </Alert>
+          )}
+
           {/* Multi-asset password warning */}
           {needsPasswordWarning && (
             <Alert variant="warning" isInline title="Multi-asset passwords not loaded" style={{ marginBottom: 12 }}>
@@ -1674,6 +1723,16 @@ export const UploadTab: React.FC<Props> = ({
                       label="Ignore Cluster Capacity Warnings"
                       isChecked={ignoreCapacityWarnings}
                       onChange={(_e, checked) => setIgnoreCapacityWarnings(checked)}
+                    />
+                  </Tooltip>
+                </SplitItem>
+                <SplitItem>
+                  <Tooltip content="Automatically adjust cluster deployment times to be 3 hours before tenant deployments. Skips clusters provided by TenantClusterPools.">
+                    <Switch
+                      id="auto-timing-switch"
+                      label="Auto-Adjust Cluster Timing"
+                      isChecked={enableAutoTiming}
+                      onChange={(_e, checked) => setEnableAutoTiming(checked)}
                     />
                   </Tooltip>
                 </SplitItem>

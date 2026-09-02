@@ -158,7 +158,14 @@ export const api = {
   validateClusterTenant: () =>
     request<any>('/schedules/validate-cluster-tenant', { method: 'POST', body: '{}' }),
   autoFixClusterTenantTiming: () =>
-    request<{ fixed_count: number; fixed_items: any[]; message: string }>('/schedules/auto-fix-cluster-tenant', { method: 'POST', body: '{}' }),
+    request<{
+      fixed_count: number;
+      skipped_count: number;
+      fixed_items: any[];
+      skipped_items: any[];
+      warnings: string[];
+      message: string
+    }>('/schedules/auto-fix-cluster-tenant-timing?buffer_hours=3.0', { method: 'POST' }),
   validatePoolCapacity: () =>
     request<PoolCapacityValidationResponse>('/schedules/validate-pool-capacity', { method: 'POST', body: '{}' }),
   diffSchedules: async (file: File): Promise<import('../types').DiffResponse> => {
