@@ -3,7 +3,9 @@ kind: PodDisruptionBudget
 metadata:
   name: rhdp-scheduler
 spec:
-  minAvailable: 1
+  # Single replica: allow the pod to be evicted during node drains/upgrades
+  # (minAvailable: 1 here would pin the lone pod and block voluntary disruptions).
+  maxUnavailable: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: rhdp-scheduler

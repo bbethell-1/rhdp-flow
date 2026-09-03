@@ -10,8 +10,40 @@ from rhdp_flow import (
     export_dry_run_manifest_yaml,
     get_catalog_item_num_users_limit,
     get_catalog_item_parameter_defaults,
+    verify_deployment,
 )
 from tests.conftest import make_config, make_schedule
+
+
+class TestVerifyDeploymentWorkshopPath:
+    """verify_deployment for workshop-UI deploys (guid is the Workshop name)."""
+
+    def _cfg(self):
+        cfg = make_config()
+        cfg.dry_run = False
+        cfg.base_domain = "babylon-catalog.apps.ocp-us-west-2.infra.open.redhat.com"
+        cfg.kubeconfig_path = None
+        return cfg
+
+    def test_neither_resourceclaim_nor_workshop_found_returns_no_url(self):
+        """When neither the ResourceClaim nor the Workshop exists, return url=None
+        so the caller can report an honest failure (not a fabricated URL)."""
+        rc_miss = MagicMock(returncode=1, stdout="", stderr="NotFound: resourceclaim")
+        ws_miss = MagicMock(returncode=1, stdout="", stderr="NotFound: workshop")
+        with patch("rhdp_flow.subprocess.run", side_effect=[rc_miss, ws_miss]):
+            healthy, url, _ = verify_deployment("ws-abc123", "user-ns", "my.ci.prod", self._cfg())
+        assert healthy is False
+        assert url is None
+
+    def test_workshop_present_returns_unverified_url(self):
+        """ResourceClaim missing but the Workshop exists -> present-but-unverified
+        (constructed URL, not healthy)."""
+        rc_miss = MagicMock(returncode=1, stdout="", stderr="NotFound: resourceclaim")
+        ws_hit = MagicMock(returncode=0, stdout=json.dumps({"metadata": {"name": "ws-abc123"}}), stderr="")
+        with patch("rhdp_flow.subprocess.run", side_effect=[rc_miss, ws_hit]):
+            healthy, url, _ = verify_deployment("ws-abc123", "user-ns", "my.ci.prod", self._cfg())
+        assert healthy is False
+        assert url and "babylon-catalog.apps.ocp-us-west-2.infra.open.redhat.com" in url
 
 
 class TestDeriveBaseDomain:
@@ -28,9 +60,12 @@ class TestDeriveBaseDomain:
         assert derive_base_domain(url) == "integration.demo.redhat.com"
 
     def test_ocp_infra_open_redhat_com(self):
-        """ocp-*.infra.open.redhat.com is converted to *.demo.redhat.com."""
-        url = "https://api.ocp-integration.infra.open.redhat.com:6443"
-        assert derive_base_domain(url) == "integration.demo.redhat.com"
+        """ocp-*.infra.open.redhat.com uses the cluster's babylon-catalog route."""
+        url = "https://api.ocp-us-west-2.infra.open.redhat.com:6443"
+        assert (
+            derive_base_domain(url)
+            == "babylon-catalog.apps.ocp-us-west-2.infra.open.redhat.com"
+        )
 
     def test_empty_returns_fallback(self):
         """Empty or None returns fallback."""
@@ -43,9 +78,12 @@ class TestDeriveBaseDomain:
         assert derive_base_domain(url) == "demo.redhat.com"
 
     def test_ocp4_infra_pattern(self):
-        """ocp4-*.infra.open.redhat.com is converted to *.demo.redhat.com."""
+        """ocp4-*.infra.open.redhat.com uses the cluster's babylon-catalog route."""
         url = "https://api.ocp4-staging.infra.open.redhat.com:6443"
-        assert derive_base_domain(url) == "staging.demo.redhat.com"
+        assert (
+            derive_base_domain(url)
+            == "babylon-catalog.apps.ocp4-staging.infra.open.redhat.com"
+        )
 
     def test_unknown_host_returns_host_without_api_prefix(self):
         """Unknown host without api. prefix is returned as-is (or fallback if empty)."""

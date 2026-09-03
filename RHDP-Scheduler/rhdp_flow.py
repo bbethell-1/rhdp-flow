@@ -225,6 +225,8 @@ class DeploymentResult:
     password: str = ""  # Workshop access password from schedule (for downstream CSV consumers)
     cluster_name: str = ""  # Tenant cluster name if deployed to existing cluster
     cluster_capacity: str = ""  # Cluster capacity status (e.g., "75% utilized")
+    users: int | None = None  # Seat count (num_users) from the schedule
+    instances: int | None = None  # WorkshopProvision instance count from the schedule
 
 # ============================================================================
 # CLUSTER/TENANT DETECTION HELPERS
@@ -582,12 +584,17 @@ class RHDPConfig:
 
 def derive_base_domain(cluster_url: str) -> str:
     """
-    Derive the RHDP web domain from an OpenShift API server URL.
+    Derive the RHDP web domain (host that serves the Babylon catalog UI) from an
+    OpenShift API server URL.
 
     Handles production, integration, dev and infra cluster patterns:
-      https://api.demo.redhat.com:6443           -> demo.redhat.com
+      https://api.demo.redhat.com:6443             -> demo.redhat.com
       https://api.integration.demo.redhat.com:6443 -> integration.demo.redhat.com
-      https://api.ocp-X.infra.open.redhat.com:6443 -> X.demo.redhat.com
+      https://api.ocp-X.infra.open.redhat.com:6443 -> babylon-catalog.apps.ocp-X.infra.open.redhat.com
+
+    Internal infra clusters (ocp-*/ocp4-*.infra.open.redhat.com) serve the
+    catalog UI at the cluster ingress route babylon-catalog.apps.<cluster>, NOT
+    a vanity <env>.demo.redhat.com domain (which does not route for them).
     """
     fallback = "integration.demo.redhat.com"
     if not cluster_url:
@@ -597,14 +604,9 @@ def derive_base_domain(cluster_url: str) -> str:
         host = host.split(":")[0]                  # strip port
         host = host.rstrip("/")
         host = host.removeprefix("api.")
-        # ocp-<env>.infra.open.redhat.com → <env>.demo.redhat.com
-        m = re.match(r'^ocp-(.+?)\.infra\.open\.redhat\.com$', host)
-        if m:
-            host = f"{m.group(1)}.demo.redhat.com"
-        # ocp4-<env>.infra.open.redhat.com (alternate naming)
-        m2 = re.match(r'^ocp4?-(.+?)\.infra\.open\.redhat\.com$', host)
-        if m2:
-            host = f"{m2.group(1)}.demo.redhat.com"
+        # ocp-<env>/ocp4-<env>.infra.open.redhat.com → catalog route on the cluster
+        if re.match(r'^ocp4?-.+?\.infra\.open\.redhat\.com$', host):
+            return f"babylon-catalog.apps.{host}"
         return host or fallback
     except Exception:
         return fallback
@@ -1158,8 +1160,9 @@ def write_deployment_results(
             'provisioning_date', 'auto_stop', 'auto_destroy',
             'timestamp', 'error_message', 'showroom_url', 'showroom_status',
             'password', 'cluster_name', 'cluster_capacity',
+            'users', 'instances',
         ]
-        
+
         with open(output_file, 'w', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
@@ -3355,11 +3358,27 @@ def verify_deployment(
         )
         
         if result.returncode != 0:
-            logger.warning(f"Could not get ResourceClaim {guid}: {result.stderr}")
-            # Still construct URL
+            # No ResourceClaim by that name. For workshop-UI deploys the guid is the
+            # Workshop name (its WorkshopProvision spawns differently-named
+            # ResourceClaims), so check for the Workshop before calling it a failure.
             suffix = guid.split('-')[-1] if '-' in guid else ""
             url = construct_workshop_url(ci, namespace, suffix, base_domain=bd)
-            return (False, url, "")
+            ws_cmd = [config.oc_command, "get", "workshop", guid, "-n", namespace, "-o", "json"]
+            ws_result = subprocess.run(ws_cmd, capture_output=True, text=True, timeout=30, env=env)
+            if ws_result.returncode == 0:
+                # Workshop exists; provisioning is managed asynchronously by the
+                # WorkshopProvision. Present but not health-verified here.
+                logger.info(f"Workshop {guid} present (provisioning managed by WorkshopProvision): {url}")
+                return (False, url, "")
+            # Neither ResourceClaim nor Workshop exists after creation — the deploy
+            # did not persist (e.g. immediately auto-destroyed because the
+            # auto-destroy/provisioning dates are in the past). Report failure with
+            # no fabricated URL rather than a misleading "deployed (unverified)".
+            logger.warning(
+                f"Neither ResourceClaim nor Workshop '{guid}' found in {namespace} after creation "
+                f"(rc: {result.stderr.strip()}; ws: {ws_result.stderr.strip()})"
+            )
+            return (False, None, "")
 
         rc_data = json.loads(result.stdout)
         status = rc_data.get('status', {})
@@ -4858,6 +4877,8 @@ def process_schedule(
                     timestamp=utc_timestamp_str(),
                     error_message=f"num_users validation failed: {schedule.users} requested, max is {limit_info['maximum']}",
                     password=schedule.password,
+                    users=schedule.users,
+                    instances=schedule.instances,
                 )
 
     try:
@@ -4880,6 +4901,8 @@ def process_schedule(
                     timestamp=utc_timestamp_str(),
                     error_message="Failed to create MultiWorkshop",
                     password=schedule.password,
+                    users=schedule.users,
+                    instances=schedule.instances,
                 )
             
             # Construct URL for multi-workshop
@@ -4899,6 +4922,8 @@ def process_schedule(
                 auto_destroy=schedule.auto_destroy,
                 timestamp=utc_timestamp_str(),
                 password=schedule.password,
+                users=schedule.users,
+                instances=schedule.instances,
             )
         
         # Check if this is a multi-region workshop
@@ -4920,6 +4945,8 @@ def process_schedule(
                     auto_destroy=schedule.auto_destroy,
                     timestamp=utc_timestamp_str(),
                     password=schedule.password,
+                    users=schedule.users,
+                    instances=schedule.instances,
                 )
             else:
                 return DeploymentResult(
@@ -4935,6 +4962,8 @@ def process_schedule(
                     timestamp=utc_timestamp_str(),
                     error_message="Failed to create multi-region workshop",
                     password=schedule.password,
+                    users=schedule.users,
+                    instances=schedule.instances,
                 )
 
         # Build payload
@@ -4979,6 +5008,8 @@ def process_schedule(
                 timestamp=utc_timestamp_str(),
                 error_message=error or "Unknown error",
                 password=schedule.password,
+                users=schedule.users,
+                instances=schedule.instances,
             )
         
         # Wait a bit for ResourceClaim to be created
@@ -4988,15 +5019,22 @@ def process_schedule(
         # Verify deployment
         is_healthy, url, _log_url = verify_deployment(guid, namespace or schedule.namespace, schedule.ci, config)
         
+        verify_error = ""
         if is_healthy:
             status = "verified"
         elif url:
             status = "deployed_unverified"
         else:
-            status = "deployed_no_url"
-            # Construct URL anyway
-            suffix = guid.split('-')[-1] if '-' in guid else ""
-            url = construct_workshop_url(schedule.ci, schedule.namespace, suffix, base_domain=getattr(config, 'base_domain', 'integration.demo.redhat.com'))
+            # verify_deployment found neither a ResourceClaim nor a Workshop after
+            # creation — the resource did not persist. Report an honest failure
+            # instead of a fabricated "deployed (unverified)" URL.
+            status = "failed"
+            url = ""
+            verify_error = (
+                "Resource not found on the cluster after creation. It was likely "
+                "auto-destroyed immediately — check that the provisioning and "
+                "auto-destroy dates are in the future."
+            )
 
         # Deploy Showroom lab environment if showroom_repo is set (M2: store result)
         sr_url = ""
@@ -5022,12 +5060,14 @@ def process_schedule(
             auto_stop=schedule.auto_stop,
             auto_destroy=schedule.auto_destroy,
             timestamp=utc_timestamp_str(),
-            error_message="",
+            error_message=verify_error,
             showroom_url=sr_url,
             showroom_status=sr_status,
             password=schedule.password,
             cluster_name=cluster_name,
             cluster_capacity=cluster_capacity_str,
+            users=schedule.users,
+            instances=schedule.instances,
         )
         
     except Exception as e:
@@ -5045,6 +5085,8 @@ def process_schedule(
             timestamp=utc_timestamp_str(),
             error_message=str(e),
             password=schedule.password,
+            users=schedule.users,
+            instances=schedule.instances,
         )
 
 # ============================================================================

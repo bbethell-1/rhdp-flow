@@ -91,6 +91,8 @@ export interface DeploymentResult {
   showroom_url: string;
   showroom_status: string;
   password: string;
+  users: number | null;
+  instances: number | null;
 }
 
 export interface JobResponse {

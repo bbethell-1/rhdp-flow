@@ -11,6 +11,11 @@ import pytest
 # Ensure rhdp_flow is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+# Tests run without a configured API key; opt out of the fail-closed gate so
+# the keyless test suite exercises endpoints as before. Individual tests that
+# assert auth behavior set RHDP_API_KEY (or clear this) explicitly.
+os.environ.setdefault("RHDP_ALLOW_UNAUTHENTICATED", "true")
+
 from rhdp_flow import (
     RHDPConfig,
     WorkshopSchedule,

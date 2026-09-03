@@ -29,6 +29,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: rhdp-scheduler-config
+            - secretRef:
+                name: rhdp-flow-api
           env:
             - name: KUBECONFIG
               value: ""

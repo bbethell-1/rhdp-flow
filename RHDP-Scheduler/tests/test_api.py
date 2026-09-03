@@ -650,6 +650,55 @@ def test_showroom_preflight_with_filter_no_match(uploaded_client):
     assert resp.status_code == 400
 
 
+def test_deploy_results_expose_users_and_instances(client):
+    """The results endpoint round-trips the seat/instance counts to the Deployments tab."""
+    from rhdp_flow import DeploymentResult
+    routes._deployment_results = [
+        DeploymentResult(
+            ci_name="Seats Lab", ci="seats.lab.prod", namespace="user-seats",
+            guid="seats-1", url="https://x", status="verified",
+            provisioning_date="", auto_stop="", auto_destroy="",
+            timestamp="", password="", users=40, instances=30,
+        )
+    ]
+    try:
+        resp = client.get("/api/deploy/results")
+        assert resp.status_code == 200
+        row = resp.json()[0]
+        assert row["users"] == 40
+        assert row["instances"] == 30
+    finally:
+        routes._deployment_results = []
+
+
+def test_delete_deploy_results_removes_matching_rows(client):
+    """POST /deploy/results/delete removes rows by (ci, namespace); leaves others."""
+    from rhdp_flow import DeploymentResult
+    routes._deployment_results = [
+        DeploymentResult(
+            ci_name="A", ci="a.prod", namespace="ns-a", guid="g1", url="", status="failed",
+            provisioning_date="", auto_stop="", auto_destroy="", timestamp="",
+        ),
+        DeploymentResult(
+            ci_name="B", ci="b.prod", namespace="ns-b", guid="g2", url="", status="verified",
+            provisioning_date="", auto_stop="", auto_destroy="", timestamp="",
+        ),
+    ]
+    try:
+        resp = client.post(
+            "/api/deploy/results/delete",
+            json={"items": [{"ci": "a.prod", "namespace": "ns-a"}]},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["deleted"] == 1
+        assert body["remaining"] == 1
+        remaining = client.get("/api/deploy/results").json()
+        assert [r["ci"] for r in remaining] == ["b.prod"]
+    finally:
+        routes._deployment_results = []
+
+
 # ---------------------------------------------------------------------------
 # QA
 # ---------------------------------------------------------------------------

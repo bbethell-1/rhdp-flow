@@ -8,14 +8,14 @@ resources:
   - pdb.yaml
 
 patches:
-  # 2 replicas, higher resources, build from main branch
+  # 1 replica (job state is in-memory, not shared across pods), higher resources, build from main branch
   - target:
       kind: Deployment
       name: rhdp-scheduler
     patch: |
       - op: replace
         path: /spec/replicas
-        value: 2
+        value: 1
       - op: replace
         path: /spec/template/spec/containers/0/resources/requests/memory
         value: 256Mi

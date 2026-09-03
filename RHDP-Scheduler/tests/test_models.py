@@ -30,3 +30,18 @@ def test_deployment_result_fields():
     assert r.status == "verified"
     assert r.error_message == ""
     assert r.password == ""
+    # New seat/instance fields default to None when not supplied.
+    assert r.users is None
+    assert r.instances is None
+
+
+def test_deployment_result_users_and_instances():
+    r = DeploymentResult(
+        ci_name="Test", ci="ci", namespace="ns",
+        guid="g", url="u", status="verified",
+        provisioning_date="", auto_stop="", auto_destroy="",
+        timestamp="t", error_message="",
+        users=40, instances=30,
+    )
+    assert r.users == 40
+    assert r.instances == 30

@@ -88,6 +88,8 @@ class DeploymentResultResponse(BaseModel):
     password: str = ""
     cluster_name: str = ""
     cluster_capacity: str = ""
+    users: int | None = None
+    instances: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +177,21 @@ class RetryRequest(BaseModel):
     enable_resource_pools: bool = Field(False, description="Enable Poolboy resource pools")
     white_glove: bool = Field(True, description="White-glove mode")
     redirect: bool = Field(True, description="Enable workshop UI redirect")
+
+
+class ResultRef(BaseModel):
+    """Identifies a single deployment result row by (ci, namespace) — the key the
+    dashboard stores results under (unique per row)."""
+
+    ci: str = Field(..., description="Catalog Item identifier (the CI column)")
+    namespace: str = Field(..., description="OpenShift namespace of the deployment")
+
+
+class DeleteResultsRequest(BaseModel):
+    """Body for POST /api/deploy/results/delete — remove result rows from the
+    dashboard view. Does NOT undeploy anything on the cluster."""
+
+    items: list[ResultRef] = Field(..., min_length=1, description="Result rows to delete")
 
 
 class QAType(str, Enum):

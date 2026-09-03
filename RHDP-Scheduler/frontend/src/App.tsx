@@ -29,7 +29,7 @@ import type {
   QAResult,
 } from './types';
 
-import { api } from './services/api';
+import { api, clearApiKey } from './services/api';
 import { TOAST_DURATION_MS } from './constants';
 import { useTheme } from './hooks/useTheme';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -179,6 +179,11 @@ const App: React.FC = () => {
                 <Tooltip content="Toggle between light and dark theme">
                   <button className="theme-toggle" onClick={toggleTheme} aria-label="Toggle theme" aria-pressed={theme === 'dark'}>
                     {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+                  </button>
+                </Tooltip>
+                <Tooltip content="Change or clear the stored API key">
+                  <button className="theme-toggle" onClick={() => { clearApiKey(); window.location.reload(); }} aria-label="Change API key">
+                    Change key
                   </button>
                 </Tooltip>
               </div>

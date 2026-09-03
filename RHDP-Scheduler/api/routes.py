@@ -16,7 +16,7 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 
@@ -36,6 +36,7 @@ from api.models import (
     ClusterTenantValidationError,
     ClusterTenantValidationResponse,
     ClusterTenantValidationWarning,
+    DeleteResultsRequest,
     DeploymentResultResponse,
     DeployRequest,
     DestroyCheckRequest,
@@ -1319,6 +1320,85 @@ async def diff_schedules(file: UploadFile = File(...), _key=Depends(verify_api_k
 # Deploy
 # ---------------------------------------------------------------------------
 
+async def _run_deploy_over(
+    schedules: list[WorkshopSchedule],
+    config: RHDPConfig,
+    job_id: str,
+    asset_passwords: dict[str, str] | None,
+) -> list[DeploymentResult]:
+    """Run the deploy loop over an explicit, LOCAL ``schedules`` list.
+
+    Operates purely on its arguments — it MUST NOT read or write the module
+    globals ``_schedules`` / ``_deployment_results``. Honors pause/cancel via
+    ``job_id`` and pushes progress through ``jobs.update_job``. Returns the list
+    of ``DeploymentResult`` for the caller to persist however it likes.
+    """
+    grouped_multi: dict[str, list[WorkshopSchedule]] = {}
+    regular_schedules: list[WorkshopSchedule] = []
+    for s in schedules:
+        if s.multi_workshop_name and s.is_multi_asset:
+            grouped_multi.setdefault(s.multi_workshop_name, []).append(s)
+        else:
+            regular_schedules.append(s)
+
+    results: list[DeploymentResult] = []
+    total = len(grouped_multi) + len(regular_schedules)
+    done = 0
+
+    # Grouped multi-asset
+    for group_name, group_scheds in grouped_multi.items():
+        await jobs.wait_if_paused(job_id)
+        if jobs.is_cancel_requested(job_id):
+            break
+        # Run sync OpenShift work off the event loop so WebSocket/polling can deliver progress.
+        mw_name = await asyncio.to_thread(
+            create_multi_workshop_from_group, group_scheds, config
+        )
+        first = group_scheds[0]
+        if mw_name:
+            url = f"https://{config.base_domain}/multi-workshop/{first.namespace}/{mw_name}"
+            results.append(DeploymentResult(
+                ci_name=group_name, ci=first.ci, namespace=first.namespace,
+                guid=mw_name, url=url, status="deployed_unverified",
+                provisioning_date=first.provisioning_date,
+                auto_stop=first.auto_stop, auto_destroy=first.auto_destroy,
+                timestamp=utc_timestamp_str(),
+                password=first.password,
+            ))
+        else:
+            results.append(DeploymentResult(
+                ci_name=group_name, ci=first.ci, namespace=first.namespace,
+                guid="failed", url="", status="failed",
+                provisioning_date=first.provisioning_date,
+                auto_stop=first.auto_stop, auto_destroy=first.auto_destroy,
+                timestamp=utc_timestamp_str(),
+                error_message="Failed to create grouped MultiWorkshop",
+                password=first.password,
+            ))
+        done += 1
+        pct = int(done / total * 100) if total else 100
+        jobs.update_job(job_id, progress=pct, message=f"Processed group: {group_name}")
+
+    for s in regular_schedules:
+        await jobs.wait_if_paused(job_id)
+        if jobs.is_cancel_requested(job_id):
+            break
+        result = await asyncio.to_thread(
+            process_schedule, s, config, asset_passwords
+        )
+        results.append(result)
+        done += 1
+        pct = int(done / total * 100) if total else 100
+        jobs.update_job(
+            job_id, progress=pct,
+            message=f"Deployed {result.ci_name}: {result.status}",
+        )
+        if not config.dry_run and len(regular_schedules) > 1:
+            await asyncio.sleep(1)
+
+    return results
+
+
 @router.post("/deploy", response_model=JobResponse)
 @_rate_limit("10/minute")
 async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=Depends(verify_api_key)):  # type: ignore
@@ -1372,69 +1452,21 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                 progress=1,
             )
 
-            # Replicate main() deploy loop logic
-            grouped_multi = {}
-            regular_schedules = []
-            for s in schedules:
-                if s.multi_workshop_name and s.is_multi_asset:
-                    grouped_multi.setdefault(s.multi_workshop_name, []).append(s)
-                else:
-                    regular_schedules.append(s)
-
-            results = []
-            total = len(grouped_multi) + len(regular_schedules)
-            done = 0
-
-            # Grouped multi-asset
-            for group_name, group_scheds in grouped_multi.items():
-                await jobs.wait_if_paused(job.job_id)
-                if jobs.is_cancel_requested(job.job_id):
-                    break
-                # Run sync OpenShift work off the event loop so WebSocket/polling can deliver progress.
-                mw_name = await asyncio.to_thread(
-                    create_multi_workshop_from_group, group_scheds, config
-                )
-                first = group_scheds[0]
-                if mw_name:
-                    url = f"https://{config.base_domain}/multi-workshop/{first.namespace}/{mw_name}"
-                    results.append(DeploymentResult(
-                        ci_name=group_name, ci=first.ci, namespace=first.namespace,
-                        guid=mw_name, url=url, status="deployed_unverified",
-                        provisioning_date=first.provisioning_date,
-                        auto_stop=first.auto_stop, auto_destroy=first.auto_destroy,
-                        timestamp=utc_timestamp_str(),
-                        password=first.password,
-                    ))
-                else:
-                    results.append(DeploymentResult(
-                        ci_name=group_name, ci=first.ci, namespace=first.namespace,
-                        guid="failed", url="", status="failed",
-                        provisioning_date=first.provisioning_date,
-                        auto_stop=first.auto_stop, auto_destroy=first.auto_destroy,
-                        timestamp=utc_timestamp_str(),
-                        error_message="Failed to create grouped MultiWorkshop",
-                        password=first.password,
-                    ))
-                done += 1
-                pct = int(done / total * 100) if total else 100
-                jobs.update_job(job.job_id, progress=pct, message=f"Processed group: {group_name}")
-
-            for s in regular_schedules:
-                await jobs.wait_if_paused(job.job_id)
-                if jobs.is_cancel_requested(job.job_id):
-                    break
-                result = await asyncio.to_thread(
-                    process_schedule, s, config, _asset_passwords
-                )
-                results.append(result)
-                done += 1
-                pct = int(done / total * 100) if total else 100
-                jobs.update_job(
-                    job.job_id, progress=pct,
-                    message=f"Deployed {result.ci_name}: {result.status}",
-                )
-                if not config.dry_run and len(regular_schedules) > 1:
-                    await asyncio.sleep(1)
+            # Replicate main() deploy loop logic (shared with /deploy/session)
+            # Planned unit count (grouped multi-asset workshops + regular schedules)
+            # used only for the "cancelled after X of Y" message below.
+            _multi_groups = {
+                s.multi_workshop_name
+                for s in schedules
+                if s.multi_workshop_name and s.is_multi_asset
+            }
+            total = len(_multi_groups) + sum(
+                1 for s in schedules
+                if not (s.multi_workshop_name and s.is_multi_asset)
+            )
+            results = await _run_deploy_over(
+                schedules, config, job.job_id, _asset_passwords
+            )
 
             global _deployment_results
             with _state_lock:
@@ -1471,6 +1503,115 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
             )
         finally:
             stop_log_capture(handler)
+
+    asyncio.create_task(_run())
+    return JobResponse(job_id=job.job_id, status=JobStatus(job.status.value), progress=job.progress)
+
+
+@router.post("/deploy/session", response_model=JobResponse)
+async def deploy_session(
+    file: UploadFile = File(...),
+    dry_run: bool = Form(False),
+    resource_lock: bool = Form(True),
+    enable_resource_pools: bool = Form(False),
+    white_glove: bool = Form(True),
+    redirect: bool = Form(True),
+    _key: None = Depends(verify_api_key),
+):
+    """Deploy an explicitly-uploaded CSV, deploying the LOCAL parsed list.
+
+    Correctness is isolated: the deploy runs off the CSV parsed in THIS request,
+    never off the shared ``_schedules`` global — so concurrent callers cannot
+    make it deploy the wrong set. For visibility, it also mirrors those
+    schedules and the resulting deployment records into Flow's global state
+    (``_schedules`` / ``_deployment_results``) so the deploy shows up in the
+    Flow dashboard (Upload + Deployments tabs). That mirror is display-only and
+    best-effort (a concurrent human upload may overwrite the displayed set).
+    Per-workshop results are also on the job (``GET /api/deploy/status/{id}``).
+    """
+    raw = await file.read()
+    if len(raw) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(413, "File exceeds 10 MB size limit")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(400, "File must be UTF-8 encoded CSV")
+
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".csv", delete=False, encoding="utf-8"
+    )
+    tmp.write(text)
+    tmp.close()
+    try:
+        schedules = read_csv_input(tmp.name)  # LOCAL list — deploy runs off this
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    finally:
+        os.unlink(tmp.name)
+
+    if not schedules:
+        raise HTTPException(400, "No schedules parsed from CSV")
+
+    # Mirror parsed schedules into Flow's global state for dashboard visibility
+    # (Upload tab). Display-only: the deploy below uses the LOCAL `schedules`.
+    global _schedules
+    with _state_lock:
+        _schedules = schedules
+
+    config = _get_config(
+        dry_run=dry_run,
+        resource_lock=resource_lock,
+        enable_resource_pools=enable_resource_pools,
+        white_glove=white_glove,
+        redirect=redirect,
+    )
+    job = jobs.create_job()
+
+    async def _run():
+        try:
+            jobs.update_job(
+                job.job_id,
+                status=jobs.Status.running,
+                message="Starting deployment",
+                progress=1,
+            )
+            results = await _run_deploy_over(
+                schedules, config, job.job_id, asset_passwords={}
+            )
+            # Mirror results into Flow's global state + persist, so this deploy
+            # shows in the Flow dashboard (Deployments tab). ACCUMULATE rather
+            # than replace: merge new results into the existing set (latest wins
+            # per ci+namespace) so the dashboard keeps history across deploys
+            # instead of showing only the most recent one.
+            global _deployment_results
+            with _state_lock:
+                merged = {(r.ci, r.namespace): r for r in _deployment_results}
+                for r in results:
+                    merged[(r.ci, r.namespace)] = r
+                _deployment_results = list(merged.values())
+                _save_results(_deployment_results)
+            if jobs.is_cancel_requested(job.job_id):
+                jobs.update_job(
+                    job.job_id,
+                    status=jobs.Status.cancelled,
+                    message=f"Cancelled after {len(results)} deployment(s)",
+                    results=[asdict(r) for r in results],
+                )
+            else:
+                jobs.update_job(
+                    job.job_id,
+                    status=jobs.Status.completed,
+                    progress=100,
+                    message=f"Completed: {len(results)} deployment(s)",
+                    results=[asdict(r) for r in results],
+                )
+        except Exception as exc:
+            jobs.update_job(
+                job.job_id,
+                status=jobs.Status.failed,
+                error=str(exc),
+                message=f"Deployment failed: {exc}",
+            )
 
     asyncio.create_task(_run())
     return JobResponse(job_id=job.job_id, status=JobStatus(job.status.value), progress=job.progress)
@@ -1739,6 +1880,24 @@ def deploy_resume(job_id: str, _key=Depends(verify_api_key)):
 @router.get("/deploy/results", response_model=list[DeploymentResultResponse])
 def get_deploy_results():
     return [_result_to_response(r) for r in _deployment_results]
+
+
+@router.post("/deploy/results/delete")
+def delete_deploy_results(body: DeleteResultsRequest, _key=Depends(verify_api_key)):
+    """Delete deployment result rows from the dashboard view.
+
+    Removes matching rows from the in-memory results and the persisted snapshot.
+    This is a view-only cleanup — it does NOT undeploy or destroy anything on the
+    cluster. Rows are matched by (ci, namespace), the key results are stored under.
+    """
+    global _deployment_results
+    refs = {(i.ci, i.namespace) for i in body.items}
+    with _state_lock:
+        before = len(_deployment_results)
+        _deployment_results = [r for r in _deployment_results if (r.ci, r.namespace) not in refs]
+        deleted = before - len(_deployment_results)
+        _save_results(_deployment_results)
+    return {"deleted": deleted, "remaining": len(_deployment_results)}
 
 
 @router.post("/deploy/preview")
@@ -2285,6 +2444,7 @@ def export_results():
         "provisioning_date", "auto_stop", "auto_destroy",
         "timestamp", "error_message", "showroom_url", "showroom_status",
         "password", "cluster_name", "cluster_capacity",
+        "users", "instances",
         "log_url",
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames)

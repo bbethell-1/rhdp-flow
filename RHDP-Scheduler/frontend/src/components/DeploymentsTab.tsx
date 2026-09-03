@@ -27,9 +27,10 @@ import ExclamationTriangleIcon from '@patternfly/react-icons/dist/esm/icons/excl
 import ExclamationCircleIcon from '@patternfly/react-icons/dist/esm/icons/exclamation-circle-icon';
 import CopyIcon from '@patternfly/react-icons/dist/esm/icons/copy-icon';
 import RedoIcon from '@patternfly/react-icons/dist/esm/icons/redo-icon';
+import TrashIcon from '@patternfly/react-icons/dist/esm/icons/trash-icon';
 import ExternalLinkAltIcon from '@patternfly/react-icons/dist/esm/icons/external-link-alt-icon';
 
-import { api } from '../services/api';
+import { api, clearApiCache } from '../services/api';
 import { generateServiceLinks } from '../utils/serviceLinks';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { AUTO_REFRESH_INTERVAL_MS, DEFAULT_PER_PAGE, RETRY_DELAY_MS } from '../constants';
@@ -153,6 +154,7 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [retrying, setRetrying] = useState(false);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   // Persist search and filter to sessionStorage
@@ -167,6 +169,12 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
   }, [setResults]);
 
   useAutoRefresh(refreshResults, AUTO_REFRESH_INTERVAL_MS, autoRefresh);
+
+  // Load persisted deploy results on mount so a browser refresh shows them
+  // without requiring a manual Refresh click (results live server-side).
+  useEffect(() => {
+    refreshResults();
+  }, [refreshResults]);
 
   // Summary counts
   const statusCounts = useMemo(() => {
@@ -254,6 +262,26 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
 
   const handleRetrySelected = () => {
     handleRetry(Array.from(selectedRows));
+  };
+
+  const handleDelete = async (r: DeploymentResult) => {
+    // View-only cleanup — removes the row from the dashboard, does not undeploy.
+    if (!window.confirm(`Remove "${r.ci_name}" (${r.namespace}) from the results list?\n\nThis only clears the dashboard row — it does NOT destroy the deployment.`)) return;
+    const key = `${r.ci} ${r.namespace}`;
+    setDeletingKey(key);
+    try {
+      await api.deleteResults([{ ci: r.ci, namespace: r.namespace }]);
+      // Remove locally rather than refetch — deployResults is cached (5s TTL),
+      // so an immediate refetch could return the pre-delete list. setResults takes
+      // an array (not a functional updater), so filter the current results prop.
+      setResults(results.filter(x => !(x.ci === r.ci && x.namespace === r.namespace)));
+      clearApiCache();
+      showToast(`Removed ${r.ci_name} from results`, 'success');
+    } catch (e) {
+      showToast(`Delete failed: ${e}`, 'danger');
+    } finally {
+      setDeletingKey(null);
+    }
   };
 
   const toggleRow = (ciName: string) => {
@@ -482,6 +510,8 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
                 <Th sort={getSortParams('ci_name')} info={{ tooltip: 'Catalog Item display name' }}>CI Name</Th>
                 <Th sort={getSortParams('ci')} info={{ tooltip: 'Catalog Item identifier (vendor.item.env)' }}>CI</Th>
                 <Th sort={getSortParams('namespace')} info={{ tooltip: 'OpenShift namespace where resources are deployed' }}>Namespace</Th>
+                <Th info={{ tooltip: 'Seat count (num_users) requested for this deployment' }}>Users</Th>
+                <Th info={{ tooltip: 'WorkshopProvision instance count requested for this deployment' }}>Instances</Th>
                 <Th info={{ tooltip: 'Globally Unique Identifier for this deployment instance' }}>GUID</Th>
                 <Th sort={getSortParams('status')}>Status</Th>
                 <Th info={{ tooltip: 'Quick access links to workshop, showroom, OpenShift console, and ResourceClaim' }}>Services</Th>
@@ -507,6 +537,8 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
                   <Td dataLabel="CI Name">{r.ci_name}</Td>
                   <Td dataLabel="CI">{r.ci}</Td>
                   <Td dataLabel="Namespace">{r.namespace}</Td>
+                  <Td dataLabel="Users">{r.users ?? '-'}</Td>
+                  <Td dataLabel="Instances">{r.instances ?? '-'}</Td>
                   <Td dataLabel="GUID">{r.guid}</Td>
                   <Td dataLabel="Status">
                     <StatusBadge status={r.status} />
@@ -554,6 +586,17 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
                         </Button>
                       </Tooltip>
                     )}
+                    <Tooltip content="Remove this row from the results (does not undeploy)">
+                      <Button
+                        variant="plain"
+                        size="sm"
+                        onClick={() => handleDelete(r)}
+                        isDisabled={deletingKey === `${r.ci} ${r.namespace}`}
+                        aria-label="Delete result"
+                      >
+                        <TrashIcon />
+                      </Button>
+                    </Tooltip>
                   </Td>
                 </Tr>
               ))}

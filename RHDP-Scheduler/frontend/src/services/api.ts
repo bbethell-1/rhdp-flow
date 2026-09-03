@@ -29,7 +29,7 @@ import type {
 
 const API = '/api';
 
-function getApiKey(): string | null {
+export function getApiKey(): string | null {
   // Use sessionStorage — cleared on tab close, not vulnerable to persistent XSS
   return sessionStorage.getItem('rhdp-api-key');
 }
@@ -226,6 +226,11 @@ export const api = {
     request<DeployPreviewResponse>('/deploy/preview', { method: 'POST', body: JSON.stringify(body) }),
   retry: (body: RetryRequest) =>
     request<JobResponse>('/deploy/retry', { method: 'POST', body: JSON.stringify(body) }),
+  deleteResults: (items: Array<{ ci: string; namespace: string }>) =>
+    request<{ deleted: number; remaining: number }>('/deploy/results/delete', {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    }),
 
   // Operations
   lock: (body: LockRequest) =>

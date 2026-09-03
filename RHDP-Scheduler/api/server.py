@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 import sys
@@ -68,9 +69,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Auth startup check
+# Auth startup check — fail closed by default (see ApiKeyGateMiddleware below)
 if not os.environ.get("RHDP_API_KEY"):
-    logger.warning("RHDP_API_KEY not set -- all mutation endpoints are unprotected")
+    if os.environ.get("RHDP_ALLOW_UNAUTHENTICATED", "").strip().lower() in ("1", "true", "yes"):
+        logger.warning(
+            "RHDP_API_KEY not set and RHDP_ALLOW_UNAUTHENTICATED=true -- API is UNAUTHENTICATED (local dev only)"
+        )
+    else:
+        logger.error(
+            "RHDP_API_KEY not set -- API will refuse all requests with 503. "
+            "Set RHDP_API_KEY (or RHDP_ALLOW_UNAUTHENTICATED=true for local dev)."
+        )
 
 # ---------------------------------------------------------------------------
 # Rate limiting via SlowAPI (shared limiter from api.limiter)
@@ -129,6 +138,49 @@ class CSPMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(CSPMiddleware)
+
+
+# ---------------------------------------------------------------------------
+# API-key gate — require X-API-Key on ALL /api endpoints (reads included),
+# except the health probe (k8s liveness/readiness call it unauthenticated)
+# and CORS preflight. Fail closed: if RHDP_API_KEY is not set, the API
+# refuses to serve (503) rather than running open — UNLESS
+# RHDP_ALLOW_UNAUTHENTICATED=true is set for local development. Note: the
+# static dashboard shell at "/" and /openapi.json are not gated (a browser
+# cannot attach X-API-Key to a page load); the SPA gates itself and every
+# /api call it makes is gated here.
+# ---------------------------------------------------------------------------
+def _unauth_allowed() -> bool:
+    return os.environ.get("RHDP_ALLOW_UNAUTHENTICATED", "").strip().lower() in ("1", "true", "yes")
+
+
+class ApiKeyGateMiddleware(BaseHTTPMiddleware):
+    _EXEMPT = {"/api/health", "/api/v1/health"}
+
+    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+        path = request.url.path
+        if request.method != "OPTIONS" and path.startswith("/api") and path not in self._EXEMPT:
+            required = os.environ.get("RHDP_API_KEY") or ""
+            if not required:
+                # Fail closed unless explicitly opted out for local dev.
+                if not _unauth_allowed():
+                    return JSONResponse(
+                        status_code=503,
+                        content={
+                            "detail": "Server misconfigured: RHDP_API_KEY is not set. "
+                            "Set it, or set RHDP_ALLOW_UNAUTHENTICATED=true for local development."
+                        },
+                    )
+            else:
+                provided = request.headers.get("X-API-Key", "")
+                if not provided or not hmac.compare_digest(provided, required):
+                    return JSONResponse(
+                        status_code=403, content={"detail": "Invalid or missing API key"}
+                    )
+        return await call_next(request)
+
+
+app.add_middleware(ApiKeyGateMiddleware)
 
 # ---------------------------------------------------------------------------
 # API routes — available at /api (primary) and /api/v1 (versioned alias)

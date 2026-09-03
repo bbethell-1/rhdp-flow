@@ -73,6 +73,8 @@ export const mockResult: DeploymentResult = {
   showroom_url: '',
   showroom_status: '',
   password: 'secret',
+  users: 20,
+  instances: 1,
 };
 
 export const mockFailedResult: DeploymentResult = {
