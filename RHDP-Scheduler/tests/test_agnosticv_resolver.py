@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 import time
 from unittest.mock import patch, MagicMock
 
 from rhdp_flow import RHDPConfig
-from agnosticv_resolver import _ensure_repo_cloned
+from agnosticv_resolver import _ensure_repo_cloned, _git_env
 
 
 class TestRHDPConfigAgnosticVFields:
@@ -84,3 +85,16 @@ class TestEnsureRepoCloned:
             result = _ensure_repo_cloned(config)
 
         assert result is False
+
+
+class TestGitEnv:
+    def test_shell_quotes_ssh_key_path_with_metacharacters(self):
+        config = RHDPConfig()
+        config.agnosticv_ssh_key_path = "/tmp/some key; rm -rf /"
+
+        env = _git_env(config)
+
+        assert "GIT_SSH_COMMAND" in env
+        quoted_path = shlex.quote("/tmp/some key; rm -rf /")
+        assert quoted_path in env["GIT_SSH_COMMAND"]
+        assert env["GIT_SSH_COMMAND"] == f"ssh -i {quoted_path} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"

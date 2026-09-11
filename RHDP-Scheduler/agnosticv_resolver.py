@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shlex
 import subprocess
 import time
 from typing import Optional, TYPE_CHECKING
@@ -31,7 +32,7 @@ def _git_env(config: "RHDPConfig") -> dict:
     env = os.environ.copy()
     if config.agnosticv_ssh_key_path:
         env["GIT_SSH_COMMAND"] = (
-            f"ssh -i {config.agnosticv_ssh_key_path} "
+            f"ssh -i {shlex.quote(config.agnosticv_ssh_key_path)} "
             "-o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
         )
     return env
