@@ -124,12 +124,11 @@ def resolve_tenant_cluster_item(ci: str, config: "RHDPConfig") -> Optional[str]:
     if agnosticv_path is None:
         return None
 
-    account, item, stage = agnosticv_path.split("/")
-
     if not _ensure_repo_cloned(config):
         return None
 
     try:
+        stage = agnosticv_path.split("/")[-1]
         result = subprocess.run(
             [config.agnosticv_cli_path, "--merge", agnosticv_path],
             cwd=config.agnosticv_cache_dir,
