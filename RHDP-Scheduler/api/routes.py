@@ -61,6 +61,8 @@ from rhdp_flow import (
     find_similar_catalog_items,
     list_catalog_items,
     users_column_ignored_by_catalog_advisory,
+    analyze_cluster_tenant_relationships,
+    validate_cluster_before_tenant,
 )
 
 from api.models import (
@@ -1050,15 +1052,18 @@ def validate_cluster_tenant_scheduling(_key=Depends(verify_api_key)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
 
-    from cluster_tenant_validation import validate_cluster_before_tenant
+    config = _get_config()
+    analyze_cluster_tenant_relationships(_schedules, config=config)
+    validation = validate_cluster_before_tenant(_schedules, config=config)
 
-    validation = validate_cluster_before_tenant(_schedules)
+    tenants_checked = sum(1 for s in _schedules if s.is_tenant)
+    clusters_found = sum(1 for r in validation["relationships"] if r.get("status") in ("valid", "timing_violation", "found_on_cluster"))
 
     return ClusterTenantValidationResponse(
-        errors=[ClusterTenantValidationError(**e) for e in validation["errors"]],
-        warnings=[ClusterTenantValidationWarning(**w) for w in validation["warnings"]],
-        tenants_checked=validation["tenants_checked"],
-        clusters_found=validation["clusters_found"],
+        errors=[ClusterTenantValidationError(**e) for e in validation["error_details"]],
+        warnings=[ClusterTenantValidationWarning(**w) for w in validation["warning_details"]],
+        tenants_checked=tenants_checked,
+        clusters_found=clusters_found,
     )
 
 
