@@ -184,3 +184,27 @@ class TestValidateClusterTenantEndpoint:
         assert "ocp4-cluster.prod" in body["warnings"][0]["message"]
         assert body["tenants_checked"] == 1
         assert body["clusters_found"] == 0
+
+
+class TestScheduleResponseIncludesDetectionFields:
+    def test_schedules_endpoint_includes_cluster_tenant_fields(self, monkeypatch):
+        from rhdp_flow import WorkshopSchedule
+
+        tenant = WorkshopSchedule(
+            ci_name="Tenant One", ci="ocp4-tenant.prod", namespace="ns",
+            enable_workshop_interface=True, password="x", activity="Admin",
+            purpose="QA", workshop_name="w", provisioning_date="10/09/2026 10:00",
+            auto_stop="11/09/2026 10:00", auto_destroy="12/09/2026 10:00",
+            is_tenant=True, detected_cluster_ci="ocp4-cluster.prod",
+            detection_method="naming", cluster_ci_source="naming",
+        )
+        monkeypatch.setattr(routes_module, "_schedules", [tenant])
+
+        response = client.get("/api/schedules", headers=_auth_headers())
+
+        assert response.status_code == 200
+        body = response.json()[0]
+        assert body["is_tenant"] is True
+        assert body["detected_cluster_ci"] == "ocp4-cluster.prod"
+        assert body["detection_method"] == "naming"
+        assert body["cluster_ci_source"] == "naming"

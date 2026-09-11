@@ -414,6 +414,11 @@ def _schedule_to_response(s: WorkshopSchedule) -> WorkshopScheduleResponse:
         showroom_zerotouch=s.showroom_zerotouch,
         item_type=s.item_type,
         cluster_ci_override=s.cluster_ci_override,
+        is_cluster=s.is_cluster,
+        is_tenant=s.is_tenant,
+        detected_cluster_ci=s.detected_cluster_ci,
+        detection_method=s.detection_method,
+        cluster_ci_source=s.cluster_ci_source,
     )
 
 

@@ -45,6 +45,11 @@ class WorkshopScheduleResponse(BaseModel):
     showroom_zerotouch: bool = False
     item_type: Optional[str] = None
     cluster_ci_override: Optional[str] = None
+    is_cluster: bool = False
+    is_tenant: bool = False
+    detected_cluster_ci: Optional[str] = None
+    detection_method: str = "none"
+    cluster_ci_source: Optional[str] = None
 
 
 class CatalogItemParameter(BaseModel):
