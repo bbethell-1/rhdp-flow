@@ -6,3 +6,6 @@ data:
   LOG_FORMAT: "json"
   LOG_LEVEL: "INFO"
   RHDP_LOG_DIR: "/app/logs"
+  AGNOSTICV_REPO_URL: "git@github.com:rhpds/agnosticv.git"
+  AGNOSTICV_CACHE_DIR: "/tmp/agnosticv-cache"
+  AGNOSTICV_REFRESH_TTL_SECONDS: "900"

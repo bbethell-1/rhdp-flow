@@ -388,6 +388,12 @@ def _get_config(
     config.white_glove = white_glove
     config.redirect = redirect
     config.base_domain = _detect_and_cache_base_domain()
+    config.agnosticv_repo_url = os.environ.get("AGNOSTICV_REPO_URL", config.agnosticv_repo_url)
+    config.agnosticv_cache_dir = os.environ.get("AGNOSTICV_CACHE_DIR", config.agnosticv_cache_dir)
+    config.agnosticv_ssh_key_path = os.environ.get("AGNOSTICV_SSH_KEY_PATH")
+    ttl = os.environ.get("AGNOSTICV_REFRESH_TTL_SECONDS")
+    if ttl:
+        config.agnosticv_refresh_ttl_seconds = int(ttl)
     return config
 
 
