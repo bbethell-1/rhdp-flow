@@ -39,7 +39,11 @@ export interface WorkshopSchedule {
   showroom_novnc: boolean;
   showroom_zerotouch: boolean;
   item_type?: 'Workshop' | 'Cluster' | 'Tenant';
-  cluster_link?: string;
+  is_cluster?: boolean;
+  is_tenant?: boolean;
+  detected_cluster_ci?: string | null;
+  detection_method?: 'csv_label' | 'naming' | 'none';
+  cluster_ci_source?: 'override' | 'agnosticv' | 'naming' | null;
 }
 
 export interface UploadResponse {

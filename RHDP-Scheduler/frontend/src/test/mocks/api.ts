@@ -56,6 +56,11 @@ export const mockSchedule: WorkshopSchedule = {
   showroom_ref: '',
   showroom_novnc: false,
   showroom_zerotouch: false,
+  is_cluster: false,
+  is_tenant: false,
+  detected_cluster_ci: null,
+  detection_method: 'none',
+  cluster_ci_source: null,
 };
 
 export const mockResult: DeploymentResult = {
