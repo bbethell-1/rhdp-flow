@@ -14,6 +14,7 @@ from __future__ import annotations
 import pytest
 from datetime import datetime, timedelta
 from typing import List
+from unittest.mock import patch, ANY
 
 from rhdp_flow import (
     is_cluster_ci,
@@ -708,4 +709,47 @@ class TestIntegrationFullWorkflow:
 class TestClusterCISourceFieldDefault:
     def test_cluster_ci_source_defaults_to_none(self):
         schedule = make_schedule("ocp4-tenant.prod")
+        assert schedule.cluster_ci_source is None
+
+
+# ============================================================================
+# Tests for AgnosticV Resolution Tier
+# ============================================================================
+
+class TestAnalyzeClusterTenantRelationshipsAgnosticVTier:
+    def test_csv_override_wins_over_agnosticv(self):
+        schedule = make_schedule(
+            "ocp4-tenant.prod",
+            cluster_ci_override="ocp4-cluster.override",
+        )
+        with patch("rhdp_flow.resolve_tenant_cluster_item", return_value="ocp4-cluster.agnosticv") as mock_resolve:
+            analyze_cluster_tenant_relationships([schedule])
+
+        mock_resolve.assert_not_called()
+        assert schedule.detected_cluster_ci == "ocp4-cluster.override"
+        assert schedule.cluster_ci_source == "override"
+
+    def test_agnosticv_wins_over_naming_when_no_override(self):
+        schedule = make_schedule("ocp4-tenant.prod")
+        with patch("rhdp_flow.resolve_tenant_cluster_item", return_value="ocp4-cluster.from-agnosticv") as mock_resolve:
+            analyze_cluster_tenant_relationships([schedule])
+
+        mock_resolve.assert_called_once_with("ocp4-tenant.prod", ANY)
+        assert schedule.detected_cluster_ci == "ocp4-cluster.from-agnosticv"
+        assert schedule.cluster_ci_source == "agnosticv"
+
+    def test_naming_fallback_when_agnosticv_returns_none(self):
+        schedule = make_schedule("ocp4-tenant.prod")
+        with patch("rhdp_flow.resolve_tenant_cluster_item", return_value=None):
+            analyze_cluster_tenant_relationships([schedule])
+
+        assert schedule.detected_cluster_ci == "ocp4-cluster.prod"
+        assert schedule.cluster_ci_source == "naming"
+
+    def test_source_is_none_when_no_cluster_resolved_at_all(self):
+        schedule = make_schedule("standalone.prod", item_type="tenant", cluster_ci_override="none")
+        with patch("rhdp_flow.resolve_tenant_cluster_item", return_value=None):
+            analyze_cluster_tenant_relationships([schedule])
+
+        assert schedule.detected_cluster_ci is None
         assert schedule.cluster_ci_source is None

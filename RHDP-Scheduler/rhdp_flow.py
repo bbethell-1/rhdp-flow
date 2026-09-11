@@ -25,6 +25,8 @@ import os
 import re
 import yaml
 
+from agnosticv_resolver import resolve_tenant_cluster_item
+
 # ============================================================================
 # CONFIGURATION & LOGGING SETUP
 # ============================================================================
@@ -318,7 +320,31 @@ def get_cluster_ci_for_tenant(tenant_ci: str, override: Optional[str] = None) ->
     return None
 
 
-def analyze_cluster_tenant_relationships(schedules: List[WorkshopSchedule]) -> None:
+def _resolve_tenant_cluster(schedule: "WorkshopSchedule", config: Optional["RHDPConfig"] = None) -> Tuple[Optional[str], Optional[str]]:
+    """Resolve a tenant schedule's cluster CI and the tier that produced it.
+
+    Priority: CSV override > AgnosticV tenant_cluster.item > naming convention.
+
+    Returns:
+        (detected_cluster_ci, cluster_ci_source) — both None if nothing resolved.
+    """
+    if schedule.cluster_ci_override:
+        if schedule.cluster_ci_override.lower() == "none":
+            return None, None
+        return schedule.cluster_ci_override, "override"
+
+    resolved = resolve_tenant_cluster_item(schedule.ci, config or RHDPConfig())
+    if resolved:
+        return resolved, "agnosticv"
+
+    naming_result = get_cluster_ci_for_tenant(schedule.ci, override=None)
+    if naming_result:
+        return naming_result, "naming"
+
+    return None, None
+
+
+def analyze_cluster_tenant_relationships(schedules: List[WorkshopSchedule], config: Optional["RHDPConfig"] = None) -> None:
     """
     Analyze and populate cluster/tenant detection fields for all schedules.
 
@@ -340,6 +366,7 @@ def analyze_cluster_tenant_relationships(schedules: List[WorkshopSchedule]) -> N
         schedule.is_cluster = False
         schedule.is_tenant = False
         schedule.detected_cluster_ci = None
+        schedule.cluster_ci_source = None
         schedule.detection_method = "none"
 
         # Priority 1: Explicit CSV label
@@ -353,13 +380,10 @@ def analyze_cluster_tenant_relationships(schedules: List[WorkshopSchedule]) -> N
             elif item_type_lower == "tenant":
                 schedule.is_tenant = True
                 schedule.detection_method = "csv_label"
-                schedule.detected_cluster_ci = get_cluster_ci_for_tenant(
-                    schedule.ci,
-                    schedule.cluster_ci_override
-                )
+                schedule.detected_cluster_ci, schedule.cluster_ci_source = _resolve_tenant_cluster(schedule, config)
                 logger.debug(
                     f"{schedule.ci_name}: Detected as tenant (CSV label), "
-                    f"cluster CI: {schedule.detected_cluster_ci}"
+                    f"cluster CI: {schedule.detected_cluster_ci} (source: {schedule.cluster_ci_source})"
                 )
                 continue
             elif item_type_lower == "workshop":
@@ -376,13 +400,10 @@ def analyze_cluster_tenant_relationships(schedules: List[WorkshopSchedule]) -> N
         elif is_tenant_ci(schedule.ci):
             schedule.is_tenant = True
             schedule.detection_method = "naming"
-            schedule.detected_cluster_ci = get_cluster_ci_for_tenant(
-                schedule.ci,
-                schedule.cluster_ci_override
-            )
+            schedule.detected_cluster_ci, schedule.cluster_ci_source = _resolve_tenant_cluster(schedule, config)
             logger.debug(
                 f"{schedule.ci_name}: Detected as tenant (naming convention), "
-                f"cluster CI: {schedule.detected_cluster_ci}"
+                f"cluster CI: {schedule.detected_cluster_ci} (source: {schedule.cluster_ci_source})"
             )
 
 
