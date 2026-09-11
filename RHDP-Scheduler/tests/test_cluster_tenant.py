@@ -699,3 +699,13 @@ class TestIntegrationFullWorkflow:
         assert schedules[1].is_tenant is True
         assert schedules[1].detected_cluster_ci == "ocp4-cluster.prod"
         assert schedules[1].detection_method == "csv_label"
+
+
+# ============================================================================
+# Tests for cluster_ci_source field
+# ============================================================================
+
+class TestClusterCISourceFieldDefault:
+    def test_cluster_ci_source_defaults_to_none(self):
+        schedule = make_schedule("ocp4-tenant.prod")
+        assert schedule.cluster_ci_source is None

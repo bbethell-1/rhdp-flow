@@ -203,6 +203,7 @@ class WorkshopSchedule:
     is_tenant: bool = False  # Detected as tenant CI (either via naming or explicit label)
     detected_cluster_ci: Optional[str] = None  # For tenants: the associated cluster CI (from override or naming)
     detection_method: str = "none"  # How the type was detected: "csv_label", "naming", "none"
+    cluster_ci_source: Optional[str] = None  # For tenants: which tier resolved detected_cluster_ci ("override", "agnosticv", "naming")
 
 @dataclass
 class DeploymentResult:
