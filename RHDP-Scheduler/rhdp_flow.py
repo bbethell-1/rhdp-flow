@@ -246,18 +246,34 @@ def is_tenant_ci(ci: str) -> bool:
     """
     Check if a catalog item is a tenant CI based on naming convention.
 
+    Supports two conventions:
+    1. Dot-infix: "-tenant." appears anywhere (e.g., "app-tenant.prod")
+    2. Suffix: ends with "-tenant" AND contains a dot separator (e.g., "workshop.prod-tenant")
+
     Args:
-        ci: Catalog item identifier (e.g., "ocp4-tenant.prod")
+        ci: Catalog item identifier
 
     Returns:
-        True if CI contains "-tenant." in the name
+        True if CI matches either tenant naming convention
     """
-    return "-tenant." in ci.lower()
+    lower_ci = ci.lower()
+    # Dot-infix convention: "-tenant." anywhere
+    if "-tenant." in lower_ci:
+        return True
+    # Suffix convention: ends with "-tenant" AND has a dot somewhere
+    # (excludes bare "workshop-tenant" which is ambiguous)
+    if lower_ci.endswith("-tenant") and "." in lower_ci:
+        return True
+    return False
 
 
 def get_cluster_ci_for_tenant(tenant_ci: str, override: Optional[str] = None) -> Optional[str]:
     """
     Determine the cluster CI for a given tenant CI.
+
+    Supports two naming conventions:
+    1. Dot-infix: replace "-tenant." with "-cluster." (e.g., "app-tenant.prod" → "app-cluster.prod")
+    2. Suffix: replace trailing "-tenant" with "-cluster" (e.g., "workshop.prod-tenant" → "workshop.prod-cluster")
 
     Args:
         tenant_ci: The tenant catalog item identifier
@@ -272,7 +288,7 @@ def get_cluster_ci_for_tenant(tenant_ci: str, override: Optional[str] = None) ->
     Logic:
         1. If override provided and not "none", return it
         2. If override is "none", return None (explicit opt-out)
-        3. If no override, attempt naming fallback: replace "-tenant." with "-cluster."
+        3. If no override, attempt naming fallback (both conventions)
     """
     # Handle explicit override
     if override:
@@ -284,16 +300,22 @@ def get_cluster_ci_for_tenant(tenant_ci: str, override: Optional[str] = None) ->
     if not is_tenant_ci(tenant_ci):
         return None
 
-    # Replace -tenant. with -cluster. (case-preserving)
-    # Find the position case-insensitively
     lower_ci = tenant_ci.lower()
-    tenant_pos = lower_ci.find("-tenant.")
-    if tenant_pos == -1:
-        return None
 
-    # Build cluster CI preserving original case for the prefix
-    cluster_ci = tenant_ci[:tenant_pos] + "-cluster." + tenant_ci[tenant_pos + 8:]
-    return cluster_ci
+    # Try dot-infix first: "-tenant." anywhere
+    tenant_pos = lower_ci.find("-tenant.")
+    if tenant_pos != -1:
+        # Build cluster CI preserving original case for the prefix
+        cluster_ci = tenant_ci[:tenant_pos] + "-cluster." + tenant_ci[tenant_pos + 8:]
+        return cluster_ci
+
+    # Try suffix convention: ends with "-tenant"
+    if lower_ci.endswith("-tenant"):
+        # Replace trailing "-tenant" with "-cluster" (case-preserving for prefix)
+        cluster_ci = tenant_ci[:-7] + "-cluster"
+        return cluster_ci
+
+    return None
 
 
 def analyze_cluster_tenant_relationships(schedules: List[WorkshopSchedule]) -> None:
