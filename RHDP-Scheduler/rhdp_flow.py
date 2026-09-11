@@ -407,30 +407,40 @@ def analyze_cluster_tenant_relationships(schedules: List[WorkshopSchedule], conf
             )
 
 
-def validate_cluster_before_tenant(schedules: List[WorkshopSchedule]) -> Dict[str, Any]:
+def validate_cluster_before_tenant(schedules: List[WorkshopSchedule], config: Optional["RHDPConfig"] = None) -> Dict[str, Any]:
     """
     Validate that cluster schedules are provisioned before their tenant schedules.
 
     Checks:
     1. For each tenant, find its cluster schedule (by detected_cluster_ci)
     2. Verify cluster provisioning_date < tenant provisioning_date
-    3. Warn if cluster schedule not found in same batch
+    3. If no matching schedule exists in this batch, check the live cluster
+       for an already-provisioned instance (best-effort; only performed when
+       config is provided). Found-and-healthy is informational, not an error.
+       Lookup failure falls back to the legacy "not in batch" warning.
 
     Args:
         schedules: List of WorkshopSchedule objects to validate
+        config: Optional RHDPConfig used for the live-cluster lookup. When
+            omitted, the out-of-batch check is skipped and behavior matches
+            the pre-existing "not in batch = warning" logic exactly.
 
     Returns:
         Dictionary with validation results:
         {
             "valid": bool,  # Overall validity
-            "errors": List[str],  # Critical errors (tenant before cluster)
-            "warnings": List[str],  # Warnings (missing cluster in batch)
-            "relationships": List[Dict]  # Detected cluster-tenant pairs
+            "errors": List[str],  # Critical errors (tenant before cluster) - unchanged shape for backward compatibility
+            "warnings": List[str],  # Warnings (missing cluster in batch) - unchanged shape for backward compatibility
+            "relationships": List[Dict],  # Detected cluster-tenant pairs
+            "error_details": List[Dict],  # Structured, additive: same errors with ci_name/tenant_ci/cluster_ci/tenant_date/cluster_date/namespace/message
+            "warning_details": List[Dict],  # Structured, additive: same warnings with ci_name/tenant_ci/namespace/message
         }
     """
-    errors = []
-    warnings = []
-    relationships = []
+    errors: List[str] = []
+    warnings: List[str] = []
+    relationships: List[Dict[str, Any]] = []
+    error_details: List[Dict[str, Any]] = []
+    warning_details: List[Dict[str, Any]] = []
 
     # Build cluster CI -> schedule mapping
     cluster_map: Dict[str, WorkshopSchedule] = {}
@@ -444,23 +454,71 @@ def validate_cluster_before_tenant(schedules: List[WorkshopSchedule]) -> Dict[st
             continue
 
         if not schedule.detected_cluster_ci:
-            warnings.append(
+            msg = (
                 f"Tenant '{schedule.ci_name}' has no detected cluster CI "
                 f"(override may be 'none')"
             )
+            warnings.append(msg)
+            warning_details.append({
+                "ci_name": schedule.ci_name,
+                "tenant_ci": schedule.ci,
+                "namespace": schedule.namespace,
+                "message": msg,
+            })
             continue
 
         cluster_schedule = cluster_map.get(schedule.detected_cluster_ci)
 
         if not cluster_schedule:
-            warnings.append(
+            live_status = find_provisioned_cluster_resourceclaim(schedule.detected_cluster_ci, config) if config else None
+
+            if live_status is True:
+                relationships.append({
+                    "tenant": schedule.ci_name,
+                    "cluster_ci": schedule.detected_cluster_ci,
+                    "status": "found_on_cluster",
+                })
+                continue
+
+            if live_status is False:
+                msg = (
+                    f"Tenant '{schedule.ci_name}' references cluster "
+                    f"'{schedule.detected_cluster_ci}', which is neither in this batch "
+                    f"nor already provisioned."
+                )
+                errors.append(msg)
+                error_details.append({
+                    "ci_name": schedule.ci_name,
+                    "tenant_ci": schedule.ci,
+                    "cluster_ci": schedule.detected_cluster_ci,
+                    "tenant_date": schedule.provisioning_date,
+                    "cluster_date": "",
+                    "namespace": schedule.namespace,
+                    "message": msg,
+                })
+                relationships.append({
+                    "tenant": schedule.ci_name,
+                    "cluster_ci": schedule.detected_cluster_ci,
+                    "status": "not_found_anywhere",
+                })
+                continue
+
+            # live_status is None: lookup unavailable/failed, fall back to legacy warning
+            msg = (
                 f"Tenant '{schedule.ci_name}' expects cluster '{schedule.detected_cluster_ci}' "
                 f"but no matching cluster found in this deployment batch"
             )
+            warnings.append(msg)
+            warning_details.append({
+                "ci_name": schedule.ci_name,
+                "tenant_ci": schedule.ci,
+                "namespace": schedule.namespace,
+                "message": msg,
+            })
             relationships.append({
                 "tenant": schedule.ci_name,
                 "cluster_ci": schedule.detected_cluster_ci,
-                "status": "cluster_not_in_batch"
+                "status": "cluster_not_in_batch",
             })
             continue
 
@@ -470,19 +528,29 @@ def validate_cluster_before_tenant(schedules: List[WorkshopSchedule]) -> Dict[st
             cluster_date = datetime.strptime(cluster_schedule.provisioning_date, "%d/%m/%Y %H:%M")
 
             if cluster_date >= tenant_date:
-                errors.append(
+                msg = (
                     f"Tenant '{schedule.ci_name}' (provisioning {schedule.provisioning_date}) "
                     f"is scheduled before or at the same time as its cluster "
                     f"'{cluster_schedule.ci_name}' (provisioning {cluster_schedule.provisioning_date}). "
                     f"Cluster must be provisioned first."
                 )
+                errors.append(msg)
+                error_details.append({
+                    "ci_name": schedule.ci_name,
+                    "tenant_ci": schedule.ci,
+                    "cluster_ci": schedule.detected_cluster_ci,
+                    "tenant_date": schedule.provisioning_date,
+                    "cluster_date": cluster_schedule.provisioning_date,
+                    "namespace": schedule.namespace,
+                    "message": msg,
+                })
                 relationships.append({
                     "tenant": schedule.ci_name,
                     "cluster": cluster_schedule.ci_name,
                     "cluster_ci": schedule.detected_cluster_ci,
                     "tenant_date": schedule.provisioning_date,
                     "cluster_date": cluster_schedule.provisioning_date,
-                    "status": "timing_violation"
+                    "status": "timing_violation",
                 })
             else:
                 relationships.append({
@@ -491,19 +559,28 @@ def validate_cluster_before_tenant(schedules: List[WorkshopSchedule]) -> Dict[st
                     "cluster_ci": schedule.detected_cluster_ci,
                     "tenant_date": schedule.provisioning_date,
                     "cluster_date": cluster_schedule.provisioning_date,
-                    "status": "valid"
+                    "status": "valid",
                 })
         except ValueError as e:
-            warnings.append(
+            msg = (
                 f"Could not parse dates for tenant '{schedule.ci_name}' "
                 f"or cluster '{cluster_schedule.ci_name}': {e}"
             )
+            warnings.append(msg)
+            warning_details.append({
+                "ci_name": schedule.ci_name,
+                "tenant_ci": schedule.ci,
+                "namespace": schedule.namespace,
+                "message": msg,
+            })
 
     return {
         "valid": len(errors) == 0,
         "errors": errors,
         "warnings": warnings,
-        "relationships": relationships
+        "relationships": relationships,
+        "error_details": error_details,
+        "warning_details": warning_details,
     }
 
 # ============================================================================

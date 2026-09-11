@@ -23,6 +23,7 @@ from rhdp_flow import (
     analyze_cluster_tenant_relationships,
     validate_cluster_before_tenant,
     WorkshopSchedule,
+    RHDPConfig,
 )
 
 
@@ -636,8 +637,8 @@ class TestIntegrationFullWorkflow:
 
         schedules = [
             make_schedule(
-                "ocp4-cluster.prod",
-                ci_name="OCP4 Cluster",
+                "app-cluster.prod",
+                ci_name="App Cluster",
                 provisioning_date=cluster_time,
             ),
             make_schedule(
@@ -790,3 +791,87 @@ class TestFindProvisionedClusterResourceClaim:
         with patch("rhdp_flow.subprocess.run", side_effect=FileNotFoundError("oc not found")):
             found = find_provisioned_cluster_resourceclaim("ocp4-cluster.prod", config)
         assert found is None
+
+class TestValidateClusterBeforeTenantOutOfBatch:
+    def test_found_on_live_cluster_is_informational_not_error(self):
+        tenant = make_schedule("ocp4-tenant.prod")
+        tenant.is_tenant = True
+        tenant.detected_cluster_ci = "ocp4-cluster.prod"
+
+        with patch("rhdp_flow.find_provisioned_cluster_resourceclaim", return_value=True):
+            result = validate_cluster_before_tenant([tenant], config=RHDPConfig())
+
+        assert result["valid"] is True
+        assert result["errors"] == []
+        assert any("already provisioned outside this batch" in w for w in result["warnings"]) is False
+        assert result["relationships"][0]["status"] == "found_on_cluster"
+
+    def test_not_found_anywhere_is_error(self):
+        tenant = make_schedule("ocp4-tenant.prod")
+        tenant.is_tenant = True
+        tenant.detected_cluster_ci = "ocp4-cluster.prod"
+
+        with patch("rhdp_flow.find_provisioned_cluster_resourceclaim", return_value=False):
+            result = validate_cluster_before_tenant([tenant], config=RHDPConfig())
+
+        assert result["valid"] is False
+        assert len(result["errors"]) == 1
+        assert "neither in this batch nor already provisioned" in result["errors"][0]
+        assert result["relationships"][0]["status"] == "not_found_anywhere"
+
+    def test_lookup_failure_falls_back_to_legacy_warning(self):
+        tenant = make_schedule("ocp4-tenant.prod")
+        tenant.is_tenant = True
+        tenant.detected_cluster_ci = "ocp4-cluster.prod"
+
+        with patch("rhdp_flow.find_provisioned_cluster_resourceclaim", return_value=None):
+            result = validate_cluster_before_tenant([tenant], config=RHDPConfig())
+
+        assert result["valid"] is True
+        assert len(result["warnings"]) == 1
+        assert "no matching cluster found in this deployment batch" in result["warnings"][0]
+        assert result["relationships"][0]["status"] == "cluster_not_in_batch"
+
+    def test_config_none_skips_live_lookup_like_legacy_behavior(self):
+        tenant = make_schedule("ocp4-tenant.prod")
+        tenant.is_tenant = True
+        tenant.detected_cluster_ci = "ocp4-cluster.prod"
+
+        result = validate_cluster_before_tenant([tenant])
+
+        assert result["valid"] is True
+        assert len(result["warnings"]) == 1
+        assert result["relationships"][0]["status"] == "cluster_not_in_batch"
+
+
+class TestValidateClusterBeforeTenantStructuredDetails:
+    def test_error_details_additive_alongside_string_errors(self):
+        cluster = make_schedule("ocp4-cluster.prod", provisioning_date="10/09/2026 12:00")
+        cluster.is_cluster = True
+        tenant = make_schedule("ocp4-tenant.prod", provisioning_date="10/09/2026 10:00")
+        tenant.is_tenant = True
+        tenant.detected_cluster_ci = "ocp4-cluster.prod"
+
+        result = validate_cluster_before_tenant([cluster, tenant])
+
+        assert isinstance(result["errors"][0], str)
+        assert "scheduled before or at the same time" in result["errors"][0]
+        assert result["error_details"][0]["tenant_ci"] == "ocp4-tenant.prod"
+        assert result["error_details"][0]["cluster_ci"] == "ocp4-cluster.prod"
+        assert result["error_details"][0]["tenant_date"] == "10/09/2026 10:00"
+        assert result["error_details"][0]["cluster_date"] == "10/09/2026 12:00"
+        assert result["error_details"][0]["namespace"] == tenant.namespace
+        assert result["error_details"][0]["message"] == result["errors"][0]
+
+    def test_warning_details_additive_for_not_in_batch(self):
+        tenant = make_schedule("ocp4-tenant.prod")
+        tenant.is_tenant = True
+        tenant.detected_cluster_ci = "ocp4-cluster.prod"
+
+        with patch("rhdp_flow.find_provisioned_cluster_resourceclaim", return_value=None):
+            result = validate_cluster_before_tenant([tenant], config=RHDPConfig())
+
+        assert isinstance(result["warnings"][0], str)
+        assert result["warning_details"][0]["tenant_ci"] == "ocp4-tenant.prod"
+        assert result["warning_details"][0]["namespace"] == tenant.namespace
+        assert result["warning_details"][0]["message"] == result["warnings"][0]
