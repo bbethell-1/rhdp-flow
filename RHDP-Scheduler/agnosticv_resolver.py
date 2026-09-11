@@ -80,3 +80,81 @@ def _ensure_repo_cloned(config: "RHDPConfig") -> bool:
     except Exception as e:
         logger.warning(f"agnosticv clone/refresh failed (non-blocking): {e}")
         return False
+
+
+def _ci_to_agnosticv_path(ci: str) -> Optional[str]:
+    """Convert a Babylon CI ('account.item.stage') to an AgnosticV path ('account/item/stage')."""
+    parts = ci.split(".")
+    if len(parts) != 3:
+        logger.warning(f"CI '{ci}' is not in 'account.item.stage' form; skipping AgnosticV resolution")
+        return None
+    account, item, stage = parts
+    return f"{account}/{item}/{stage}"
+
+
+def _agnosticv_path_to_ci(path: str, default_stage: str) -> str:
+    """Convert an AgnosticV path ('account/item[/stage]') back to a Babylon CI ('account.item.stage').
+
+    If the path omits /stage, defaults to the tenant's own stage per the
+    tenant_cluster.item schema.
+    """
+    segments = path.strip("/").split("/")
+    if len(segments) == 3:
+        account, item, stage = segments
+    elif len(segments) == 2:
+        account, item = segments
+        stage = default_stage
+    else:
+        raise ValueError(f"Unexpected AgnosticV path shape: {path!r}")
+    return f"{account}.{item}.{stage}"
+
+
+def resolve_tenant_cluster_item(ci: str, config: "RHDPConfig") -> Optional[str]:
+    """Resolve the cluster CI a tenant CI binds to, via AgnosticV's tenant_cluster.item.
+
+    Args:
+        ci: Tenant catalog item identifier, e.g. "ai-quickstarts.ai-qs-rag-tenant.prod".
+        config: RHDPConfig with agnosticv_* settings.
+
+    Returns:
+        The resolved cluster CI (e.g. "ai-quickstarts.ai-qs-rag-cluster.prod"),
+        or None if resolution is unavailable for any reason. Never raises.
+    """
+    agnosticv_path = _ci_to_agnosticv_path(ci)
+    if agnosticv_path is None:
+        return None
+
+    account, item, stage = agnosticv_path.split("/")
+
+    if not _ensure_repo_cloned(config):
+        return None
+
+    try:
+        result = subprocess.run(
+            [config.agnosticv_cli_path, "--merge", agnosticv_path],
+            cwd=config.agnosticv_cache_dir,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            logger.warning(f"agnosticv --merge failed for '{agnosticv_path}' (non-blocking): {result.stderr.strip()}")
+            return None
+
+        merged = yaml.safe_load(result.stdout)
+        if not isinstance(merged, dict):
+            logger.warning(f"agnosticv --merge for '{agnosticv_path}' produced no usable YAML (non-blocking)")
+            return None
+
+        sandboxes = merged.get("__meta__", {}).get("sandboxes", []) or []
+        for sandbox in sandboxes:
+            tenant_cluster = (sandbox or {}).get("tenant_cluster") or {}
+            cluster_item_path = tenant_cluster.get("item")
+            if cluster_item_path:
+                return _agnosticv_path_to_ci(cluster_item_path, default_stage=stage)
+
+        logger.debug(f"No tenant_cluster.item found for '{ci}' in AgnosticV")
+        return None
+    except Exception as e:
+        logger.warning(f"AgnosticV resolution failed for '{ci}' (non-blocking): {e}")
+        return None

@@ -98,3 +98,90 @@ class TestGitEnv:
         quoted_path = shlex.quote("/tmp/some key; rm -rf /")
         assert quoted_path in env["GIT_SSH_COMMAND"]
         assert env["GIT_SSH_COMMAND"] == f"ssh -i {quoted_path} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+
+
+from agnosticv_resolver import resolve_tenant_cluster_item
+
+
+class TestResolveTenantClusterItem:
+    def _config(self, tmp_path):
+        config = RHDPConfig()
+        config.agnosticv_cache_dir = str(tmp_path / "agnosticv-cache")
+        (tmp_path / "agnosticv-cache" / ".git").mkdir(parents=True)
+        return config
+
+    def test_resolves_item_with_explicit_stage(self, tmp_path):
+        config = self._config(tmp_path)
+        merged_yaml = """
+__meta__:
+  sandboxes:
+    - name: main
+      tenant_cluster:
+        item: ai-quickstarts/ai-qs-rag-cluster/prod
+"""
+        with patch("agnosticv_resolver.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout=merged_yaml, stderr="")
+            result = resolve_tenant_cluster_item("ai-quickstarts.ai-qs-rag-tenant.prod", config)
+
+        assert result == "ai-quickstarts.ai-qs-rag-cluster.prod"
+
+    def test_resolves_item_defaulting_stage_to_tenants_own_stage(self, tmp_path):
+        config = self._config(tmp_path)
+        merged_yaml = """
+__meta__:
+  sandboxes:
+    - name: main
+      tenant_cluster:
+        item: ai-quickstarts/ai-qs-rag-cluster
+"""
+        with patch("agnosticv_resolver.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout=merged_yaml, stderr="")
+            result = resolve_tenant_cluster_item("ai-quickstarts.ai-qs-rag-tenant.dev", config)
+
+        assert result == "ai-quickstarts.ai-qs-rag-cluster.dev"
+
+    def test_returns_none_when_no_tenant_cluster_present(self, tmp_path):
+        config = self._config(tmp_path)
+        merged_yaml = "__meta__:\n  sandboxes:\n    - name: main\n"
+        with patch("agnosticv_resolver.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout=merged_yaml, stderr="")
+            result = resolve_tenant_cluster_item("ai-quickstarts.ai-qs-rag-tenant.prod", config)
+
+        assert result is None
+
+    def test_returns_none_on_cli_failure(self, tmp_path):
+        config = self._config(tmp_path)
+        with patch("agnosticv_resolver.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="item not found")
+            result = resolve_tenant_cluster_item("ai-quickstarts.ai-qs-rag-tenant.prod", config)
+
+        assert result is None
+
+    def test_returns_none_on_malformed_yaml(self, tmp_path):
+        config = self._config(tmp_path)
+        with patch("agnosticv_resolver.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout=": : not yaml : :", stderr="")
+            result = resolve_tenant_cluster_item("ai-quickstarts.ai-qs-rag-tenant.prod", config)
+
+        assert result is None
+
+    def test_returns_none_on_missing_cli_binary(self, tmp_path):
+        config = self._config(tmp_path)
+        with patch("agnosticv_resolver.subprocess.run", side_effect=FileNotFoundError("agnosticv not found")):
+            result = resolve_tenant_cluster_item("ai-quickstarts.ai-qs-rag-tenant.prod", config)
+
+        assert result is None
+
+    def test_returns_none_when_clone_fails(self, tmp_path):
+        config = RHDPConfig()
+        config.agnosticv_cache_dir = str(tmp_path / "does-not-exist")
+        with patch("agnosticv_resolver.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=128, stdout="", stderr="Permission denied")
+            result = resolve_tenant_cluster_item("ai-quickstarts.ai-qs-rag-tenant.prod", config)
+
+        assert result is None
+
+    def test_returns_none_for_malformed_ci(self, tmp_path):
+        config = self._config(tmp_path)
+        result = resolve_tenant_cluster_item("not-a-valid-ci", config)
+        assert result is None
