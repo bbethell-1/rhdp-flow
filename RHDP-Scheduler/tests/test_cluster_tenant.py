@@ -14,7 +14,7 @@ from __future__ import annotations
 import pytest
 from datetime import datetime, timedelta
 from typing import List
-from unittest.mock import patch, ANY
+from unittest.mock import patch, ANY, MagicMock
 
 from rhdp_flow import (
     is_cluster_ci,
@@ -753,3 +753,40 @@ class TestAnalyzeClusterTenantRelationshipsAgnosticVTier:
 
         assert schedule.detected_cluster_ci is None
         assert schedule.cluster_ci_source is None
+
+
+# ============================================================================
+# Tests for find_provisioned_cluster_resourceclaim() - Live-Cluster Lookup
+# ============================================================================
+
+class TestFindProvisionedClusterResourceClaim:
+    def test_returns_true_when_resourceclaim_found(self):
+        from rhdp_flow import find_provisioned_cluster_resourceclaim, RHDPConfig as _RHDPConfigForLookup
+        config = _RHDPConfigForLookup()
+        fake_result = MagicMock(returncode=0, stdout='{"items": [{"metadata": {"name": "rc-1"}}]}')
+        with patch("rhdp_flow.subprocess.run", return_value=fake_result):
+            found = find_provisioned_cluster_resourceclaim("ocp4-cluster.prod", config)
+        assert found is True
+
+    def test_returns_false_when_no_resourceclaims_found(self):
+        from rhdp_flow import find_provisioned_cluster_resourceclaim, RHDPConfig as _RHDPConfigForLookup
+        config = _RHDPConfigForLookup()
+        fake_result = MagicMock(returncode=0, stdout='{"items": []}')
+        with patch("rhdp_flow.subprocess.run", return_value=fake_result):
+            found = find_provisioned_cluster_resourceclaim("ocp4-cluster.prod", config)
+        assert found is False
+
+    def test_returns_none_on_oc_command_failure(self):
+        from rhdp_flow import find_provisioned_cluster_resourceclaim, RHDPConfig as _RHDPConfigForLookup
+        config = _RHDPConfigForLookup()
+        fake_result = MagicMock(returncode=1, stdout="", stderr="Unauthorized")
+        with patch("rhdp_flow.subprocess.run", return_value=fake_result):
+            found = find_provisioned_cluster_resourceclaim("ocp4-cluster.prod", config)
+        assert found is None
+
+    def test_returns_none_on_subprocess_exception(self):
+        from rhdp_flow import find_provisioned_cluster_resourceclaim, RHDPConfig as _RHDPConfigForLookup
+        config = _RHDPConfigForLookup()
+        with patch("rhdp_flow.subprocess.run", side_effect=FileNotFoundError("oc not found")):
+            found = find_provisioned_cluster_resourceclaim("ocp4-cluster.prod", config)
+        assert found is None

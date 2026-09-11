@@ -3353,6 +3353,44 @@ def verify_deployment(
 # QA FUNCTIONS
 # ============================================================================
 
+def find_provisioned_cluster_resourceclaim(cluster_ci: str, config: RHDPConfig) -> Optional[bool]:
+    """Check whether a cluster catalog item is already provisioned on the live cluster.
+
+    Used when a tenant's detected cluster isn't part of the current CSV batch,
+    to distinguish "not provisioned anywhere" from "already exists, just not
+    in this batch."
+
+    Returns:
+        True if a matching ResourceClaim is found anywhere in the cluster,
+        False if none is found, or None if the lookup itself failed (API
+        error, timeout, missing oc). Callers must treat None as "unknown" and
+        fall back to the pre-existing "not in batch = error" behavior rather
+        than treating it as either True or False.
+    """
+    try:
+        cmd = [
+            config.oc_command,
+            "get", "resourceclaims",
+            "--all-namespaces",
+            "-l", f"babylon.gpte.redhat.com/catalogItemName={cluster_ci}",
+            "-o", "json",
+        ]
+        env = os.environ.copy()
+        if config.kubeconfig_path:
+            env["KUBECONFIG"] = config.kubeconfig_path
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
+        if result.returncode != 0:
+            logger.warning(f"Live-cluster lookup for '{cluster_ci}' failed (non-blocking): {result.stderr.strip()}")
+            return None
+
+        data = json.loads(result.stdout)
+        return len(data.get("items", [])) > 0
+    except Exception as e:
+        logger.warning(f"Live-cluster lookup for '{cluster_ci}' failed (non-blocking): {e}")
+        return None
+
+
 def list_scheduled_resourceclaims(
     namespace: str,
     config: RHDPConfig,
