@@ -484,6 +484,12 @@ class RHDPConfig:
         # When set with dry_run, write ResourceClaim / Workshop / WorkshopProvision YAMLs here
         self.dry_run_export_yaml_dir: Optional[str] = None
         self.dry_run_yaml_export_seq: int = 0
+        # AgnosticV tenant->cluster resolution (see agnosticv_resolver.py)
+        self.agnosticv_repo_url: str = "git@github.com:rhpds/agnosticv.git"
+        self.agnosticv_cache_dir: str = "/tmp/agnosticv-cache"
+        self.agnosticv_ssh_key_path: Optional[str] = None
+        self.agnosticv_cli_path: str = "agnosticv"
+        self.agnosticv_refresh_ttl_seconds: int = 900
 
     def validate(self) -> bool:
         """Validate configuration"""
