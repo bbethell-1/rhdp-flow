@@ -430,7 +430,7 @@ def _shift_provisioning_earlier(provisioning_date: str, minutes: int = 180) -> s
         return provisioning_date
 
 
-def auto_provision_missing_clusters(schedules: list[WorkshopSchedule]) -> dict[str, Any]:
+def auto_provision_missing_clusters(schedules: list[WorkshopSchedule], buffer_hours: float = 4.0) -> dict[str, Any]:
     """
     Inject a fresh cluster provisioner for every tenant that has nowhere to land.
 
@@ -490,7 +490,7 @@ def auto_provision_missing_clusters(schedules: list[WorkshopSchedule]) -> dict[s
             activity=tenant.activity,
             purpose=tenant.purpose,
             workshop_name=tenant.workshop_name,
-            provisioning_date=_shift_provisioning_earlier(tenant.provisioning_date, 180),
+            provisioning_date=_shift_provisioning_earlier(tenant.provisioning_date, int(buffer_hours * 60)),
             auto_stop=tenant.auto_stop,
             auto_destroy=tenant.auto_destroy,
             instances=tenant.instances,

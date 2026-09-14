@@ -1734,7 +1734,8 @@ def test_validate_cluster_tenant_error_wrong_order(client):
     assert error["namespace"] == "user-bbethell-redhat-com"
 
 
-def test_validate_cluster_tenant_missing_cluster(client):
+@patch("rhdp_flow.find_provisioned_cluster_resourceclaim", return_value=None)
+def test_validate_cluster_tenant_missing_cluster(mock_find, client):
     """Upload CSV with tenant but no cluster row, should return warning about missing cluster."""
     # Upload CSV with only tenant row, no cluster row
     resp = client.post(

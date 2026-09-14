@@ -574,7 +574,7 @@ export const UploadTab: React.FC<Props> = ({
           ].filter((r) => !r.pool_exists && !r.has_cluster_row);
           if (enableAutoProvision && willFail.length > 0) {
             try {
-              const prov = await api.autoProvisionClusters();
+              const prov = await api.autoProvisionClusters(timingBufferHours);
               if (prov.count > 0 || (prov.needs_agv_prs || []).length > 0) {
                 setAutoProvisionResult({ added: prov.added || [], needs_agv_prs: prov.needs_agv_prs || [] });
                 if (prov.schedules) setSchedules(prov.schedules);
@@ -2155,42 +2155,38 @@ export const UploadTab: React.FC<Props> = ({
                   </Tooltip>
                 </SplitItem>
                 <SplitItem>
-                  <Split hasGutter style={{ alignItems: 'center' }}>
-                    <SplitItem>
-                      <Tooltip content="ON: Flow automatically moves cluster provisioning times to be X hours before their tenant deploys — so the cluster is ready when the tenant arrives. If the calculated time is already past, Flow uses now+30 min so it deploys immediately.">
-                        <Switch
-                          id="auto-timing-switch"
-                          label="Auto-Adjust Cluster Timing"
-                          isChecked={enableAutoTiming}
-                          onChange={(_e, checked) => setEnableAutoTiming(checked)}
-                        />
-                      </Tooltip>
-                    </SplitItem>
-                    {enableAutoTiming && (
-                      <SplitItem>
-                        <Tooltip content="Cluster will be provisioned this many hours before its tenant. If that time is already past, cluster is scheduled for now + 30 min.">
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--pf-v6-global--BackgroundColor--200)', borderRadius: 6, padding: '3px 10px 3px 8px', border: '1px solid var(--pf-v6-global--BorderColor--100)' }}>
-                            <input
-                              type="number"
-                              min={0.5}
-                              max={24}
-                              step={0.5}
-                              value={timingBufferHours}
-                              onChange={e => setTimingBufferHours(Number(e.target.value))}
-                              style={{ width: 40, padding: '1px 4px', borderRadius: 4, border: '1px solid var(--pf-v6-global--BorderColor--100)', fontSize: '0.85rem', textAlign: 'center', background: 'transparent' }}
-                            />
-                            <span style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)', whiteSpace: 'nowrap' }}>hr before tenant</span>
-                          </span>
-                        </Tooltip>
-                      </SplitItem>
-                    )}
-                  </Split>
+                  <Tooltip content="Tenant workshops run ON TOP of cluster pools. Flow reschedules each cluster pool row (including rows auto-added by Flow) to deploy this many hours BEFORE its tenant. If that calculated time is already in the past, Flow uses now + 30 min so it still deploys. Tenants always follow the cluster.">
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Switch
+                        id="auto-timing-switch"
+                        label=""
+                        isChecked={enableAutoTiming}
+                        onChange={(_e, checked) => setEnableAutoTiming(checked)}
+                      />
+                      <span style={{ fontSize: '0.875rem', whiteSpace: 'nowrap' }}>
+                        Cluster pools start
+                      </span>
+                      <input
+                        type="number"
+                        min={0.5}
+                        max={24}
+                        step={0.5}
+                        value={timingBufferHours}
+                        disabled={!enableAutoTiming}
+                        onChange={e => setTimingBufferHours(Number(e.target.value))}
+                        style={{ width: 44, padding: '2px 4px', borderRadius: 4, border: '1px solid var(--pf-v6-global--BorderColor--100)', fontSize: '0.875rem', textAlign: 'center', opacity: enableAutoTiming ? 1 : 0.4 }}
+                      />
+                      <span style={{ fontSize: '0.875rem', color: 'var(--pf-v6-global--Color--200)', whiteSpace: 'nowrap' }}>
+                        hr before tenants
+                      </span>
+                    </span>
+                  </Tooltip>
                 </SplitItem>
                 <SplitItem>
-                  <Tooltip content="ON: When a tenant has no shared cluster pool and no cluster row in your CSV, Flow automatically adds one — scheduled before the tenant so it's ready in time. The injected row is tagged 'added by Flow' in the table and can be removed. Turn off to manage cluster rows manually.">
+                  <Tooltip content="Tenants run ON TOP of cluster pools. If a tenant has no existing pool and no cluster row in your CSV, Flow adds a cluster pool row automatically — scheduled before the tenant and tagged 'added by Flow'. Turn off to manage cluster rows yourself.">
                     <Switch
                       id="auto-provision-switch"
-                      label="Auto-Provision Missing Clusters"
+                      label="Auto-Add Missing Cluster Pools"
                       isChecked={enableAutoProvision}
                       onChange={(_e, checked) => setEnableAutoProvision(checked)}
                     />
