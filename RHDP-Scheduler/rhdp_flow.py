@@ -2576,34 +2576,11 @@ def validate_catalog_item_exists(ci: str, expected_namespace: str, config: RHDPC
             cmd = [config.oc_command, "get", "catalogitem", ci, "-n", ns, "-o", "json"]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)
             if result.returncode == 0:
-                # Determine if CI suffix matches where it was found
-                ci_suffix = ci.split('.')[-1] if '.' in ci else None
-                if ci_suffix == 'event' and ns == 'babylon-catalog-event':
-                    suggestion = (
-                        f"CSV has Catalog_Namespace={expected_namespace}, but '{ci}' is in {ns} (correct for .event suffix). "
-                        f"FIX: Delete the entire 'Catalog_Namespace' column from your CSV to use auto-detection. "
-                        f"Auto-detection uses CI suffix (.event→event, .prod→prod, .dev→dev). "
-                        f"Only keep Catalog_Namespace column if you need to override specific rows."
-                    )
-                elif ci_suffix == 'prod' and ns == 'babylon-catalog-prod':
-                    suggestion = (
-                        f"CSV has Catalog_Namespace={expected_namespace}, but '{ci}' is in {ns} (correct for .prod suffix). "
-                        f"FIX: Delete the entire 'Catalog_Namespace' column from your CSV to use auto-detection. "
-                        f"Auto-detection uses CI suffix (.event→event, .prod→prod, .dev→dev). "
-                        f"Only keep Catalog_Namespace column if you need to override specific rows."
-                    )
-                elif ci_suffix == 'dev' and ns == 'babylon-catalog-dev':
-                    suggestion = (
-                        f"CSV has Catalog_Namespace={expected_namespace}, but '{ci}' is in {ns} (correct for .dev suffix). "
-                        f"FIX: Delete the entire 'Catalog_Namespace' column from your CSV to use auto-detection. "
-                        f"Auto-detection uses CI suffix (.event→event, .prod→prod, .dev→dev). "
-                        f"Only keep Catalog_Namespace column if you need to override specific rows."
-                    )
-                else:
-                    suggestion = (
-                        f"CSV has Catalog_Namespace={expected_namespace}, but '{ci}' is actually in {ns}. "
-                        f"FIX: Change this row's Catalog_Namespace to '{ns}', or delete the column to use auto-detection based on CI suffix."
-                    )
+                # Item exists but in different namespace - this is OK to deploy
+                suggestion = (
+                    f"Expected in {expected_namespace}, found in {ns}. "
+                    f"Will deploy from {ns} (where item actually exists)."
+                )
                 return (False, ns, suggestion)
         except Exception:
             continue

@@ -1065,22 +1065,26 @@ export const UploadTab: React.FC<Props> = ({
           {/* Catalog namespace mismatches */}
           {catalogNamespaceMismatches.length > 0 && (
             <Alert
-              variant="warning"
+              variant="info"
               isInline
-              title={`${catalogNamespaceMismatches.length} catalog item(s) found in different namespace`}
+              title={`${catalogNamespaceMismatches.length} item(s) found in different catalog namespace than CSV specifies`}
               style={{ marginBottom: 12 }}
             >
-              <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+              <div style={{ fontSize: '0.9rem', marginBottom: 8 }}>
+                <strong>Why this matters:</strong> Your CSV says these should be in one catalog namespace, but they actually exist in another.
+                This is common when deploying .prod items for an event, or using a CSV exported with incorrect namespace overrides.
+              </div>
+              <ul style={{ margin: '4px 0 8px', paddingLeft: 20, fontSize: '0.85rem' }}>
                 {catalogNamespaceMismatches.map((m, i) => (
                   <li key={i}>
-                    <strong>{m.ci_name}</strong> ({m.ci}): {m.suggestion}
+                    <strong>{m.ci_name}</strong> — CSV says <code>{m.expected_catalog_namespace}</code>, but found in <code>{m.found_catalog_namespace}</code>
                   </li>
                 ))}
               </ul>
-              <div style={{ marginTop: 8, fontWeight: 600 }}>
-                💡 <strong>Quick Fix:</strong> Delete the entire <code>Catalog_Namespace</code> column from your CSV.
-                Flow will auto-detect the correct namespace from the CI suffix (.event→event, .prod→prod, .dev→dev).
-                This allows mixed .prod and .event items in the same deployment.
+              <div style={{ padding: '8px 12px', background: 'var(--pf-v6-global--BackgroundColor--200)', borderRadius: 4 }}>
+                <strong>✓ Safe to deploy as-is</strong> — Flow will use the actual catalog namespace ({catalogNamespaceMismatches[0]?.found_catalog_namespace}) where these items exist.
+                <br />
+                <strong>OR</strong> fix your CSV by deleting the <code>Catalog_Namespace</code> column to use auto-detection (.event→event, .prod→prod).
               </div>
             </Alert>
           )}
