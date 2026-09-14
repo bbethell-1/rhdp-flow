@@ -331,9 +331,8 @@ def _list_tenant_cluster_pools() -> set[str]:
     Return the set of TenantClusterPool names that exist (cluster-wide).
 
     Pools are named exactly after their cluster CI, e.g.
-    ``ai-quickstarts.ai-qs-rag-cluster.event``. Pools live in the
-    ``shared-clusters`` namespace. Fails safe to an empty set so a missing
-    pool CRD / permission issue never blocks the deploy.
+    ``ai-quickstarts.ai-qs-rag-cluster.event``. Fails safe to an empty set so
+    a missing pool CRD / permission issue never blocks the deploy.
     """
     import json
     import subprocess
@@ -367,17 +366,11 @@ def check_tenant_cluster_references(schedules: list[Any]) -> dict[str, Any]:
          batch (CSV cluster row) so the tenant lands on that fresh cluster
          via its ``cloudSelector``.
 
-    This function queries the LIVE catalog (not the agnosticv source) because
-    that is what babylon actually deploys from. The live field names are
-    camelCase (``tenantCluster.componentName``) — agnosticv's snake_case
-    ``tenant_cluster.item`` is converted on sync.
-
     Returns a dict with tiered results:
       - ready:        tenant has a live tenantCluster ref AND a pool exists
       - ref_no_pool:  tenant has a ref but no TenantClusterPool exists yet
       - missing_refs: tenant has no tenantCluster ref in the live catalog
-      - has_cluster_row: subset of the above that is covered by a cluster row
-                         in this same CSV batch (classic path — will still work)
+      - has_cluster_row: whether covered by a cluster row in this same batch
       - total_tenant_count / checked
     """
     import json
@@ -390,7 +383,6 @@ def check_tenant_cluster_references(schedules: list[Any]) -> dict[str, Any]:
             "total_tenant_count": 0, "checked": True,
         }
 
-    # Catalog namespace resolver + cluster-row set from THIS batch (classic path).
     try:
         from rhdp_flow import get_catalog_namespace, is_cluster_ci
     except Exception:
@@ -399,8 +391,6 @@ def check_tenant_cluster_references(schedules: list[Any]) -> dict[str, Any]:
 
     existing_pools = _list_tenant_cluster_pools()
 
-    # CIs of any cluster provisioner rows present in this batch, so we can tell
-    # the user "you already deploy the cluster, so this will still work".
     batch_cluster_cis = set()
     for s in schedules:
         if getattr(s, "is_cluster", False) or (is_cluster_ci and is_cluster_ci(s.ci)):
@@ -412,8 +402,6 @@ def check_tenant_cluster_references(schedules: list[Any]) -> dict[str, Any]:
     checked_any = False
 
     for schedule in tenant_schedules:
-        # Resolve the catalog namespace — catalog items live in
-        # babylon-catalog-{event,prod,dev}, NOT the deploy target namespace.
         if get_catalog_namespace:
             catalog_ns = get_catalog_namespace(schedule.ci, getattr(schedule, "catalog_namespace", ""))
         else:
@@ -425,7 +413,6 @@ def check_tenant_cluster_references(schedules: list[Any]) -> dict[str, Any]:
                 shell=True, capture_output=True, text=True, timeout=10,
             )
             if result.returncode != 0:
-                # Couldn't query this item; don't guess — skip it.
                 continue
             checked_any = True
             catalog_item = json.loads(result.stdout)
@@ -433,27 +420,21 @@ def check_tenant_cluster_references(schedules: list[Any]) -> dict[str, Any]:
             continue
 
         spec = catalog_item.get("spec", {})
-        # Live path is spec.sandboxes; fall back to raw __meta__ just in case.
         sandboxes = spec.get("sandboxes") or spec.get("__meta__", {}).get("sandboxes", [])
 
         cluster_ref = None
         for sandbox in sandboxes:
             if sandbox.get("kind") != "OcpSandbox":
                 continue
-            # Live (synced) uses camelCase tenantCluster.componentName; raw
-            # agnosticv uses snake_case tenant_cluster.item — accept either.
             tc = sandbox.get("tenantCluster") or sandbox.get("tenant_cluster")
             if tc:
                 cluster_ref = tc.get("componentName") or tc.get("item")
                 break
 
-        # Naming-convention fallback for pool/cluster-row matching when no ref.
         detected = getattr(schedule, "detected_cluster_ci", None)
         cluster_target = cluster_ref or detected
 
-        # Is this tenant already covered by a cluster row in the same batch?
         covered_by_row = bool(cluster_target and cluster_target in batch_cluster_cis)
-        # Does a pool exist for the referenced/derived cluster?
         pool_exists = bool(cluster_target and cluster_target in existing_pools)
 
         record = {

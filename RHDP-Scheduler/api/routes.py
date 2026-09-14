@@ -52,6 +52,10 @@ from api.models import (
     HealthResponse,
     JobResponse,
     JobStatus,
+    LabagatorEventsResponse,
+    LabagatorEventSummary,
+    LabagatorImportRequest,
+    LabagatorPreviewResponse,
     LockRequest,
     NumUsersValidationResponse,
     NumUsersViolation,
@@ -74,6 +78,7 @@ from api.models import (
     UsersNotInCatalogAdvisory,
     WorkshopScheduleResponse,
 )
+from api.services import labagator_client
 from api.services.labagator_import import transform_labagator_to_flow
 from rhdp_flow import (
     DeploymentResult,
@@ -870,6 +875,65 @@ def list_all_pools(request: Request):
 # Schedules
 # ---------------------------------------------------------------------------
 
+@router.get("/labagator/events", response_model=LabagatorEventsResponse)
+def list_labagator_events():
+    """List Labagator events happening in the next 7 days, soonest first."""
+    try:
+        events = labagator_client.list_events()
+    except labagator_client.LabagatorError:
+        return LabagatorEventsResponse(events=[], error="labagator_unreachable")
+
+    try:
+        return LabagatorEventsResponse(
+            events=[
+                LabagatorEventSummary(
+                    id=e["id"], name=e["name"], start_date=e["start_date"],
+                    end_date=e["end_date"], location=e.get("location", ""),
+                )
+                for e in events
+            ],
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        logger.warning("Labagator returned malformed event data: %s", exc)
+        return LabagatorEventsResponse(events=[], error="labagator_unreachable")
+
+
+@router.get("/schedules/labagator-preview", response_model=LabagatorPreviewResponse)
+def labagator_preview(
+    event_id: int,
+    namespace: str,
+    event_name: str,
+    enable_workshop_interface: bool = True,
+    concurrency: int = 10,
+    white_glove: bool = True,
+    auto_stop_days: int = 7,
+    auto_destroy_days: int = 14,
+):
+    """Fetch the Flow-format CSV for a Labagator event without ingesting it."""
+    _validate_namespace(namespace)
+    try:
+        csv_text = labagator_client.get_deploy_handoff_csv(
+            event_id=event_id,
+            namespace=namespace,
+            enable_workshop_interface=enable_workshop_interface,
+            concurrency=concurrency,
+            white_glove=white_glove,
+            auto_stop_days=auto_stop_days,
+            auto_destroy_days=auto_destroy_days,
+        )
+    except labagator_client.LabagatorError as e:
+        raise HTTPException(502, str(e))
+
+    try:
+        reader = csv.reader(io.StringIO(csv_text))
+        all_rows = [row for row in reader if any(cell.strip() for cell in row)]
+        session_count = max(0, len(all_rows) - 1)
+        return LabagatorPreviewResponse(event_name=event_name, session_count=session_count, csv_text=csv_text)
+    except (TypeError, ValueError) as exc:
+        logger.warning("Labagator returned malformed CSV data: %s", exc)
+        raise HTTPException(502, "Labagator returned invalid data")
+
+
 @router.post("/schedules/upload", response_model=UploadResponse)
 @_rate_limit("10/minute")
 async def upload_csv(request: Request, file: UploadFile = File(...), _key=Depends(verify_api_key)):
@@ -881,6 +945,12 @@ async def upload_csv(request: Request, file: UploadFile = File(...), _key=Depend
     except UnicodeDecodeError:
         raise HTTPException(400, "File must be UTF-8 encoded CSV")
     return _ingest_schedule_csv_text(text, file.filename or "unknown.csv")
+
+
+@router.post("/schedules/import-from-labagator", response_model=UploadResponse)
+def import_from_labagator(body: LabagatorImportRequest, _key=Depends(verify_api_key)):
+    """Ingest a Flow-format CSV previously fetched from Labagator via /schedules/labagator-preview."""
+    return _ingest_schedule_csv_text(body.csv_text, body.filename)
 
 
 @router.post("/schedules/import-labagator", response_model=UploadResponse)
@@ -2684,6 +2754,7 @@ def check_tenant_cluster_refs(_key=Depends(verify_api_key)):
         return {"missing_refs": [], "total_tenant_count": 0}
 
 
+
 @router.post("/schedules/auto-provision-clusters")
 def auto_provision_clusters(_key=Depends(verify_api_key)):
     """Inject fresh cluster provisioners for tenants that have nowhere to land.
@@ -2706,7 +2777,6 @@ def auto_provision_clusters(_key=Depends(verify_api_key)):
         return result
     except Exception:
         logger.exception("Auto-provision clusters failed")
-        # Degrade gracefully — never block the deploy flow on this enhancement.
         return {"added": [], "count": 0, "needs_agv_prs": [],
                 "schedules": [_schedule_to_response(s) for s in _schedules]}
 
@@ -2731,4 +2801,3 @@ def remove_auto_provisioned(_key=Depends(verify_api_key)):
         logger.exception("Remove auto-provisioned clusters failed")
         return {"removed_count": 0,
                 "schedules": [_schedule_to_response(s) for s in _schedules]}
-

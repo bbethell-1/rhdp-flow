@@ -25,6 +25,8 @@ import {
   SearchInput,
   Tooltip,
   TextInput,
+  ExpandableSection,
+  NumberInput,
   ToggleGroup,
   ToggleGroupItem,
 } from '@patternfly/react-core';
@@ -36,7 +38,7 @@ import InfoCircleIcon from '@patternfly/react-icons/dist/esm/icons/info-circle-i
 import { api } from '../services/api';
 import { DiffView } from './DiffView';
 import { CatalogItemSelect } from './CatalogItemSelect';
-import type { WorkshopSchedule, DeploymentResult, NumUsersViolation, UsersNotInCatalogAdvisory, ScheduleExampleMeta } from '../types';
+import type { WorkshopSchedule, DeploymentResult, NumUsersViolation, UsersNotInCatalogAdvisory, ScheduleExampleMeta, LabagatorEventSummary, LabagatorPreviewResponse } from '../types';
 
 /* ── Schedule date validation helpers ── */
 
@@ -97,17 +99,42 @@ export const UploadTab: React.FC<Props> = ({
       .catch(() => setScheduleExamples([]));
   }, []);
 
+  useEffect(() => {
+    api.listLabagatorEvents()
+      .then((res) => {
+        setLabagatorUnavailable(!!res.error);
+        setLabagatorEvents(res.events);
+      })
+      .catch(() => setLabagatorUnavailable(true));
+  }, []);
+
   const [deploying, setDeploying] = useState(false);
   const [deployPaused, setDeployPaused] = useState(false);
   const [validating, setValidating] = useState(false);
   const [yamlDownloading, setYamlDownloading] = useState(false);
   const [rowEditsLocked, setRowEditsLocked] = useState(false);
-  const [importMode, setImportMode] = useState<'flow' | 'labagator'>('flow');
   const [scheduleExamples, setScheduleExamples] = useState<ScheduleExampleMeta[]>([]);
   const [loadingExampleSlug, setLoadingExampleSlug] = useState<string | null>(null);
   const [passwordCount, setPasswordCount] = useState<number | null>(null);
 
-  // Labagator import settings
+  // Labagator import state (live API import)
+  const [labagatorEvents, setLabagatorEvents] = useState<LabagatorEventSummary[]>([]);
+  const [labagatorUnavailable, setLabagatorUnavailable] = useState(false);
+  const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
+  const [labagatorNamespace, setLabagatorNamespace] = useState('');
+  const [labagatorNamespaceError, setLabagatorNamespaceError] = useState('');
+  const [labagatorAdvancedOpen, setLabagatorAdvancedOpen] = useState(false);
+  const [labagatorEnableWorkshopInterface, setLabagatorEnableWorkshopInterface] = useState(true);
+  const [labagatorConcurrency, setLabagatorConcurrency] = useState(10);
+  const [labagatorAutoStopDays, setLabagatorAutoStopDays] = useState(7);
+  const [labagatorAutoDestroyDays, setLabagatorAutoDestroyDays] = useState(14);
+  const [labagatorPreviewing, setLabagatorPreviewing] = useState(false);
+  const [labagatorPreview, setLabagatorPreview] = useState<LabagatorPreviewResponse | null>(null);
+  const [labagatorImporting, setLabagatorImporting] = useState(false);
+  const [showLabagatorConfirm, setShowLabagatorConfirm] = useState(false);
+
+  // Labagator import settings (legacy manual CSV upload)
+  const [importMode, setImportMode] = useState<'flow' | 'labagator'>('flow');
   const [labagatorDefaultCI, setLabagatorDefaultCI] = useState('');
   const [labagatorDefaultUsers, setLabagatorDefaultUsers] = useState(25);
   const [labagatorBufferHours, setLabagatorBufferHours] = useState(2);
@@ -522,7 +549,6 @@ export const UploadTab: React.FC<Props> = ({
       showToast(msg, data.skipped_rows ? 'danger' : 'success');
       try {
         await refreshClusterValidation();
-        // Validate cluster-tenant relationships
         const ctRes = await api.validateClusterTenant();
         setClusterTenantValidation(ctRes);
 
@@ -551,7 +577,6 @@ export const UploadTab: React.FC<Props> = ({
               if (prov.count > 0 || (prov.needs_agv_prs || []).length > 0) {
                 setAutoProvisionResult({ added: prov.added || [], needs_agv_prs: prov.needs_agv_prs || [] });
                 if (prov.schedules) setSchedules(prov.schedules);
-                // Re-check refs so the "will fail" alert clears for injected clusters.
                 try { setMissingTenantRefs(await api.checkTenantClusterRefs()); } catch { /* ignore */ }
               }
             } catch (e) {
@@ -573,6 +598,69 @@ export const UploadTab: React.FC<Props> = ({
       }
     } catch (e) {
       showToast(`${importMode === 'labagator' ? 'Import' : 'Upload'} failed: ${e}`, 'danger');
+    }
+  };
+
+  const NAMESPACE_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+
+  const handleLabagatorPreview = async () => {
+    if (labagatorPreviewing) return;
+    if (selectedEventId === null) { showToast('Please select an event', 'danger'); return; }
+    if (!labagatorNamespace || labagatorNamespace.length > 63 || !NAMESPACE_RE.test(labagatorNamespace)) {
+      setLabagatorNamespaceError('Invalid namespace: must match [a-z0-9-], 1-63 chars');
+      return;
+    }
+    setLabagatorNamespaceError('');
+    const event = labagatorEvents.find((e) => e.id === selectedEventId);
+    if (!event) { showToast('Selected event not found', 'danger'); return; }
+
+    setLabagatorPreviewing(true);
+    try {
+      const preview = await api.previewLabagatorImport({
+        event_id: selectedEventId,
+        namespace: labagatorNamespace,
+        event_name: event.name,
+        enable_workshop_interface: labagatorEnableWorkshopInterface,
+        concurrency: labagatorConcurrency,
+        white_glove: whiteGlove,
+        auto_stop_days: labagatorAutoStopDays,
+        auto_destroy_days: labagatorAutoDestroyDays,
+      });
+      if (preview.session_count === 0) {
+        showToast('No sessions found for this event this week.', 'info');
+        return;
+      }
+      setLabagatorPreview(preview);
+      setShowLabagatorConfirm(true);
+    } catch (e) {
+      showToast(`Preview failed: ${e}`, 'danger');
+    } finally {
+      setLabagatorPreviewing(false);
+    }
+  };
+
+  const handleLabagatorConfirm = async () => {
+    if (!labagatorPreview || labagatorImporting) return;
+    setLabagatorImporting(true);
+    setShowLabagatorConfirm(false);
+    try {
+      const data = await api.importFromLabagator(labagatorPreview.csv_text, `${labagatorPreview.event_name}.csv`);
+      setSchedules(data.schedules);
+      setSkippedRows(data.skipped_rows ?? 0);
+      setTotalRows(data.total_rows ?? 0);
+      showToast(`Imported ${data.count} session(s) from ${labagatorPreview.event_name}`, 'success');
+      try {
+        await refreshClusterValidation();
+        const ctRes = await api.validateClusterTenant();
+        setClusterTenantValidation(ctRes);
+      } catch (e) {
+        console.warn('Post-import cluster validation failed', e);
+      }
+    } catch (e) {
+      showToast(`Import failed: ${e}`, 'danger');
+    } finally {
+      setLabagatorPreview(null);
+      setLabagatorImporting(false);
     }
   };
 
@@ -888,27 +976,134 @@ export const UploadTab: React.FC<Props> = ({
       )}
 
       {/* CSV Upload */}
-      <Split hasGutter style={{ marginBottom: 16, alignItems: 'center' }}>
-        <SplitItem isFilled>
-          <FileUpload
-            id="csv-file-upload"
-            filename={csvFilename}
-            filenamePlaceholder="Drag & drop or browse for a CSV file"
-            browseButtonText="Browse"
-            clearButtonText="Clear"
-            onFileInputChange={(_e, file) => { setCsvFile(file); setCsvFilename(file.name); }}
-            onClearClick={() => { setCsvFile(null); setCsvFilename(''); }}
-            dropzoneProps={{ accept: { 'text/csv': ['.csv'] } }}
-            hideDefaultPreview
-          />
-        </SplitItem>
-        <SplitItem>
-          <Button variant="primary" onClick={handleUpload}>Upload</Button>
-        </SplitItem>
-        <SplitItem>
-          <Button variant="secondary" onClick={() => setShowClearConfirm(true)}>Clear / New Upload</Button>
-        </SplitItem>
-      </Split>
+      <Card style={{ marginBottom: 16 }}>
+        <CardTitle>Upload Flow CSV</CardTitle>
+        <CardBody>
+          <Split hasGutter style={{ alignItems: 'center' }}>
+            <SplitItem isFilled>
+              <FileUpload
+                id="csv-file-upload"
+                filename={csvFilename}
+                filenamePlaceholder="Drag & drop or browse for a CSV file"
+                browseButtonText="Browse"
+                clearButtonText="Clear"
+                onFileInputChange={(_e, file) => { setCsvFile(file); setCsvFilename(file.name); }}
+                onClearClick={() => { setCsvFile(null); setCsvFilename(''); }}
+                dropzoneProps={{ accept: { 'text/csv': ['.csv'] } }}
+                hideDefaultPreview
+              />
+            </SplitItem>
+            <SplitItem>
+              <Button variant="primary" onClick={handleUpload}>Upload</Button>
+            </SplitItem>
+            <SplitItem>
+              <Button variant="secondary" onClick={() => setShowClearConfirm(true)}>Clear / New Upload</Button>
+            </SplitItem>
+          </Split>
+        </CardBody>
+      </Card>
+
+      {/* Import from Labagator */}
+      <Card style={{ marginBottom: 16 }}>
+        <CardTitle>Import from Labagator</CardTitle>
+        <CardBody>
+          {labagatorUnavailable ? (
+            <Alert variant="warning" isInline title="Labagator is unavailable — use manual CSV export instead" />
+          ) : labagatorEvents.length === 0 ? (
+            <Alert variant="info" isInline title="No Labagator events this week" />
+          ) : (
+            <>
+              <Split hasGutter style={{ marginBottom: 12, alignItems: 'flex-end' }}>
+                <SplitItem isFilled>
+                  <FormSelect
+                    aria-label="Labagator event"
+                    value={selectedEventId ?? ''}
+                    onChange={(_e, v) => setSelectedEventId(v ? Number(v) : null)}
+                  >
+                    <FormSelectOption key="" value="" label="Select an event…" />
+                    {labagatorEvents.map((ev) => (
+                      <FormSelectOption key={ev.id} value={ev.id} label={`${ev.name} (${ev.start_date} – ${ev.end_date})`} />
+                    ))}
+                  </FormSelect>
+                </SplitItem>
+                <SplitItem isFilled>
+                  <TextInput
+                    id="labagator-namespace"
+                    aria-label="Namespace"
+                    placeholder="Namespace (required)"
+                    value={labagatorNamespace}
+                    onChange={(_e, v) => { setLabagatorNamespace(v); setLabagatorNamespaceError(''); }}
+                    validated={labagatorNamespaceError ? 'error' : 'default'}
+                  />
+                </SplitItem>
+                <SplitItem>
+                  <Button
+                    variant="primary"
+                    isDisabled={!labagatorNamespace || labagatorPreviewing}
+                    isLoading={labagatorPreviewing}
+                    onClick={handleLabagatorPreview}
+                  >
+                    Import
+                  </Button>
+                </SplitItem>
+              </Split>
+              {labagatorNamespaceError && (
+                <Alert variant="danger" isInline title={labagatorNamespaceError} style={{ marginBottom: 12 }} />
+              )}
+
+              <ExpandableSection
+                toggleText="Advanced"
+                isExpanded={labagatorAdvancedOpen}
+                onToggle={() => setLabagatorAdvancedOpen(!labagatorAdvancedOpen)}
+              >
+                <Split hasGutter style={{ marginTop: 12 }}>
+                  <SplitItem>
+                    <Switch
+                      id="labagator-enable-workshop-interface"
+                      label="Enable workshop interface"
+                      isChecked={labagatorEnableWorkshopInterface}
+                      onChange={(_e, checked) => setLabagatorEnableWorkshopInterface(checked)}
+                    />
+                  </SplitItem>
+                  <SplitItem>
+                    <NumberInput
+                      value={labagatorConcurrency}
+                      min={1}
+                      onMinus={() => setLabagatorConcurrency((n) => Math.max(1, n - 1))}
+                      onPlus={() => setLabagatorConcurrency((n) => n + 1)}
+                      onChange={(e) => setLabagatorConcurrency(Number((e.target as HTMLInputElement).value) || 1)}
+                      inputAriaLabel="Concurrency"
+                      widthChars={4}
+                    />
+                  </SplitItem>
+                  <SplitItem>
+                    <NumberInput
+                      value={labagatorAutoStopDays}
+                      min={0}
+                      onMinus={() => setLabagatorAutoStopDays((n) => Math.max(0, n - 1))}
+                      onPlus={() => setLabagatorAutoStopDays((n) => n + 1)}
+                      onChange={(e) => setLabagatorAutoStopDays(Number((e.target as HTMLInputElement).value) || 0)}
+                      inputAriaLabel="Auto-stop days"
+                      widthChars={4}
+                    />
+                  </SplitItem>
+                  <SplitItem>
+                    <NumberInput
+                      value={labagatorAutoDestroyDays}
+                      min={0}
+                      onMinus={() => setLabagatorAutoDestroyDays((n) => Math.max(0, n - 1))}
+                      onPlus={() => setLabagatorAutoDestroyDays((n) => n + 1)}
+                      onChange={(e) => setLabagatorAutoDestroyDays(Number((e.target as HTMLInputElement).value) || 0)}
+                      inputAriaLabel="Auto-destroy days"
+                      widthChars={4}
+                    />
+                  </SplitItem>
+                </Split>
+              </ExpandableSection>
+            </>
+          )}
+        </CardBody>
+      </Card>
 
       {/* Passwords CSV upload */}
       <Split hasGutter style={{ marginBottom: 16, alignItems: 'center' }}>
@@ -1196,9 +1391,7 @@ export const UploadTab: React.FC<Props> = ({
               ...(missingTenantRefs.missing_refs || []),
               ...(missingTenantRefs.ref_no_pool || []),
             ];
-            // No landing spot at all → will fail on deploy.
             const willFail = all.filter((r: any) => !r.pool_exists && !r.has_cluster_row);
-            // Covered by a fresh cluster provisioner in this same CSV → fine, just FYI.
             const viaFreshCluster = all.filter((r: any) => !r.pool_exists && r.has_cluster_row);
 
             if (willFail.length === 0 && viaFreshCluster.length === 0) return null;
@@ -2292,6 +2485,28 @@ export const UploadTab: React.FC<Props> = ({
         <ModalFooter>
           <Button variant="primary" onClick={handleClear}>Clear Session</Button>
           <Button variant="link" onClick={() => setShowClearConfirm(false)}>Cancel</Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Labagator import confirmation modal */}
+      <Modal
+        variant="small"
+        isOpen={showLabagatorConfirm}
+        onClose={() => { setShowLabagatorConfirm(false); setLabagatorPreview(null); }}
+        aria-labelledby="labagator-confirm-title"
+      >
+        <ModalHeader title="Confirm Labagator Import" labelId="labagator-confirm-title" />
+        <ModalBody>
+          {labagatorPreview && (
+            <p>
+              Import <strong>{labagatorPreview.session_count}</strong> session(s) from{' '}
+              <strong>{labagatorPreview.event_name}</strong> into namespace <strong>{labagatorNamespace}</strong>?
+            </p>
+          )}
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="primary" onClick={handleLabagatorConfirm} isDisabled={labagatorImporting} isLoading={labagatorImporting}>Confirm</Button>
+          <Button variant="link" onClick={() => { setShowLabagatorConfirm(false); setLabagatorPreview(null); }}>Cancel</Button>
         </ModalFooter>
       </Modal>
 

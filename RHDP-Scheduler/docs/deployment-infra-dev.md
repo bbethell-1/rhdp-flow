@@ -61,11 +61,14 @@ Flow integrates with the Labagator event planning tool for seamless session-to-w
 
 ### Import Workflow
 
-1. Export sessions from Labagator (CSV format)
-2. In Flow Upload tab, toggle "Labagator Sessions"
-3. Upload the Labagator CSV
-4. Sessions auto-convert to Flow workshop format
-5. Deploy as usual
+1. In Flow Upload tab, locate the "Import from Labagator" card
+2. Select an event from the dropdown (populated live from Labagator's API)
+3. Enter the target namespace, adjusting Advanced options if needed
+4. Click "Import" — Flow fetches a ready-made Flow-format CSV from Labagator and shows a confirmation dialog with the session count and event name
+5. Click "Confirm" to load the sessions into the schedule table, or "Cancel" to discard the preview
+6. Deploy as usual
+
+CSV shaping (multi-asset grouping, password fill, namespace/concurrency/auto-stop/auto-destroy) is done server-side by Labagator's own export endpoint — Flow no longer re-derives this from raw session data.
 
 ### Export Workflow
 
@@ -73,15 +76,9 @@ Flow integrates with the Labagator event planning tool for seamless session-to-w
 2. In Deployments tab, click "Export for Labagator"
 3. Import exported CSV back into Labagator for session updates
 
-### CSV Mapping
-
-- `session_code` → CI Name prefix (e.g., "LAB-001 - Title")
-- `session_date` + `start_time` → Provisioning Date
-- `session_date` + `end_time` → Auto-stop Date
-- Auto-destroy: 2 hours after stop time
-- Namespace: `labagator-{session-code}`
-
 ### API Endpoints
 
-- Import: `POST /api/schedules/import-labagator`
+- List events: `GET /api/labagator/events`
+- Preview sessions: `GET /api/schedules/labagator-preview?event_id=<id>&namespace=<ns>` (returns `{event_name, session_count, csv_text}`, does not ingest)
+- Import sessions: `POST /api/schedules/import-from-labagator` (body: `{"csv_text": "<csv>", "filename": "<name>"}`, ingests the CSV returned by the preview call)
 - Export: `GET /api/schedules/export-for-labagator`

@@ -25,6 +25,8 @@ import type {
   DeployPreviewResponse,
   PoolInfo,
   PoolLookupResponse,
+  LabagatorEventsResponse,
+  LabagatorPreviewResponse,
 } from '../types';
 
 export interface TenantClusterRef {
@@ -111,6 +113,32 @@ export const api = {
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
+  listLabagatorEvents: () => cachedRequest<LabagatorEventsResponse>('/labagator/events'),
+
+  previewLabagatorImport: (params: {
+    event_id: number;
+    namespace: string;
+    event_name: string;
+    enable_workshop_interface: boolean;
+    concurrency: number;
+    white_glove: boolean;
+    auto_stop_days: number;
+    auto_destroy_days: number;
+  }): Promise<LabagatorPreviewResponse> => {
+    const qs = new URLSearchParams({
+      event_id: String(params.event_id),
+      namespace: params.namespace,
+      event_name: params.event_name,
+      enable_workshop_interface: String(params.enable_workshop_interface),
+      concurrency: String(params.concurrency),
+      white_glove: String(params.white_glove),
+      auto_stop_days: String(params.auto_stop_days),
+      auto_destroy_days: String(params.auto_destroy_days),
+    });
+    return request<LabagatorPreviewResponse>(`/schedules/labagator-preview?${qs.toString()}`);
+  },
+
+  /** Legacy manual-upload path: POST a Labagator session-export CSV, transformed server-side. */
   importLabagatorCSV: async (
     file: File,
     options?: {
@@ -141,6 +169,12 @@ export const api = {
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
+
+  importFromLabagator: (csvText: string, filename: string): Promise<UploadResponse> =>
+    request<UploadResponse>('/schedules/import-from-labagator', {
+      method: 'POST',
+      body: JSON.stringify({ csv_text: csvText, filename }),
+    }),
   uploadPasswordsCSV: async (file: File): Promise<{count: number; message: string}> => {
     const form = new FormData();
     form.append('file', file);
