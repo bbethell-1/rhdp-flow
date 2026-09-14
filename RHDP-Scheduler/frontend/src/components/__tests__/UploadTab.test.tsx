@@ -165,4 +165,43 @@ describe('UploadTab', () => {
     );
     expect(screen.getByText('Upload Passwords')).toBeInTheDocument();
   });
+
+  it('shows the resolved cluster CI and its source for a tenant row', () => {
+    const tenantSchedule = {
+      ...mockSchedule,
+      item_type: 'Tenant' as const,
+      is_tenant: true,
+      detected_cluster_ci: 'ocp4-cluster.prod',
+      cluster_ci_source: 'agnosticv' as const,
+    };
+    render(
+      <UploadTab
+        dryRun={true}
+        schedules={[tenantSchedule]}
+        setSchedules={noop}
+        results={[]}
+        setResults={noop}
+        showToast={noop}
+        onClear={noop}
+      />
+    );
+    expect(screen.getByText('ocp4-cluster.prod')).toBeInTheDocument();
+    expect(screen.getByText('AgnosticV')).toBeInTheDocument();
+  });
+
+  it('shows a dash for non-tenant rows in the cluster column', () => {
+    render(
+      <UploadTab
+        dryRun={true}
+        schedules={[mockSchedule]}
+        setSchedules={noop}
+        results={[]}
+        setResults={noop}
+        showToast={noop}
+        onClear={noop}
+      />
+    );
+    const clusterCells = screen.getAllByText('-');
+    expect(clusterCells.length).toBeGreaterThan(0);
+  });
 });

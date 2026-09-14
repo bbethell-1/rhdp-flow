@@ -44,6 +44,8 @@ export interface WorkshopSchedule {
   is_cluster?: boolean;
   is_tenant?: boolean;
   detected_cluster_ci?: string | null;
+  detection_method?: 'csv_label' | 'naming' | 'none';
+  cluster_ci_source?: 'override' | 'agnosticv' | 'naming' | null;
   auto_added?: boolean;
 }
 

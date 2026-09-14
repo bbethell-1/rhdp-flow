@@ -7,6 +7,7 @@ import {
   CardTitle,
   FormSelect,
   FormSelectOption,
+  Label,
   PageSection,
   Title,
   Progress,
@@ -1351,7 +1352,7 @@ export const UploadTab: React.FC<Props> = ({
               <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
                 {clusterTenantValidation.errors.map((e: any, i: number) => (
                   <li key={i}>
-                    {e.tenant_name || e.tenant_ci}: {e.issue}
+                    {e.tenant_name || e.tenant_ci}: {e.message}
                   </li>
                 ))}
               </ul>
@@ -1402,7 +1403,7 @@ export const UploadTab: React.FC<Props> = ({
                   <Th>Item Type</Th>
                   <Th>CI Name</Th>
                   <Th>CI (Catalog Item)</Th>
-                  <Th>Cluster Link</Th>
+                  <Th>Cluster</Th>
                   {usePoolLookup && (
                     <Th>
                       Resource Pool{' '}
@@ -1546,29 +1547,29 @@ export const UploadTab: React.FC<Props> = ({
                           />
                         )}
                       </Td>
-                      <Td dataLabel="Cluster Link">
-                        {s.item_type === 'Tenant' ? (
-                          <FormSelect
-                            value={s.cluster_link || ''}
-                            onChange={(_e, value) => {
-                              const updated = schedules.map((sc, idx) => idx === i ? { ...sc, cluster_link: value as string } : sc);
-                              setSchedules(updated);
-                              api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
-                            }}
-                            aria-label={`Cluster link for ${s.ci_name}`}
-                            style={{ minWidth: '200px' }}
-                          >
-                            <FormSelectOption key="none" value="" label="(select cluster)" />
-                            {schedules
-                              .filter((sc, idx) => sc.item_type === 'Cluster' && idx !== i)
-                              .map((clusterSched, idx) => (
-                                <FormSelectOption
-                                  key={idx}
-                                  value={clusterSched.ci_name}
-                                  label={clusterSched.ci_name}
-                                />
-                              ))}
-                          </FormSelect>
+                      <Td dataLabel="Cluster">
+                        {s.item_type === 'Tenant' && s.detected_cluster_ci ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span>{s.detected_cluster_ci}</span>
+                            {s.cluster_ci_source && (
+                              <Label
+                                isCompact
+                                color={
+                                  s.cluster_ci_source === 'agnosticv'
+                                    ? 'green'
+                                    : s.cluster_ci_source === 'override'
+                                    ? 'blue'
+                                    : 'grey'
+                                }
+                              >
+                                {s.cluster_ci_source === 'agnosticv'
+                                  ? 'AgnosticV'
+                                  : s.cluster_ci_source === 'override'
+                                  ? 'Manual override'
+                                  : 'Naming convention'}
+                              </Label>
+                            )}
+                          </div>
                         ) : (
                           <span style={{ color: 'var(--pf-v6-global--Color--200)' }}>-</span>
                         )}

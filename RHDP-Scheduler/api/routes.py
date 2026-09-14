@@ -81,6 +81,7 @@ from rhdp_flow import (
     WorkshopSchedule,
     _dedup_qa_results,
     _merge_qa1_qa2,
+    analyze_cluster_tenant_relationships,
     check_showroom_health,
     create_multi_workshop_from_group,
     derive_base_domain,
@@ -110,6 +111,7 @@ from rhdp_flow import (
     users_column_ignored_by_catalog_advisory,
     utc_timestamp_str,
     validate_catalog_item_exists,
+    validate_cluster_before_tenant,
 )
 
 logger = logging.getLogger("rhdp_flow.api")
@@ -425,6 +427,12 @@ def _get_config(
     config.white_glove = white_glove
     config.redirect = redirect
     config.base_domain = _detect_and_cache_base_domain()
+    config.agnosticv_repo_url = os.environ.get("AGNOSTICV_REPO_URL", config.agnosticv_repo_url)
+    config.agnosticv_cache_dir = os.environ.get("AGNOSTICV_CACHE_DIR", config.agnosticv_cache_dir)
+    config.agnosticv_ssh_key_path = os.environ.get("AGNOSTICV_SSH_KEY_PATH")
+    ttl = os.environ.get("AGNOSTICV_REFRESH_TTL_SECONDS")
+    if ttl:
+        config.agnosticv_refresh_ttl_seconds = int(ttl)
     return config
 
 
@@ -454,6 +462,8 @@ def _schedule_to_response(s: WorkshopSchedule) -> WorkshopScheduleResponse:
         is_cluster=s.is_cluster,
         is_tenant=s.is_tenant,
         detected_cluster_ci=s.detected_cluster_ci,
+        detection_method=s.detection_method,
+        cluster_ci_source=s.cluster_ci_source,
         auto_added=s.auto_added,
     )
 
@@ -1131,15 +1141,18 @@ def validate_cluster_tenant_scheduling(_key=Depends(verify_api_key)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
 
-    from cluster_tenant_validation import validate_cluster_before_tenant
+    config = _get_config()
+    analyze_cluster_tenant_relationships(_schedules, config=config)
+    validation = validate_cluster_before_tenant(_schedules, config=config)
 
-    validation = validate_cluster_before_tenant(_schedules)
+    tenants_checked = sum(1 for s in _schedules if s.is_tenant)
+    clusters_found = sum(1 for r in validation["relationships"] if r.get("status") in ("valid", "timing_violation", "found_on_cluster"))
 
     return ClusterTenantValidationResponse(
-        errors=[ClusterTenantValidationError(**e) for e in validation["errors"]],
-        warnings=[ClusterTenantValidationWarning(**w) for w in validation["warnings"]],
-        tenants_checked=validation["tenants_checked"],
-        clusters_found=validation["clusters_found"],
+        errors=[ClusterTenantValidationError(**e) for e in validation["error_details"]],
+        warnings=[ClusterTenantValidationWarning(**w) for w in validation["warning_details"]],
+        tenants_checked=tenants_checked,
+        clusters_found=clusters_found,
     )
 
 
