@@ -1067,19 +1067,22 @@ export const UploadTab: React.FC<Props> = ({
             <Alert
               variant="info"
               isInline
-              title={`${catalogNamespaceMismatches.length} item(s) are in a different catalog than your CSV says`}
+              title={`${catalogNamespaceMismatches.length} item(s) auto-detected in different catalog`}
               style={{ marginBottom: 12 }}
             >
               <div style={{ marginBottom: 8 }}>
-                Your CSV says these items are in <code>{catalogNamespaceMismatches[0]?.expected_catalog_namespace}</code>,
-                but they're actually in <code>{catalogNamespaceMismatches[0]?.found_catalog_namespace}</code>.
-                {catalogNamespaceMismatches.length > 3 && ` (${catalogNamespaceMismatches.length} total)`}
+                Flow found these items in <code>{catalogNamespaceMismatches[0]?.found_catalog_namespace}</code> and will deploy from there:
               </div>
-              <div style={{ padding: '10px 14px', background: 'var(--pf-v6-global--BackgroundColor--200)', borderRadius: 4, fontSize: '0.95rem' }}>
-                <strong>✓ You can deploy now</strong> — Flow will use the correct catalog where items exist.
-                <br />
-                <strong style={{ marginTop: 6, display: 'block' }}>To fix the mismatch:</strong> Delete the <code>Catalog_Namespace</code> column
-                from your CSV to let Flow auto-detect based on CI suffix (.prod → prod, .event → event).
+              <ul style={{ margin: '0 0 8px 20px', fontSize: '0.9rem' }}>
+                {catalogNamespaceMismatches.slice(0, 5).map((m, i) => (
+                  <li key={i}>{m.ci_name}</li>
+                ))}
+                {catalogNamespaceMismatches.length > 5 && (
+                  <li style={{ fontStyle: 'italic' }}>...and {catalogNamespaceMismatches.length - 5} more</li>
+                )}
+              </ul>
+              <div style={{ fontSize: '0.9rem', color: 'var(--pf-v6-global--Color--200)' }}>
+                <strong>Deploy Settings</strong> below to override catalog namespace if needed.
               </div>
             </Alert>
           )}
