@@ -1430,20 +1430,31 @@ export const UploadTab: React.FC<Props> = ({
                     title={`${willFail.length} workshop(s) will fail — no cluster to run on`}
                     style={{ marginBottom: 12 }}
                     actionLinks={
-                      <Button
-                        variant="danger"
-                        size="sm"
-                        onClick={() => {
-                          const cis = [...new Set(willFail.map((r: any) => r.cluster_ref).filter(Boolean))] as string[];
-                          setPoolCreateCIs(cis.length > 0 ? cis : willFail.map((r: any) => r.ci));
-                          setPoolCreateYaml('');
-                          setPoolCreateResults([]);
-                          setPoolCreateApplied(false);
-                          setShowPoolCreateModal(true);
-                        }}
-                      >
-                        Create TenantClusterPools (recommended)
-                      </Button>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={() => {
+                            const cis = [...new Set(willFail.map((r: any) => r.cluster_ref).filter(Boolean))] as string[];
+                            setPoolCreateCIs(cis.length > 0 ? cis : willFail.map((r: any) => r.ci));
+                            setPoolCreateYaml('');
+                            setPoolCreateResults([]);
+                            setPoolCreateApplied(false);
+                            setShowPoolCreateModal(true);
+                          }}
+                        >
+                          Create TenantClusterPools
+                        </Button>
+                        <Button
+                          variant="link"
+                          size="sm"
+                          onClick={async () => {
+                            try { setMissingTenantRefs(await api.checkTenantClusterRefs()); } catch { /* ignore */ }
+                          }}
+                        >
+                          Re-check cluster refs
+                        </Button>
+                      </div>
                     }
                   >
                     <div style={{ marginBottom: 8 }}>
@@ -2873,9 +2884,9 @@ export const UploadTab: React.FC<Props> = ({
                   setPoolCreateResults(res.results);
                   const allOk = res.results.every(r => r.success);
                   if (allOk) {
-                    showToast(`Created ${res.count} TenantClusterPool(s) successfully`, 'success');
-                    // Re-validate to clear the danger alert
-                    try { setMissingTenantRefs(await api.checkTenantClusterRefs()); } catch { /* ignore */ }
+                    showToast(`TenantClusterPool CRD(s) created — enable and wait for clusters before deploying`, 'success');
+                    // Do NOT re-validate here: pool CRD exists but has no ready clusters yet.
+                    // The danger alert should stay until the pool is actually provisioned.
                   } else {
                     showToast('Some pools failed to apply — see results below', 'danger');
                   }
@@ -2903,6 +2914,26 @@ export const UploadTab: React.FC<Props> = ({
                   {r.success ? r.output : r.error}
                 </Alert>
               ))}
+              {poolCreateResults.some(r => r.success) && (
+                <Alert
+                  variant="info"
+                  isInline
+                  title="Pool CRD created — not yet ready to deploy"
+                  style={{ marginTop: 8 }}
+                >
+                  <ol style={{ margin: '6px 0 0 18px', fontSize: '0.875rem', lineHeight: 1.6 }}>
+                    <li>
+                      The CRD is created{poolCreateEnabled
+                        ? ' and enabled.'
+                        : <> but <strong>disabled</strong> — set <code>enabled: true</code> or toggle it in the cluster console to start provisioning.</>
+                      }
+                    </li>
+                    <li>Babylon will provision the clusters. This typically takes <strong>30–60 minutes</strong>.</li>
+                    <li>Once ready, close this modal and click <strong>Re-check cluster refs</strong> in the alert — it will clear when the pool is ready.</li>
+                    <li>Then deploy your workshops normally.</li>
+                  </ol>
+                </Alert>
+              )}
             </div>
           )}
 
