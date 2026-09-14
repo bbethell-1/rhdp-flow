@@ -1435,15 +1435,30 @@ export const UploadTab: React.FC<Props> = ({
                           variant="danger"
                           size="sm"
                           onClick={() => {
-                            const cis = [...new Set(willFail.map((r: any) => r.cluster_ref).filter(Boolean))] as string[];
-                            setPoolCreateCIs(cis.length > 0 ? cis : willFail.map((r: any) => r.ci));
+                            // Use cluster_ref from CatalogItem if available; otherwise
+                            // derive from tenant CI by swapping -tenant. → -cluster.
+                            // Never fall back to the tenant CI itself — that would create
+                            // a pool named after the tenant, which Babylon can't provision.
+                            const cis = [...new Set(willFail.map((r: any) => {
+                              if (r.cluster_ref) return r.cluster_ref;
+                              const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
+                              return derived !== r.ci ? derived : null;
+                            }).filter(Boolean))] as string[];
+                            setPoolCreateCIs(cis);
                             setPoolCreateYaml('');
                             setPoolCreateResults([]);
                             setPoolCreateApplied(false);
                             setShowPoolCreateModal(true);
                           }}
                         >
-                          Create TenantClusterPools
+                          {(() => {
+                            const cis = [...new Set(willFail.map((r: any) => {
+                              if (r.cluster_ref) return r.cluster_ref;
+                              const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
+                              return derived !== r.ci ? derived : null;
+                            }).filter(Boolean))];
+                            return `Create ${cis.length} TenantClusterPool${cis.length === 1 ? '' : 's'}`;
+                          })()}
                         </Button>
                         <Button
                           variant="link"
@@ -2770,13 +2785,42 @@ export const UploadTab: React.FC<Props> = ({
         }}
         aria-labelledby="pool-create-title"
       >
-        <ModalHeader title="Create TenantClusterPools" labelId="pool-create-title" />
+        <ModalHeader
+          title={`Create TenantClusterPools (${poolCreateCIs.length} pool${poolCreateCIs.length === 1 ? '' : 's'})`}
+          labelId="pool-create-title"
+        />
         <ModalBody>
-          <Alert variant="info" isInline title="What this does" style={{ marginBottom: 16 }}>
+          <Alert variant="info" isInline title="What this does" style={{ marginBottom: 12 }}>
             Creates a <code>TenantClusterPool</code> CRD in the <code>shared-clusters</code> namespace for each
             missing cluster. Babylon uses these pools to pre-provision and share cluster capacity across events.
             Review the YAML before applying — you can copy it and apply manually, or click Apply to push it directly.
           </Alert>
+
+          {/* Cluster CI list — confirm the right pools before applying */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 6 }}>
+              Pools to create ({poolCreateCIs.length}):
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {poolCreateCIs.map((ci, i) => (
+                <span
+                  key={i}
+                  style={{
+                    display: 'inline-block',
+                    padding: '2px 10px',
+                    borderRadius: 12,
+                    fontSize: '0.8rem',
+                    fontFamily: 'monospace',
+                    background: 'var(--pf-v6-global--BackgroundColor--200)',
+                    border: '1px solid var(--pf-v6-global--BorderColor--100)',
+                    color: 'var(--pf-v6-global--Color--100)',
+                  }}
+                >
+                  {ci}
+                </span>
+              ))}
+            </div>
+          </div>
 
           {/* Config form */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 24px', marginBottom: 16 }}>
