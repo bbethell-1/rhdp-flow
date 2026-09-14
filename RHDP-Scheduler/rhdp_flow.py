@@ -413,7 +413,7 @@ def analyze_cluster_tenant_relationships(schedules: list[WorkshopSchedule], conf
             )
 
 
-def _shift_provisioning_earlier(provisioning_date: str, minutes: int = 180) -> str:
+def _shift_provisioning_earlier(provisioning_date: str, minutes: int = 240) -> str:
     """Return provisioning_date shifted earlier by `minutes` (DD/MM/YYYY HH:MM).
 
     If the shifted time would be in the past, returns now + 30 min so the
@@ -441,7 +441,7 @@ def auto_provision_missing_clusters(schedules: list[WorkshopSchedule], buffer_ho
 
     Injected rows are tagged ``auto_added=True`` and named "... (Cluster — added
     by Flow)" so they are obvious in the UI and fully reversible. They inherit
-    the tenant's namespace/dates/instances and are scheduled 3h earlier so the
+    the tenant's namespace/dates/instances and are scheduled buffer_hours earlier so the
     cluster is ready before the tenant provisions.
 
     This is a deploy-time convenience only. The permanent fix is a catalog

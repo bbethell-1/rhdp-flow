@@ -9,13 +9,13 @@ provisioning earlier than the tenants that depend on it.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 logger = logging.getLogger("rhdp_flow.cluster_tenant_validation")
 
 
-def auto_fix_cluster_tenant_timing(schedules: list[Any], buffer_minutes: int = 180) -> dict[str, Any]:
+def auto_fix_cluster_tenant_timing(schedules: list[Any], buffer_minutes: int = 240) -> dict[str, Any]:
     """
     Auto-fix cluster/tenant timing by ensuring clusters deploy BEFORE tenants.
 
@@ -28,7 +28,7 @@ def auto_fix_cluster_tenant_timing(schedules: list[Any], buffer_minutes: int = 1
 
     Args:
         schedules: List of WorkshopSchedule objects to fix
-        buffer_minutes: Lead time for cluster before tenant (default: 180 = 3 hours)
+        buffer_minutes: Lead time for cluster before tenant (default: 240 = 4 hours)
 
     Returns:
         Dict with:
@@ -110,6 +110,10 @@ def auto_fix_cluster_tenant_timing(schedules: list[Any], buffer_minutes: int = 1
 
             # Always ensure cluster is buffer_minutes BEFORE tenant
             ideal_cluster_date = tenant_date - timedelta(minutes=buffer_minutes)
+            # If the ideal time is already in the past, deploy ASAP (now + 30 min)
+            now = datetime.now(UTC).replace(tzinfo=None)
+            if ideal_cluster_date < now:
+                ideal_cluster_date = now + timedelta(minutes=30)
 
             # Only adjust if cluster is too late or at same time as tenant
             time_diff = (tenant_date - cluster_date).total_seconds() / 60  # minutes
