@@ -432,10 +432,16 @@ def check_tenant_cluster_references(schedules: list[Any]) -> dict[str, Any]:
                 break
 
         detected = getattr(schedule, "detected_cluster_ci", None)
-        cluster_target = cluster_ref or detected
 
-        covered_by_row = bool(cluster_target and cluster_target in batch_cluster_cis)
-        pool_exists = bool(cluster_target and cluster_target in existing_pools)
+        # pool_exists is authoritative: only the live CatalogItem's componentName
+        # is what Babylon reads. The heuristic (detected) is irrelevant for pool
+        # resolution — Babylon doesn't know about it.
+        pool_exists = bool(cluster_ref and cluster_ref in existing_pools)
+
+        # covered_by_row can use the heuristic fallback: if auto-add has injected
+        # a cluster row matched by naming convention, the tenant is covered.
+        cluster_target_for_row = cluster_ref or detected
+        covered_by_row = bool(cluster_target_for_row and cluster_target_for_row in batch_cluster_cis)
 
         record = {
             "ci": schedule.ci,
