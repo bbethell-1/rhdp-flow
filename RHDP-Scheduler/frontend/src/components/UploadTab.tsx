@@ -2166,17 +2166,21 @@ export const UploadTab: React.FC<Props> = ({
                         />
                       </SplitItem>
                       {enableAutoTiming && (
-                        <SplitItem style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <input
-                            type="number"
-                            min={0.5}
-                            max={24}
-                            step={0.5}
-                            value={timingBufferHours}
-                            onChange={e => setTimingBufferHours(Number(e.target.value))}
-                            style={{ width: 52, padding: '2px 6px', borderRadius: 4, border: '1px solid var(--pf-v6-global--BorderColor--100)', fontSize: '0.85rem', textAlign: 'center' }}
-                          />
-                          <span style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)' }}>h before tenant</span>
+                        <SplitItem>
+                          <Tooltip content="How many hours before each tenant the cluster should be provisioned">
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--pf-v6-global--BackgroundColor--200)', borderRadius: 6, padding: '3px 10px 3px 8px', border: '1px solid var(--pf-v6-global--BorderColor--100)' }}>
+                              <input
+                                type="number"
+                                min={0.5}
+                                max={24}
+                                step={0.5}
+                                value={timingBufferHours}
+                                onChange={e => setTimingBufferHours(Number(e.target.value))}
+                                style={{ width: 40, padding: '1px 4px', borderRadius: 4, border: '1px solid var(--pf-v6-global--BorderColor--100)', fontSize: '0.85rem', textAlign: 'center', background: 'transparent' }}
+                              />
+                              <span style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)', whiteSpace: 'nowrap' }}>hr before tenant</span>
+                            </span>
+                          </Tooltip>
                         </SplitItem>
                       )}
                     </Split>
