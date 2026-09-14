@@ -502,13 +502,31 @@ export const UploadTab: React.FC<Props> = ({
       if (result.fixed_count > 0 || result.skipped_count > 0) {
         setTimingWarnings(result.warnings || []);
         setShowTimingWarnings(true);
-        // Refresh schedules to show updated times
         const updated = await api.getSchedules();
         setSchedules(updated);
         showToast(result.message, 'success');
       }
+      // Re-validate so timing errors clear from the danger alert
+      try {
+        const ctRes = await api.validateClusterTenant();
+        setClusterTenantValidation(ctRes);
+      } catch { /* ignore */ }
     } catch (err) {
       console.warn('Auto-timing adjustment failed:', err);
+    }
+  };
+
+  const handleAutoProvision = async () => {
+    try {
+      const prov = await api.autoProvisionClusters(timingBufferHours);
+      if (prov.schedules) setSchedules(prov.schedules);
+      setAutoProvisionResult({ added: prov.added || [], needs_agv_prs: prov.needs_agv_prs || [] });
+      try { setMissingTenantRefs(await api.checkTenantClusterRefs()); } catch { /* ignore */ }
+      if ((prov.added || []).length > 0) {
+        showToast(`Added ${prov.added.length} cluster pool row(s)`, 'success');
+      }
+    } catch (e) {
+      showToast(`Auto-provision failed: ${e}`, 'danger');
     }
   };
 
@@ -573,16 +591,7 @@ export const UploadTab: React.FC<Props> = ({
             ...(refsRes.ref_no_pool || []),
           ].filter((r) => !r.pool_exists && !r.has_cluster_row);
           if (enableAutoProvision && willFail.length > 0) {
-            try {
-              const prov = await api.autoProvisionClusters(timingBufferHours);
-              if (prov.count > 0 || (prov.needs_agv_prs || []).length > 0) {
-                setAutoProvisionResult({ added: prov.added || [], needs_agv_prs: prov.needs_agv_prs || [] });
-                if (prov.schedules) setSchedules(prov.schedules);
-                try { setMissingTenantRefs(await api.checkTenantClusterRefs()); } catch { /* ignore */ }
-              }
-            } catch (e) {
-              console.warn('Auto-provision clusters failed', e);
-            }
+            await handleAutoProvision();
           } else {
             setAutoProvisionResult(null);
           }
@@ -1250,7 +1259,8 @@ export const UploadTab: React.FC<Props> = ({
           )}
 
           {/* Pool capacity warnings */}
-          {(poolCapacityWarnings.length > 0 || poolsNotFound.length > 0) && (
+          {(poolCapacityWarnings.length > 0 || poolsNotFound.length > 0)
+           && !(missingTenantRefs && poolCapacityWarnings.length === 0) && (
             <Alert
               variant={poolCapacityWarnings.some(w => w.severity === 'critical') ? 'danger' : 'info'}
               isInline
@@ -1403,13 +1413,22 @@ export const UploadTab: React.FC<Props> = ({
                   <Alert
                     variant="danger"
                     isInline
-                    title={`${willFail.length} workshop(s) will fail — nowhere to run`}
+                    title={`${willFail.length} workshop(s) will fail — no cluster pool available`}
                     style={{ marginBottom: 12 }}
+                    actionClose={
+                      <Button
+                        variant="link"
+                        onClick={async () => {
+                          setEnableAutoProvision(true);
+                          await handleAutoProvision();
+                        }}
+                      >
+                        Auto-add cluster pools ({timingBufferHours}h before tenants)
+                      </Button>
+                    }
                   >
                     <div style={{ marginBottom: 8 }}>
-                      These workshops run <strong>on top of</strong> a cluster, but right now there's
-                      no cluster ready for them — no shared cluster pool exists, and no cluster is
-                      being created in this batch:
+                      These workshops run <strong>on top of</strong> a cluster pool, but none is available — no shared pool exists and no cluster is being deployed in this batch. Click the button to let Flow add them automatically:
                     </div>
                     <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
                       {willFail.slice(0, 5).map((ref: any, i: number) => (
@@ -1422,19 +1441,9 @@ export const UploadTab: React.FC<Props> = ({
                       )}
                     </ul>
                     <div style={{ padding: '10px 14px', background: 'var(--pf-v6-global--BackgroundColor--200)', border: '1px solid var(--pf-v6-global--BorderColor--100)', borderRadius: 4 }}>
-                      <strong>Two ways to fix this:</strong>
-                      <ol style={{ margin: '6px 0 0 18px', fontSize: '0.85rem' }}>
-                        <li>
-                          <strong>Deploy a fresh cluster now</strong> — add the matching
-                          "Cluster" row for each workshop to your CSV (same name, ending
-                          <code>-cluster</code>). Flow deploys the cluster first, then the workshop lands on it.
-                        </li>
-                        <li>
-                          <strong>Permanent fix (shared pool)</strong> — platform team adds the
-                          <code>tenant_cluster</code> link in AgnosticV and creates a shared cluster
-                          pool. Then no per-event cluster is needed. Ping <code>#forum-rhdp</code>.
-                        </li>
-                      </ol>
+                      <strong>Permanent fix:</strong> platform team adds the
+                      <code>tenant_cluster</code> link in AgnosticV + shared cluster pool.
+                      Ping <code>#forum-rhdp</code>. Until then, Flow will add cluster rows automatically when the toggle is on.
                     </div>
                   </Alert>
                 )}
@@ -1539,19 +1548,11 @@ export const UploadTab: React.FC<Props> = ({
                   <Button
                     variant="link"
                     onClick={async () => {
-                      try {
-                        const result = await api.autoFixClusterTenantTiming(timingBufferHours);
-                        showToast(result.message, 'success');
-                        const updated = await api.getSchedules();
-                        setSchedules(updated);
-                        const ctRes = await api.validateClusterTenant();
-                        setClusterTenantValidation(ctRes);
-                      } catch (err) {
-                        showToast(`Auto-fix failed: ${err}`, 'danger');
-                      }
+                      setEnableAutoTiming(true);
+                      await handleAutoTiming();
                     }}
                   >
-                    Fix timing ({timingBufferHours}h buffer)
+                    Fix timing ({timingBufferHours}h before tenants)
                   </Button>
                 }
               >
