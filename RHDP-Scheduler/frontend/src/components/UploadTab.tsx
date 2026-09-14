@@ -180,6 +180,7 @@ export const UploadTab: React.FC<Props> = ({
 
   // Auto-timing settings
   const [enableAutoTiming, setEnableAutoTiming] = useState(true);
+  const [timingBufferHours, setTimingBufferHours] = useState(4);
   const [timingWarnings, setTimingWarnings] = useState<string[]>([]);
   const [showTimingWarnings, setShowTimingWarnings] = useState(false);
 
@@ -497,7 +498,7 @@ export const UploadTab: React.FC<Props> = ({
 
   const handleAutoTiming = async () => {
     try {
-      const result = await api.autoFixClusterTenantTiming();
+      const result = await api.autoFixClusterTenantTiming(timingBufferHours);
       if (result.fixed_count > 0 || result.skipped_count > 0) {
         setTimingWarnings(result.warnings || []);
         setShowTimingWarnings(true);
@@ -1527,7 +1528,7 @@ export const UploadTab: React.FC<Props> = ({
                   variant="link"
                   onClick={async () => {
                     try {
-                      const result = await api.autoFixClusterTenantTiming();
+                      const result = await api.autoFixClusterTenantTiming(timingBufferHours);
                       showToast(result.message, 'success');
                       const updated = await api.getSchedules();
                       setSchedules(updated);
@@ -2154,13 +2155,31 @@ export const UploadTab: React.FC<Props> = ({
                   </Tooltip>
                 </SplitItem>
                 <SplitItem>
-                  <Tooltip content="Automatically adjust cluster deployment times to be 3 hours before tenant deployments. Skips clusters provided by TenantClusterPools.">
-                    <Switch
-                      id="auto-timing-switch"
-                      label="Auto-Adjust Cluster Timing"
-                      isChecked={enableAutoTiming}
-                      onChange={(_e, checked) => setEnableAutoTiming(checked)}
-                    />
+                  <Tooltip content="Automatically adjust cluster deployment times to deploy before tenant deployments. Skips clusters provided by TenantClusterPools.">
+                    <Split hasGutter style={{ alignItems: 'center' }}>
+                      <SplitItem>
+                        <Switch
+                          id="auto-timing-switch"
+                          label="Auto-Adjust Cluster Timing"
+                          isChecked={enableAutoTiming}
+                          onChange={(_e, checked) => setEnableAutoTiming(checked)}
+                        />
+                      </SplitItem>
+                      {enableAutoTiming && (
+                        <SplitItem style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <input
+                            type="number"
+                            min={0.5}
+                            max={24}
+                            step={0.5}
+                            value={timingBufferHours}
+                            onChange={e => setTimingBufferHours(Number(e.target.value))}
+                            style={{ width: 52, padding: '2px 6px', borderRadius: 4, border: '1px solid var(--pf-v6-global--BorderColor--100)', fontSize: '0.85rem', textAlign: 'center' }}
+                          />
+                          <span style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)' }}>h before tenant</span>
+                        </SplitItem>
+                      )}
+                    </Split>
                   </Tooltip>
                 </SplitItem>
                 <SplitItem>

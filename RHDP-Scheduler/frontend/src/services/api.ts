@@ -235,7 +235,7 @@ export const api = {
   removeAutoProvisioned: () =>
     request<{ removed_count: number; schedules: WorkshopSchedule[] }>(
       '/schedules/remove-auto-provisioned', { method: 'POST' }),
-  autoFixClusterTenantTiming: () =>
+  autoFixClusterTenantTiming: (bufferHours = 4.0) =>
     request<{
       fixed_count: number;
       skipped_count: number;
@@ -243,7 +243,7 @@ export const api = {
       skipped_items: any[];
       warnings: string[];
       message: string
-    }>('/schedules/auto-fix-cluster-tenant-timing?buffer_hours=3.0', { method: 'POST' }),
+    }>(`/schedules/auto-fix-cluster-tenant-timing?buffer_hours=${bufferHours}`, { method: 'POST' }),
   validatePoolCapacity: () =>
     request<PoolCapacityValidationResponse>('/schedules/validate-pool-capacity', { method: 'POST', body: '{}' }),
   diffSchedules: async (file: File): Promise<import('../types').DiffResponse> => {
