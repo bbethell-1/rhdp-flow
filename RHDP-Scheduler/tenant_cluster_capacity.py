@@ -247,3 +247,80 @@ def check_schedules_capacity(schedules: list[Any], ignore_warnings: bool = False
         "checked_count": checked_count,
         "capacity_info": capacity_info
     }
+
+
+def calculate_cluster_needs(schedules: list[Any]) -> dict[str, Any]:
+    """
+    Calculate how many cluster CIs are needed for tenant workshops.
+
+    Groups tenant schedules by their cluster CI, counts tenants, queries pool
+    capacity, and calculates cluster deficit.
+
+    Args:
+        schedules: List of WorkshopSchedule objects
+
+    Returns:
+        Dict with:
+        - needs: List of dicts with cluster_ci, tenant_count, capacity_per_cluster,
+                 clusters_needed, clusters_in_csv, deficit
+        - total_tenant_count: Total tenant workshops
+        - total_deficit: Total cluster shortage across all tenant types
+    """
+    import math
+
+    needs = []
+    total_tenant_count = 0
+    total_deficit = 0
+
+    # Group tenants by their detected cluster CI
+    tenant_groups = {}  # cluster_ci -> list of tenant schedules
+    cluster_counts = {}  # cluster_ci -> count of cluster rows in CSV
+
+    for schedule in schedules:
+        if schedule.is_tenant and schedule.detected_cluster_ci:
+            cluster_ci = schedule.detected_cluster_ci
+            if cluster_ci not in tenant_groups:
+                tenant_groups[cluster_ci] = []
+            tenant_groups[cluster_ci].append(schedule)
+            total_tenant_count += 1
+        elif schedule.is_cluster:
+            cluster_ci = schedule.ci
+            cluster_counts[cluster_ci] = cluster_counts.get(cluster_ci, 0) + 1
+
+    # Calculate needs for each tenant type
+    for cluster_ci, tenant_schedules in tenant_groups.items():
+        tenant_count = len(tenant_schedules)
+        clusters_in_csv = cluster_counts.get(cluster_ci, 0)
+
+        # Try to get capacity from pool
+        # Use first tenant schedule to query capacity
+        first_tenant = tenant_schedules[0]
+        capacity = check_cluster_capacity(first_tenant.ci, first_tenant.namespace)
+
+        if capacity:
+            capacity_per_cluster = capacity.max_placements_per_cluster
+        else:
+            # Fallback if can't query pool (assume conservative 20)
+            capacity_per_cluster = 20
+            logger.warning(f"Could not query capacity for {cluster_ci}, assuming {capacity_per_cluster} per cluster")
+
+        clusters_needed = math.ceil(tenant_count / capacity_per_cluster)
+        deficit = max(0, clusters_needed - clusters_in_csv)
+        total_deficit += deficit
+
+        needs.append({
+            "cluster_ci": cluster_ci,
+            "tenant_ci_example": first_tenant.ci,
+            "tenant_count": tenant_count,
+            "capacity_per_cluster": capacity_per_cluster,
+            "clusters_needed": clusters_needed,
+            "clusters_in_csv": clusters_in_csv,
+            "deficit": deficit,
+            "pool_available": capacity.available_clusters if capacity else None,
+        })
+
+    return {
+        "needs": needs,
+        "total_tenant_count": total_tenant_count,
+        "total_deficit": total_deficit
+    }

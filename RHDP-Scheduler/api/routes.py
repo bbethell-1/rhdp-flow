@@ -33,6 +33,8 @@ from api.models import (
     CatalogItemParameter,
     CatalogNamespaceMismatch,
     CatalogNamespaceValidationResponse,
+    ClusterNeed,
+    ClusterNeedsResponse,
     ClusterTenantValidationError,
     ClusterTenantValidationResponse,
     ClusterTenantValidationWarning,
@@ -2604,3 +2606,37 @@ async def export_for_labagator(_key=Depends(verify_api_key)):
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=flow-export-for-labagator.csv"},
     )
+
+
+@router.get("/schedules/cluster-needs", response_model=ClusterNeedsResponse)
+def get_cluster_needs(_key=Depends(verify_api_key)):
+    """Calculate cluster capacity needs for tenant workshops.
+
+    Analyzes loaded schedules to determine:
+    - How many tenant workshops are being deployed
+    - How many cluster CIs are needed based on pool capacity
+    - Deficit (if any) between needed clusters and clusters in CSV
+
+    Returns:
+        ClusterNeedsResponse with capacity calculations per tenant type
+    """
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+
+    try:
+        from tenant_cluster_capacity import calculate_cluster_needs
+
+        result = calculate_cluster_needs(_schedules)
+
+        return ClusterNeedsResponse(
+            needs=[ClusterNeed(**n) for n in result["needs"]],
+            total_tenant_count=result["total_tenant_count"],
+            total_deficit=result["total_deficit"]
+        )
+    except ImportError as e:
+        logger.warning(f"Cluster needs calculation unavailable: {e}")
+        return ClusterNeedsResponse()
+    except Exception as e:
+        logger.exception("Cluster needs calculation failed")
+        return ClusterNeedsResponse()
+

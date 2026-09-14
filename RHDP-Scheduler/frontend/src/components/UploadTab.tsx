@@ -147,6 +147,7 @@ export const UploadTab: React.FC<Props> = ({
 
   // Cluster-tenant validation
   const [clusterTenantValidation, setClusterTenantValidation] = useState<any>(null);
+  const [clusterNeeds, setClusterNeeds] = useState<any>(null);
 
   // Auto-timing settings
   const [enableAutoTiming, setEnableAutoTiming] = useState(true);
@@ -514,6 +515,14 @@ export const UploadTab: React.FC<Props> = ({
         // Validate cluster-tenant relationships
         const ctRes = await api.validateClusterTenant();
         setClusterTenantValidation(ctRes);
+
+        // Check cluster capacity needs
+        try {
+          const needsRes = await api.getClusterNeeds();
+          setClusterNeeds(needsRes);
+        } catch (e) {
+          console.warn('Cluster needs check failed', e);
+        }
 
         // Auto-adjust cluster timing if enabled
         if (enableAutoTiming) {
@@ -1104,6 +1113,38 @@ export const UploadTab: React.FC<Props> = ({
                 ))}
               </ul>
               Verify the CI names are correct. Deployment will fail for these items.
+            </Alert>
+          )}
+
+          {/* Cluster capacity needs */}
+          {clusterNeeds && clusterNeeds.total_deficit > 0 && (
+            <Alert
+              variant="warning"
+              isInline
+              title={`Need ${clusterNeeds.total_deficit} more cluster(s) for ${clusterNeeds.total_tenant_count} tenant workshops`}
+              style={{ marginBottom: 12 }}
+            >
+              <div style={{ marginBottom: 8 }}>
+                You're deploying tenant workshops but don't have enough cluster CIs in your CSV:
+              </div>
+              <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
+                {clusterNeeds.needs.filter((n: any) => n.deficit > 0).map((need: any, i: number) => (
+                  <li key={i}>
+                    <strong>{need.tenant_count} tenant workshops</strong> need <strong>{need.clusters_needed} clusters</strong> ({need.capacity_per_cluster} tenants/cluster)
+                    <br />
+                    <span style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)' }}>
+                      CSV has {need.clusters_in_csv} cluster rows → need {need.deficit} more: <code>{need.cluster_ci}</code>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <div style={{ padding: '10px 14px', background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 4 }}>
+                <strong>⚠️ Action needed:</strong> Add {clusterNeeds.total_deficit} cluster CI row(s) to your CSV, or ensure clusters already exist in the pool.
+                <br />
+                <span style={{ fontSize: '0.85rem', marginTop: 4, display: 'block' }}>
+                  Clusters take 3 hours to provision. Use <strong>Auto-Adjust Cluster Timing</strong> below to schedule them before tenants.
+                </span>
+              </div>
             </Alert>
           )}
 
