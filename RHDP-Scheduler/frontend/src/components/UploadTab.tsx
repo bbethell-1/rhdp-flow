@@ -1162,11 +1162,11 @@ export const UploadTab: React.FC<Props> = ({
             </Alert>
           )}
 
-          {/* Multi-asset password warning */}
+          {/* Multi-asset password info */}
           {needsPasswordWarning && (
-            <Alert variant="warning" isInline title="Multi-asset passwords not loaded" style={{ marginBottom: 12 }}>
-              Multi-asset workshop(s) detected but no password file uploaded. Each asset CI may need its own password.
-              Upload a passwords CSV above to avoid deployment failures.
+            <Alert variant="info" isInline title="Multi-asset passwords (optional)" style={{ marginBottom: 12 }}>
+              Multi-asset workshop(s) detected. If each asset CI needs its own password, upload a passwords CSV above.
+              Otherwise, the main CSV password will be used for all assets.
             </Alert>
           )}
 
