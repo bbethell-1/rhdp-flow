@@ -22,9 +22,11 @@ from argparse import ArgumentParser
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import yaml
+
+from agnosticv_resolver import resolve_tenant_cluster_item
 
 # ============================================================================
 # CONFIGURATION & LOGGING SETUP
@@ -205,6 +207,8 @@ class WorkshopSchedule:
     is_tenant: bool = False  # Detected as tenant CI (either via naming or explicit label)
     detected_cluster_ci: str | None = None  # For tenants: the associated cluster CI (from override or naming)
     detection_method: str = "none"  # How the type was detected: "csv_label", "naming", "none"
+    cluster_ci_source: str | None = None  # For tenants: which tier resolved detected_cluster_ci ("override", "agnosticv", "naming")
+    auto_added: bool = False  # True if Flow injected this row (e.g. auto-provisioned cluster for a tenant with nowhere to land)
 
 @dataclass
 class DeploymentResult:
@@ -252,21 +256,32 @@ def is_tenant_ci(ci: str) -> bool:
     """
     Check if a catalog item is a tenant CI based on naming convention.
 
+    Supports two conventions:
+    1. Dot-infix: "-tenant." appears anywhere (e.g., "app-tenant.prod")
+    2. Suffix: ends with "-tenant" AND contains a dot separator (e.g., "workshop.prod-tenant")
+
     Args:
-        ci: Catalog item identifier (e.g., "ocp4-tenant.prod")
+        ci: Catalog item identifier
 
     Returns:
-        True if CI contains "-tenant." or ends with "-tenant" after a catalog dot
+        True if CI matches either tenant naming convention
     """
-    lower = ci.lower()
-    if "-tenant." in lower:
+    lower_ci = ci.lower()
+    # Dot-infix convention: "-tenant." anywhere
+    if "-tenant." in lower_ci:
         return True
-    return lower.endswith("-tenant") and "." in lower
+    # Suffix convention: ends with "-tenant" AND has a dot somewhere
+    # (excludes bare "workshop-tenant" which is ambiguous)
+    return bool(lower_ci.endswith("-tenant") and "." in lower_ci)
 
 
 def get_cluster_ci_for_tenant(tenant_ci: str, override: str | None = None) -> str | None:
     """
     Determine the cluster CI for a given tenant CI.
+
+    Supports two naming conventions:
+    1. Dot-infix: replace "-tenant." with "-cluster." (e.g., "app-tenant.prod" → "app-cluster.prod")
+    2. Suffix: replace trailing "-tenant" with "-cluster" (e.g., "workshop.prod-tenant" → "workshop.prod-cluster")
 
     Args:
         tenant_ci: The tenant catalog item identifier
@@ -281,7 +296,7 @@ def get_cluster_ci_for_tenant(tenant_ci: str, override: str | None = None) -> st
     Logic:
         1. If override provided and not "none", return it
         2. If override is "none", return None (explicit opt-out)
-        3. If no override, attempt naming fallback: replace "-tenant." with "-cluster."
+        3. If no override, attempt naming fallback (both conventions)
     """
     # Handle explicit override
     if override:
@@ -293,17 +308,49 @@ def get_cluster_ci_for_tenant(tenant_ci: str, override: str | None = None) -> st
     if not is_tenant_ci(tenant_ci):
         return None
 
-    # Replace -tenant. / -tenant suffix with cluster equivalent (case-preserving)
     lower_ci = tenant_ci.lower()
-    tenant_dot = lower_ci.find("-tenant.")
-    if tenant_dot != -1:
-        return tenant_ci[:tenant_dot] + "-cluster." + tenant_ci[tenant_dot + 8:]
+
+    # Try dot-infix first: "-tenant." anywhere
+    tenant_pos = lower_ci.find("-tenant.")
+    if tenant_pos != -1:
+        # Build cluster CI preserving original case for the prefix
+        cluster_ci = tenant_ci[:tenant_pos] + "-cluster." + tenant_ci[tenant_pos + 8:]
+        return cluster_ci
+
+    # Try suffix convention: ends with "-tenant"
     if lower_ci.endswith("-tenant"):
-        return tenant_ci[: -len("-tenant")] + "-cluster"
+        # Replace trailing "-tenant" with "-cluster" (case-preserving for prefix)
+        cluster_ci = tenant_ci[:-7] + "-cluster"
+        return cluster_ci
+
     return None
 
 
-def analyze_cluster_tenant_relationships(schedules: list[WorkshopSchedule]) -> None:
+def _resolve_tenant_cluster(schedule: "WorkshopSchedule", config: Optional["RHDPConfig"] = None) -> tuple[str | None, str | None]:
+    """Resolve a tenant schedule's cluster CI and the tier that produced it.
+
+    Priority: CSV override > AgnosticV tenant_cluster.item > naming convention.
+
+    Returns:
+        (detected_cluster_ci, cluster_ci_source) — both None if nothing resolved.
+    """
+    if schedule.cluster_ci_override:
+        if schedule.cluster_ci_override.lower() == "none":
+            return None, None
+        return schedule.cluster_ci_override, "override"
+
+    resolved = resolve_tenant_cluster_item(schedule.ci, config or RHDPConfig())
+    if resolved:
+        return resolved, "agnosticv"
+
+    naming_result = get_cluster_ci_for_tenant(schedule.ci, override=None)
+    if naming_result:
+        return naming_result, "naming"
+
+    return None, None
+
+
+def analyze_cluster_tenant_relationships(schedules: list[WorkshopSchedule], config: Optional["RHDPConfig"] = None) -> None:
     """
     Analyze and populate cluster/tenant detection fields for all schedules.
 
@@ -325,6 +372,7 @@ def analyze_cluster_tenant_relationships(schedules: list[WorkshopSchedule]) -> N
         schedule.is_cluster = False
         schedule.is_tenant = False
         schedule.detected_cluster_ci = None
+        schedule.cluster_ci_source = None
         schedule.detection_method = "none"
 
         # Priority 1: Explicit CSV label
@@ -338,13 +386,10 @@ def analyze_cluster_tenant_relationships(schedules: list[WorkshopSchedule]) -> N
             elif item_type_lower == "tenant":
                 schedule.is_tenant = True
                 schedule.detection_method = "csv_label"
-                schedule.detected_cluster_ci = get_cluster_ci_for_tenant(
-                    schedule.ci,
-                    schedule.cluster_ci_override
-                )
+                schedule.detected_cluster_ci, schedule.cluster_ci_source = _resolve_tenant_cluster(schedule, config)
                 logger.debug(
                     f"{schedule.ci_name}: Detected as tenant (CSV label), "
-                    f"cluster CI: {schedule.detected_cluster_ci}"
+                    f"cluster CI: {schedule.detected_cluster_ci} (source: {schedule.cluster_ci_source})"
                 )
                 continue
             elif item_type_lower == "workshop":
@@ -361,14 +406,118 @@ def analyze_cluster_tenant_relationships(schedules: list[WorkshopSchedule]) -> N
         elif is_tenant_ci(schedule.ci):
             schedule.is_tenant = True
             schedule.detection_method = "naming"
-            schedule.detected_cluster_ci = get_cluster_ci_for_tenant(
-                schedule.ci,
-                schedule.cluster_ci_override
-            )
+            schedule.detected_cluster_ci, schedule.cluster_ci_source = _resolve_tenant_cluster(schedule, config)
             logger.debug(
                 f"{schedule.ci_name}: Detected as tenant (naming convention), "
-                f"cluster CI: {schedule.detected_cluster_ci}"
+                f"cluster CI: {schedule.detected_cluster_ci} (source: {schedule.cluster_ci_source})"
             )
+
+
+def _shift_provisioning_earlier(provisioning_date: str, minutes: int = 180) -> str:
+    """Return provisioning_date shifted earlier by `minutes` (DD/MM/YYYY HH:MM)."""
+    try:
+        dt = datetime.strptime(provisioning_date.strip(), "%d/%m/%Y %H:%M")
+        return (dt - timedelta(minutes=minutes)).strftime("%d/%m/%Y %H:%M")
+    except (ValueError, AttributeError):
+        return provisioning_date
+
+
+def auto_provision_missing_clusters(schedules: list[WorkshopSchedule]) -> dict[str, Any]:
+    """
+    Inject a fresh cluster provisioner for every tenant that has nowhere to land.
+
+    A tenant will fail on deploy if there is no shared TenantClusterPool for it
+    AND no matching ``-cluster`` provisioner in this batch. This function finds
+    those tenants (via the live-catalog/pool check) and appends a cluster
+    WorkshopSchedule for each, so the tenant has somewhere to run.
+
+    Injected rows are tagged ``auto_added=True`` and named "... (Cluster — added
+    by Flow)" so they are obvious in the UI and fully reversible. They inherit
+    the tenant's namespace/dates/instances and are scheduled 3h earlier so the
+    cluster is ready before the tenant provisions.
+
+    This is a deploy-time convenience only. The permanent fix is a catalog
+    ``tenant_cluster`` reference (AgnosticV PR) + a shared cluster pool.
+
+    Returns dict: {added: [{tenant_ci, cluster_ci, workshop_name}], count, needs_agv_prs}.
+    """
+    from tenant_cluster_capacity import check_tenant_cluster_references
+
+    refs = check_tenant_cluster_references(schedules)
+    # Will-fail tenants: no pool and no cluster row already in the batch.
+    will_fail = [
+        r for r in (refs.get("missing_refs", []) + refs.get("ref_no_pool", []))
+        if not r.get("pool_exists") and not r.get("has_cluster_row")
+    ]
+
+    # CIs of clusters already present (manual or previously auto-added) — never double-add.
+    existing_cluster_cis = {s.ci for s in schedules if getattr(s, "is_cluster", False) or is_cluster_ci(s.ci)}
+
+    by_ci = {s.ci: s for s in schedules}
+    added: list[dict[str, str]] = []
+    needs_agv_prs: list[dict[str, str]] = []
+
+    for r in will_fail:
+        tenant = by_ci.get(r["ci"])
+        if tenant is None:
+            continue
+        cluster_ci = tenant.detected_cluster_ci or get_cluster_ci_for_tenant(
+            tenant.ci, tenant.cluster_ci_override
+        )
+        # Record what the user should do for a permanent fix regardless.
+        needs_agv_prs.append({
+            "tenant_ci": tenant.ci,
+            "cluster_ci": cluster_ci or "",
+            "workshop_name": tenant.ci_name,
+        })
+        if not cluster_ci or cluster_ci in existing_cluster_cis:
+            continue
+
+        cluster = WorkshopSchedule(
+            ci_name=f"{tenant.ci_name} (Cluster — added by Flow)",
+            ci=cluster_ci,
+            namespace=tenant.namespace,
+            enable_workshop_interface=False,
+            password="",
+            activity=tenant.activity,
+            purpose=tenant.purpose,
+            workshop_name=tenant.workshop_name,
+            provisioning_date=_shift_provisioning_earlier(tenant.provisioning_date, 180),
+            auto_stop=tenant.auto_stop,
+            auto_destroy=tenant.auto_destroy,
+            instances=tenant.instances,
+            catalog_namespace=tenant.catalog_namespace,
+            white_glove=tenant.white_glove,
+            redirect=False,
+            item_type="cluster",
+            is_cluster=True,
+            detection_method="auto_provisioned",
+            auto_added=True,
+        )
+        schedules.append(cluster)
+        existing_cluster_cis.add(cluster_ci)
+        added.append({
+            "tenant_ci": tenant.ci,
+            "cluster_ci": cluster_ci,
+            "workshop_name": tenant.ci_name,
+        })
+
+    # Re-analyze so the new cluster rows and tenant links are consistent.
+    if added:
+        analyze_cluster_tenant_relationships(schedules)
+
+    return {"added": added, "count": len(added), "needs_agv_prs": needs_agv_prs}
+
+
+def remove_auto_provisioned_clusters(schedules: list[WorkshopSchedule]) -> dict[str, Any]:
+    """Remove all Flow-injected (auto_added) rows. Returns {removed_count}."""
+    before = len(schedules)
+    kept = [s for s in schedules if not getattr(s, "auto_added", False)]
+    removed = before - len(kept)
+    schedules[:] = kept
+    if removed:
+        analyze_cluster_tenant_relationships(schedules)
+    return {"removed_count": removed}
 
 
 def filter_pool_provided_clusters(schedules: list[WorkshopSchedule]) -> list[WorkshopSchedule]:
@@ -439,30 +588,40 @@ def filter_pool_provided_clusters(schedules: list[WorkshopSchedule]) -> list[Wor
     return [s for s in schedules if not (s.is_cluster and s.ci in clusters_to_skip)]
 
 
-def validate_cluster_before_tenant(schedules: list[WorkshopSchedule]) -> dict[str, Any]:
+def validate_cluster_before_tenant(schedules: list[WorkshopSchedule], config: Optional["RHDPConfig"] = None) -> dict[str, Any]:
     """
     Validate that cluster schedules are provisioned before their tenant schedules.
 
     Checks:
     1. For each tenant, find its cluster schedule (by detected_cluster_ci)
     2. Verify cluster provisioning_date < tenant provisioning_date
-    3. Warn if cluster schedule not found in same batch
+    3. If no matching schedule exists in this batch, check the live cluster
+       for an already-provisioned instance (best-effort; only performed when
+       config is provided). Found-and-healthy is informational, not an error.
+       Lookup failure falls back to the legacy "not in batch" warning.
 
     Args:
         schedules: List of WorkshopSchedule objects to validate
+        config: Optional RHDPConfig used for the live-cluster lookup. When
+            omitted, the out-of-batch check is skipped and behavior matches
+            the pre-existing "not in batch = warning" logic exactly.
 
     Returns:
         Dictionary with validation results:
         {
             "valid": bool,  # Overall validity
-            "errors": List[str],  # Critical errors (tenant before cluster)
-            "warnings": List[str],  # Warnings (missing cluster in batch)
-            "relationships": List[Dict]  # Detected cluster-tenant pairs
+            "errors": List[str],  # Critical errors (tenant before cluster) - unchanged shape for backward compatibility
+            "warnings": List[str],  # Warnings (missing cluster in batch) - unchanged shape for backward compatibility
+            "relationships": List[Dict],  # Detected cluster-tenant pairs
+            "error_details": List[Dict],  # Structured, additive: same errors with ci_name/tenant_ci/cluster_ci/tenant_date/cluster_date/namespace/message
+            "warning_details": List[Dict],  # Structured, additive: same warnings with ci_name/tenant_ci/namespace/message
         }
     """
-    errors = []
-    warnings = []
-    relationships = []
+    errors: list[str] = []
+    warnings: list[str] = []
+    relationships: list[dict[str, Any]] = []
+    error_details: list[dict[str, Any]] = []
+    warning_details: list[dict[str, Any]] = []
 
     # Build cluster CI -> schedule mapping
     cluster_map: dict[str, WorkshopSchedule] = {}
@@ -476,23 +635,71 @@ def validate_cluster_before_tenant(schedules: list[WorkshopSchedule]) -> dict[st
             continue
 
         if not schedule.detected_cluster_ci:
-            warnings.append(
+            msg = (
                 f"Tenant '{schedule.ci_name}' has no detected cluster CI "
                 f"(override may be 'none')"
             )
+            warnings.append(msg)
+            warning_details.append({
+                "ci_name": schedule.ci_name,
+                "tenant_ci": schedule.ci,
+                "namespace": schedule.namespace,
+                "message": msg,
+            })
             continue
 
         cluster_schedule = cluster_map.get(schedule.detected_cluster_ci)
 
         if not cluster_schedule:
-            warnings.append(
+            live_status = find_provisioned_cluster_resourceclaim(schedule.detected_cluster_ci, config) if config else None
+
+            if live_status is True:
+                relationships.append({
+                    "tenant": schedule.ci_name,
+                    "cluster_ci": schedule.detected_cluster_ci,
+                    "status": "found_on_cluster",
+                })
+                continue
+
+            if live_status is False:
+                msg = (
+                    f"Tenant '{schedule.ci_name}' references cluster "
+                    f"'{schedule.detected_cluster_ci}', which is neither in this batch "
+                    f"nor already provisioned."
+                )
+                errors.append(msg)
+                error_details.append({
+                    "ci_name": schedule.ci_name,
+                    "tenant_ci": schedule.ci,
+                    "cluster_ci": schedule.detected_cluster_ci,
+                    "tenant_date": schedule.provisioning_date,
+                    "cluster_date": "",
+                    "namespace": schedule.namespace,
+                    "message": msg,
+                })
+                relationships.append({
+                    "tenant": schedule.ci_name,
+                    "cluster_ci": schedule.detected_cluster_ci,
+                    "status": "not_found_anywhere",
+                })
+                continue
+
+            # live_status is None: lookup unavailable/failed, fall back to legacy warning
+            msg = (
                 f"Tenant '{schedule.ci_name}' expects cluster '{schedule.detected_cluster_ci}' "
                 f"but no matching cluster found in this deployment batch"
             )
+            warnings.append(msg)
+            warning_details.append({
+                "ci_name": schedule.ci_name,
+                "tenant_ci": schedule.ci,
+                "namespace": schedule.namespace,
+                "message": msg,
+            })
             relationships.append({
                 "tenant": schedule.ci_name,
                 "cluster_ci": schedule.detected_cluster_ci,
-                "status": "cluster_not_in_batch"
+                "status": "cluster_not_in_batch",
             })
             continue
 
@@ -502,19 +709,29 @@ def validate_cluster_before_tenant(schedules: list[WorkshopSchedule]) -> dict[st
             cluster_date = datetime.strptime(cluster_schedule.provisioning_date, "%d/%m/%Y %H:%M")
 
             if cluster_date >= tenant_date:
-                errors.append(
+                msg = (
                     f"Tenant '{schedule.ci_name}' (provisioning {schedule.provisioning_date}) "
                     f"is scheduled before or at the same time as its cluster "
                     f"'{cluster_schedule.ci_name}' (provisioning {cluster_schedule.provisioning_date}). "
                     f"Cluster must be provisioned first."
                 )
+                errors.append(msg)
+                error_details.append({
+                    "ci_name": schedule.ci_name,
+                    "tenant_ci": schedule.ci,
+                    "cluster_ci": schedule.detected_cluster_ci,
+                    "tenant_date": schedule.provisioning_date,
+                    "cluster_date": cluster_schedule.provisioning_date,
+                    "namespace": schedule.namespace,
+                    "message": msg,
+                })
                 relationships.append({
                     "tenant": schedule.ci_name,
                     "cluster": cluster_schedule.ci_name,
                     "cluster_ci": schedule.detected_cluster_ci,
                     "tenant_date": schedule.provisioning_date,
                     "cluster_date": cluster_schedule.provisioning_date,
-                    "status": "timing_violation"
+                    "status": "timing_violation",
                 })
             else:
                 relationships.append({
@@ -523,19 +740,28 @@ def validate_cluster_before_tenant(schedules: list[WorkshopSchedule]) -> dict[st
                     "cluster_ci": schedule.detected_cluster_ci,
                     "tenant_date": schedule.provisioning_date,
                     "cluster_date": cluster_schedule.provisioning_date,
-                    "status": "valid"
+                    "status": "valid",
                 })
         except ValueError as e:
-            warnings.append(
+            msg = (
                 f"Could not parse dates for tenant '{schedule.ci_name}' "
                 f"or cluster '{cluster_schedule.ci_name}': {e}"
             )
+            warnings.append(msg)
+            warning_details.append({
+                "ci_name": schedule.ci_name,
+                "tenant_ci": schedule.ci,
+                "namespace": schedule.namespace,
+                "message": msg,
+            })
 
     return {
         "valid": len(errors) == 0,
         "errors": errors,
         "warnings": warnings,
-        "relationships": relationships
+        "relationships": relationships,
+        "error_details": error_details,
+        "warning_details": warning_details,
     }
 
 # ============================================================================
@@ -560,6 +786,12 @@ class RHDPConfig:
         # When set with dry_run, write ResourceClaim / Workshop / WorkshopProvision YAMLs here
         self.dry_run_export_yaml_dir: str | None = None
         self.dry_run_yaml_export_seq: int = 0
+        # AgnosticV tenant->cluster resolution (see agnosticv_resolver.py)
+        self.agnosticv_repo_url: str = "git@github.com:rhpds/agnosticv.git"
+        self.agnosticv_cache_dir: str = "/tmp/agnosticv-cache"
+        self.agnosticv_ssh_key_path: str | None = None
+        self.agnosticv_cli_path: str = "agnosticv"
+        self.agnosticv_refresh_ttl_seconds: int = 900
 
     def validate(self) -> bool:
         """Validate configuration"""
@@ -3414,6 +3646,44 @@ def verify_deployment(
 # ============================================================================
 # QA FUNCTIONS
 # ============================================================================
+
+def find_provisioned_cluster_resourceclaim(cluster_ci: str, config: RHDPConfig) -> bool | None:
+    """Check whether a cluster catalog item is already provisioned on the live cluster.
+
+    Used when a tenant's detected cluster isn't part of the current CSV batch,
+    to distinguish "not provisioned anywhere" from "already exists, just not
+    in this batch."
+
+    Returns:
+        True if a matching ResourceClaim is found anywhere in the cluster,
+        False if none is found, or None if the lookup itself failed (API
+        error, timeout, missing oc). Callers must treat None as "unknown" and
+        fall back to the pre-existing "not in batch = error" behavior rather
+        than treating it as either True or False.
+    """
+    try:
+        cmd = [
+            config.oc_command,
+            "get", "resourceclaims",
+            "--all-namespaces",
+            "-l", f"babylon.gpte.redhat.com/catalogItemName={cluster_ci}",
+            "-o", "json",
+        ]
+        env = os.environ.copy()
+        if config.kubeconfig_path:
+            env["KUBECONFIG"] = config.kubeconfig_path
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
+        if result.returncode != 0:
+            logger.warning(f"Live-cluster lookup for '{cluster_ci}' failed (non-blocking): {result.stderr.strip()}")
+            return None
+
+        data = json.loads(result.stdout)
+        return len(data.get("items", [])) > 0
+    except Exception as e:
+        logger.warning(f"Live-cluster lookup for '{cluster_ci}' failed (non-blocking): {e}")
+        return None
+
 
 def list_scheduled_resourceclaims(
     namespace: str,

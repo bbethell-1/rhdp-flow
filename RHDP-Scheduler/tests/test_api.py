@@ -1684,7 +1684,7 @@ def test_validate_cluster_tenant_success(client):
     assert "tenants_checked" in data
     assert data["tenants_checked"] == 1
 
-    # Should have found 1 matching cluster
+    # Should have found 1 matching cluster (NEW: counts valid relationships)
     assert "clusters_found" in data
     assert data["clusters_found"] == 1
 
@@ -1721,8 +1721,7 @@ def test_validate_cluster_tenant_error_wrong_order(client):
     assert "cluster_ci" in error
     assert error["cluster_ci"] == "openshift-cnv.ocp-virt-roadshow-multi-user.prod"
     assert "message" in error
-    # Should indicate tenant is scheduled before cluster
-    assert "before" in error["message"].lower()
+    assert "must be provisioned first" in error["message"].lower()
 
     # Should include timing information
     assert "tenant_date" in error
@@ -1764,7 +1763,7 @@ def test_validate_cluster_tenant_missing_cluster(client):
     assert "tenant_ci" in warning
     assert warning["tenant_ci"] == "openshift-cnv.ocp-virt-roadshow-multi-user.prod-tenant"
     assert "message" in warning
-    assert "no corresponding cluster" in warning["message"].lower()
+    assert "no matching cluster found" in warning["message"].lower()
     assert "namespace" in warning
     assert warning["namespace"] == "user-bbethell-redhat-com"
 

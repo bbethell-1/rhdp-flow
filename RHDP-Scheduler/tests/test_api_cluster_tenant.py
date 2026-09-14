@@ -1,126 +1,209 @@
-"""API endpoint tests for cluster-tenant validation."""
+"""Integration tests for POST /schedules/validate-cluster-tenant."""
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-
-import pytest
 from fastapi.testclient import TestClient
 
+import api.routes as routes_module
 from api.server import app
 
 client = TestClient(app)
 
 
-@pytest.fixture
-def sample_csv_with_tenant():
-    """CSV with both cluster and tenant variants."""
-    base_time = datetime.now()
-    cluster_time = base_time.strftime("%d/%m/%Y %H:%M")
-    tenant_time = (base_time + timedelta(hours=1)).strftime("%d/%m/%Y %H:%M")
-    stop_time = (base_time + timedelta(hours=2)).strftime("%d/%m/%Y %H:%M")
-    destroy_time = (base_time + timedelta(days=1)).strftime("%d/%m/%Y %H:%M")
-
-    return f"""CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC)
-Cluster Workshop,workshop.prod,user-test,10,True,test123,Admin,QA,Test Workshop,{cluster_time},{stop_time},{destroy_time}
-Tenant Workshop,workshop.prod-tenant,user-test,10,True,test123,Admin,QA,Test Workshop Tenant,{tenant_time},{stop_time},{destroy_time}
-"""
+def _auth_headers():
+    import os
+    return {"X-API-Key": os.environ.get("RHDP_API_KEY", "")}
 
 
-@pytest.fixture
-def sample_csv_tenant_before_cluster():
-    """CSV with tenant scheduled before cluster (error case)."""
-    base_time = datetime.now()
-    tenant_time = base_time.strftime("%d/%m/%Y %H:%M")
-    cluster_time = (base_time + timedelta(hours=1)).strftime("%d/%m/%Y %H:%M")
-    stop_time = (base_time + timedelta(hours=2)).strftime("%d/%m/%Y %H:%M")
-    destroy_time = (base_time + timedelta(days=1)).strftime("%d/%m/%Y %H:%M")
+class TestValidateClusterTenantEndpoint:
+    """Tests for the cluster-tenant validation endpoint using rhdp_flow's validator."""
 
-    return f"""CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC)
-Cluster Workshop,workshop.prod,user-test,10,True,test123,Admin,QA,Test Workshop,{cluster_time},{stop_time},{destroy_time}
-Tenant Workshop,workshop.prod-tenant,user-test,10,True,test123,Admin,QA,Test Workshop Tenant,{tenant_time},{stop_time},{destroy_time}
-"""
+    def test_no_schedules_loaded(self):
+        """Endpoint returns 400 when no schedules loaded."""
+        client.post("/api/sessions/clear", headers=_auth_headers())
+        response = client.post("/api/schedules/validate-cluster-tenant", headers=_auth_headers())
+        assert response.status_code == 400
+        assert "No schedules loaded" in response.json()["detail"]
+
+    def test_uses_rhdp_flow_validator_and_reports_out_of_batch_error(self, monkeypatch):
+        """Test that endpoint uses rhdp_flow validator and reports error for tenant without cluster in batch."""
+        from rhdp_flow import WorkshopSchedule
+
+        tenant = WorkshopSchedule(
+            ci_name="Tenant One",
+            ci="ocp4-tenant.prod",
+            namespace="ns",
+            enable_workshop_interface=True,
+            password="x",
+            activity="Admin",
+            purpose="QA",
+            workshop_name="w",
+            provisioning_date="10/09/2026 10:00",
+            auto_stop="11/09/2026 10:00",
+            auto_destroy="12/09/2026 10:00",
+            item_type="tenant",
+            is_tenant=True,
+            detected_cluster_ci="ocp4-cluster.prod",
+        )
+        monkeypatch.setattr(routes_module, "_schedules", [tenant])
+        monkeypatch.setattr("rhdp_flow.find_provisioned_cluster_resourceclaim", lambda ci, cfg: False)
+
+        response = client.post("/api/schedules/validate-cluster-tenant", headers=_auth_headers())
+
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["errors"]) == 1
+        assert body["errors"][0]["tenant_ci"] == "ocp4-tenant.prod"
+        assert "neither in this batch nor already provisioned" in body["errors"][0]["message"]
+        assert body["errors"][0]["cluster_ci"] == "ocp4-cluster.prod"
+
+    def test_valid_ordering_no_errors(self, monkeypatch):
+        """Cluster scheduled before tenant → no errors."""
+        from rhdp_flow import WorkshopSchedule
+
+        cluster = WorkshopSchedule(
+            ci_name="Cluster One",
+            ci="ocp4-cluster.prod",
+            namespace="ns",
+            enable_workshop_interface=True,
+            password="x",
+            activity="Admin",
+            purpose="QA",
+            workshop_name="w",
+            provisioning_date="10/09/2026 10:00",
+            auto_stop="11/09/2026 10:00",
+            auto_destroy="12/09/2026 10:00",
+            item_type="cluster",
+            is_cluster=True,
+        )
+        tenant = WorkshopSchedule(
+            ci_name="Tenant One",
+            ci="ocp4-tenant.prod",
+            namespace="ns",
+            enable_workshop_interface=True,
+            password="x",
+            activity="Admin",
+            purpose="QA",
+            workshop_name="w",
+            provisioning_date="10/09/2026 11:00",  # 1 hour after cluster
+            auto_stop="11/09/2026 10:00",
+            auto_destroy="12/09/2026 10:00",
+            item_type="tenant",
+            is_tenant=True,
+            detected_cluster_ci="ocp4-cluster.prod",
+        )
+        monkeypatch.setattr(routes_module, "_schedules", [cluster, tenant])
+
+        response = client.post("/api/schedules/validate-cluster-tenant", headers=_auth_headers())
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["errors"] == []
+        assert body["tenants_checked"] == 1
+        assert body["clusters_found"] == 1
+
+    def test_invalid_ordering_tenant_before_cluster(self, monkeypatch):
+        """Tenant scheduled before cluster → timing error."""
+        from rhdp_flow import WorkshopSchedule
+
+        cluster = WorkshopSchedule(
+            ci_name="Cluster One",
+            ci="ocp4-cluster.prod",
+            namespace="ns",
+            enable_workshop_interface=True,
+            password="x",
+            activity="Admin",
+            purpose="QA",
+            workshop_name="w",
+            provisioning_date="10/09/2026 11:00",  # AFTER tenant
+            auto_stop="11/09/2026 10:00",
+            auto_destroy="12/09/2026 10:00",
+            item_type="cluster",
+            is_cluster=True,
+        )
+        tenant = WorkshopSchedule(
+            ci_name="Tenant One",
+            ci="ocp4-tenant.prod",
+            namespace="ns",
+            enable_workshop_interface=True,
+            password="x",
+            activity="Admin",
+            purpose="QA",
+            workshop_name="w",
+            provisioning_date="10/09/2026 10:00",  # BEFORE cluster
+            auto_stop="11/09/2026 10:00",
+            auto_destroy="12/09/2026 10:00",
+            item_type="tenant",
+            is_tenant=True,
+            detected_cluster_ci="ocp4-cluster.prod",
+        )
+        monkeypatch.setattr(routes_module, "_schedules", [cluster, tenant])
+
+        response = client.post("/api/schedules/validate-cluster-tenant", headers=_auth_headers())
+
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["errors"]) == 1
+        assert body["errors"][0]["tenant_ci"] == "ocp4-tenant.prod"
+        assert body["errors"][0]["cluster_ci"] == "ocp4-cluster.prod"
+        assert "must be provisioned first" in body["errors"][0]["message"].lower()
+        assert body["tenants_checked"] == 1
+
+    def test_tenant_without_cluster_in_batch_gives_warning_when_no_config(self, monkeypatch):
+        """Tenant without cluster in batch → warning (when live lookup unavailable)."""
+        from rhdp_flow import WorkshopSchedule
+
+        tenant = WorkshopSchedule(
+            ci_name="Tenant One",
+            ci="ocp4-tenant.prod",
+            namespace="ns",
+            enable_workshop_interface=True,
+            password="x",
+            activity="Admin",
+            purpose="QA",
+            workshop_name="w",
+            provisioning_date="10/09/2026 10:00",
+            auto_stop="11/09/2026 10:00",
+            auto_destroy="12/09/2026 10:00",
+            item_type="tenant",
+            is_tenant=True,
+            detected_cluster_ci="ocp4-cluster.prod",
+        )
+        monkeypatch.setattr(routes_module, "_schedules", [tenant])
+        # Simulate lookup failure (no config or lookup returns None)
+        monkeypatch.setattr("rhdp_flow.find_provisioned_cluster_resourceclaim", lambda ci, cfg: None)
+
+        response = client.post("/api/schedules/validate-cluster-tenant", headers=_auth_headers())
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["errors"] == []
+        assert len(body["warnings"]) == 1
+        assert body["warnings"][0]["tenant_ci"] == "ocp4-tenant.prod"
+        assert "ocp4-cluster.prod" in body["warnings"][0]["message"]
+        assert body["tenants_checked"] == 1
+        assert body["clusters_found"] == 0
 
 
-def test_validate_cluster_tenant_no_schedules():
-    """Endpoint returns 400 when no schedules loaded."""
-    # Clear any existing schedules
-    client.post("/api/sessions/clear")
+class TestScheduleResponseIncludesDetectionFields:
+    def test_schedules_endpoint_includes_cluster_tenant_fields(self, monkeypatch):
+        from rhdp_flow import WorkshopSchedule
 
-    response = client.post("/api/schedules/validate-cluster-tenant")
-    assert response.status_code == 400
-    assert "No schedules loaded" in response.json()["detail"]
+        tenant = WorkshopSchedule(
+            ci_name="Tenant One", ci="ocp4-tenant.prod", namespace="ns",
+            enable_workshop_interface=True, password="x", activity="Admin",
+            purpose="QA", workshop_name="w", provisioning_date="10/09/2026 10:00",
+            auto_stop="11/09/2026 10:00", auto_destroy="12/09/2026 10:00",
+            is_tenant=True, detected_cluster_ci="ocp4-cluster.prod",
+            detection_method="naming", cluster_ci_source="naming",
+        )
+        monkeypatch.setattr(routes_module, "_schedules", [tenant])
 
+        response = client.get("/api/schedules", headers=_auth_headers())
 
-def test_validate_cluster_tenant_valid_ordering(sample_csv_with_tenant):
-    """Valid ordering: cluster before tenant → no errors."""
-    client.post("/api/sessions/clear")
-
-    # Upload CSV
-    files = {"file": ("test.csv", sample_csv_with_tenant, "text/csv")}
-    upload_response = client.post("/api/schedules/upload", files=files)
-    assert upload_response.status_code == 200
-
-    # Validate cluster-tenant ordering
-    response = client.post("/api/schedules/validate-cluster-tenant")
-    assert response.status_code == 200
-
-    data = response.json()
-    assert data["errors"] == []
-    assert data["warnings"] == []
-    assert data["tenants_checked"] == 1
-    assert data["clusters_found"] == 1
-
-
-def test_validate_cluster_tenant_invalid_ordering(sample_csv_tenant_before_cluster):
-    """Invalid ordering: tenant before cluster → error."""
-    client.post("/api/sessions/clear")
-
-    # Upload CSV
-    files = {"file": ("test.csv", sample_csv_tenant_before_cluster, "text/csv")}
-    upload_response = client.post("/api/schedules/upload", files=files)
-    assert upload_response.status_code == 200
-
-    # Validate cluster-tenant ordering
-    response = client.post("/api/schedules/validate-cluster-tenant")
-    assert response.status_code == 200
-
-    data = response.json()
-    assert len(data["errors"]) == 1
-    assert data["errors"][0]["tenant_ci"] == "workshop.prod-tenant"
-    assert data["errors"][0]["cluster_ci"] == "workshop.prod"
-    assert "Deploy cluster first" in data["errors"][0]["message"]
-    assert data["warnings"] == []
-    assert data["tenants_checked"] == 1
-    assert data["clusters_found"] == 1
-
-
-def test_validate_cluster_tenant_no_cluster():
-    """Tenant without cluster → warning."""
-    base_time = datetime.now()
-    tenant_time = base_time.strftime("%d/%m/%Y %H:%M")
-    stop_time = (base_time + timedelta(hours=2)).strftime("%d/%m/%Y %H:%M")
-    destroy_time = (base_time + timedelta(days=1)).strftime("%d/%m/%Y %H:%M")
-
-    csv_content = f"""CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC)
-Tenant Workshop,workshop.prod-tenant,user-test,10,True,test123,Admin,QA,Test Workshop Tenant,{tenant_time},{stop_time},{destroy_time}
-"""
-
-    client.post("/api/sessions/clear")
-
-    # Upload CSV
-    files = {"file": ("test.csv", csv_content, "text/csv")}
-    upload_response = client.post("/api/schedules/upload", files=files)
-    assert upload_response.status_code == 200
-
-    # Validate cluster-tenant ordering
-    response = client.post("/api/schedules/validate-cluster-tenant")
-    assert response.status_code == 200
-
-    data = response.json()
-    assert data["errors"] == []
-    assert len(data["warnings"]) == 1
-    assert data["warnings"][0]["tenant_ci"] == "workshop.prod-tenant"
-    assert "workshop.prod" in data["warnings"][0]["message"]
-    assert data["tenants_checked"] == 1
-    assert data["clusters_found"] == 0
+        assert response.status_code == 200
+        body = response.json()[0]
+        assert body["is_tenant"] is True
+        assert body["detected_cluster_ci"] == "ocp4-cluster.prod"
+        assert body["detection_method"] == "naming"
+        assert body["cluster_ci_source"] == "naming"

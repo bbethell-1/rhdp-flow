@@ -34,6 +34,8 @@ spec:
           env:
             - name: KUBECONFIG
               value: ""
+            - name: AGNOSTICV_SSH_KEY_PATH
+              value: "/etc/agnosticv-deploy-key/ssh-privatekey"
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -66,8 +68,15 @@ spec:
               mountPath: /app/logs
             - name: tmp
               mountPath: /tmp
+            - name: agnosticv-deploy-key
+              mountPath: /etc/agnosticv-deploy-key
+              readOnly: true
       volumes:
         - name: logs
           emptyDir: {}
         - name: tmp
           emptyDir: {}
+        - name: agnosticv-deploy-key
+          secret:
+            secretName: agnosticv-deploy-key
+            defaultMode: 0400

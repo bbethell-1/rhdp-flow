@@ -7,6 +7,7 @@ import {
   CardTitle,
   FormSelect,
   FormSelectOption,
+  Label,
   PageSection,
   Title,
   Progress,
@@ -181,6 +182,14 @@ export const UploadTab: React.FC<Props> = ({
   const [enableAutoTiming, setEnableAutoTiming] = useState(true);
   const [timingWarnings, setTimingWarnings] = useState<string[]>([]);
   const [showTimingWarnings, setShowTimingWarnings] = useState(false);
+
+  // Auto-provision clusters: when a tenant has nowhere to land (no pool, no
+  // cluster row), Flow injects a fresh cluster provisioner so it can deploy.
+  const [enableAutoProvision, setEnableAutoProvision] = useState(true);
+  const [autoProvisionResult, setAutoProvisionResult] = useState<{
+    added: Array<{ tenant_ci: string; cluster_ci: string; workshop_name: string }>;
+    needs_agv_prs: Array<{ tenant_ci: string; cluster_ci: string; workshop_name: string }>;
+  } | null>(null);
 
   // Pool capacity validation
   const [poolCapacityWarnings, setPoolCapacityWarnings] = useState<import('../types').PoolCapacityWarning[]>([]);
@@ -555,6 +564,27 @@ export const UploadTab: React.FC<Props> = ({
         try {
           const refsRes = await api.checkTenantClusterRefs();
           setMissingTenantRefs(refsRes);
+
+          // Auto-provision clusters for tenants that would otherwise fail
+          // (no shared pool and no cluster row in this batch).
+          const willFail = [
+            ...(refsRes.missing_refs || []),
+            ...(refsRes.ref_no_pool || []),
+          ].filter((r) => !r.pool_exists && !r.has_cluster_row);
+          if (enableAutoProvision && willFail.length > 0) {
+            try {
+              const prov = await api.autoProvisionClusters();
+              if (prov.count > 0 || (prov.needs_agv_prs || []).length > 0) {
+                setAutoProvisionResult({ added: prov.added || [], needs_agv_prs: prov.needs_agv_prs || [] });
+                if (prov.schedules) setSchedules(prov.schedules);
+                try { setMissingTenantRefs(await api.checkTenantClusterRefs()); } catch { /* ignore */ }
+              }
+            } catch (e) {
+              console.warn('Auto-provision clusters failed', e);
+            }
+          } else {
+            setAutoProvisionResult(null);
+          }
         } catch (e) {
           console.warn('Tenant cluster reference check failed', e);
         }
@@ -1353,32 +1383,138 @@ export const UploadTab: React.FC<Props> = ({
             </Alert>
           )}
 
-          {/* Missing tenant cluster references */}
-          {missingTenantRefs && missingTenantRefs.missing_refs && missingTenantRefs.missing_refs.length > 0 && (
+          {/* Tenant cluster readiness — a tenant needs somewhere to run:
+              either a shared cluster pool exists, OR its cluster provisioner
+              deploys in this same batch. If neither, it will fail. */}
+          {missingTenantRefs && (() => {
+            const all = [
+              ...(missingTenantRefs.missing_refs || []),
+              ...(missingTenantRefs.ref_no_pool || []),
+            ];
+            const willFail = all.filter((r: any) => !r.pool_exists && !r.has_cluster_row);
+            const viaFreshCluster = all.filter((r: any) => !r.pool_exists && r.has_cluster_row);
+
+            if (willFail.length === 0 && viaFreshCluster.length === 0) return null;
+
+            return (
+              <>
+                {willFail.length > 0 && (
+                  <Alert
+                    variant="danger"
+                    isInline
+                    title={`${willFail.length} workshop(s) will fail — nowhere to run`}
+                    style={{ marginBottom: 12 }}
+                  >
+                    <div style={{ marginBottom: 8 }}>
+                      These workshops run <strong>on top of</strong> a cluster, but right now there's
+                      no cluster ready for them — no shared cluster pool exists, and no cluster is
+                      being created in this batch:
+                    </div>
+                    <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
+                      {willFail.slice(0, 5).map((ref: any, i: number) => (
+                        <li key={i}><strong>{ref.workshop_name}</strong></li>
+                      ))}
+                      {willFail.length > 5 && (
+                        <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>
+                          ...and {willFail.length - 5} more
+                        </li>
+                      )}
+                    </ul>
+                    <div style={{ padding: '10px 14px', background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 4 }}>
+                      <strong>Two ways to fix this:</strong>
+                      <ol style={{ margin: '6px 0 0 18px', fontSize: '0.85rem' }}>
+                        <li>
+                          <strong>Deploy a fresh cluster now</strong> — add the matching
+                          "Cluster" row for each workshop to your CSV (same name, ending
+                          <code>-cluster</code>). Flow deploys the cluster first, then the workshop lands on it.
+                        </li>
+                        <li>
+                          <strong>Permanent fix (shared pool)</strong> — platform team adds the
+                          <code>tenant_cluster</code> link in AgnosticV and creates a shared cluster
+                          pool. Then no per-event cluster is needed. Ping <code>#forum-rhdp</code>.
+                        </li>
+                      </ol>
+                    </div>
+                  </Alert>
+                )}
+                {viaFreshCluster.length > 0 && (
+                  <Alert
+                    variant="info"
+                    isInline
+                    title={`${viaFreshCluster.length} workshop(s) will use a fresh cluster from this batch`}
+                    style={{ marginBottom: 12 }}
+                  >
+                    <div style={{ marginBottom: 6 }}>
+                      ✓ This is fine. There's no shared pool yet, so each of these workshops will run
+                      on the matching cluster you're deploying in this same CSV:
+                    </div>
+                    <ul style={{ margin: '0 0 6px 20px', fontSize: '0.9rem' }}>
+                      {viaFreshCluster.slice(0, 5).map((ref: any, i: number) => (
+                        <li key={i}><strong>{ref.workshop_name}</strong></li>
+                      ))}
+                      {viaFreshCluster.length > 5 && (
+                        <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>
+                          ...and {viaFreshCluster.length - 5} more
+                        </li>
+                      )}
+                    </ul>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)' }}>
+                      Fresh clusters take longer to provision than a ready pool. For a permanent
+                      shared pool, ask the platform team to add the <code>tenant_cluster</code> link + pool.
+                    </div>
+                  </Alert>
+                )}
+              </>
+            );
+          })()}
+
+          {/* Flow auto-added fresh clusters so at-risk tenants have somewhere to land */}
+          {autoProvisionResult && autoProvisionResult.added.length > 0 && (
             <Alert
-              variant="warning"
+              variant="success"
               isInline
-              title={`${missingTenantRefs.missing_refs.length} workshop(s) will fail — cluster setup missing`}
+              title={`Flow added ${autoProvisionResult.added.length} cluster(s) so these workshops can deploy`}
               style={{ marginBottom: 12 }}
+              actionClose={
+                <Button
+                  variant="link"
+                  isInline
+                  onClick={async () => {
+                    try {
+                      const res = await api.removeAutoProvisioned();
+                      if (res.schedules) setSchedules(res.schedules);
+                      setAutoProvisionResult(null);
+                      try { setMissingTenantRefs(await api.checkTenantClusterRefs()); } catch { /* ignore */ }
+                      showToast(`Removed ${res.removed_count} Flow-added cluster(s)`, 'info');
+                    } catch (e) {
+                      showToast(`Could not remove clusters: ${e}`, 'danger');
+                    }
+                  }}
+                >
+                  Remove
+                </Button>
+              }
             >
               <div style={{ marginBottom: 8 }}>
-                These workshops need to run ON a cluster, but the catalog configuration is missing the cluster reference:
+                These tenant workshops had no cluster to run on (no shared pool, no cluster in your CSV),
+                so Flow added a fresh cluster for each — scheduled 3 hours earlier and tagged
+                <strong> "added by Flow"</strong> in the table below. Remove them any time with the link above.
               </div>
               <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
-                {missingTenantRefs.missing_refs.slice(0, 5).map((ref: any, i: number) => (
-                  <li key={i}><strong>{ref.workshop_name}</strong></li>
+                {autoProvisionResult.added.slice(0, 5).map((a, i) => (
+                  <li key={i}><strong>{a.workshop_name}</strong> → <code>{a.cluster_ci}</code></li>
                 ))}
-                {missingTenantRefs.missing_refs.length > 5 && (
+                {autoProvisionResult.added.length > 5 && (
                   <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>
-                    ...and {missingTenantRefs.missing_refs.length - 5} more
+                    ...and {autoProvisionResult.added.length - 5} more
                   </li>
                 )}
               </ul>
-              <div style={{ padding: '10px 14px', background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 4 }}>
-                <strong>⚠️ Deploy will fail</strong> — catalog needs <code>tenant_cluster</code> reference added.
-                <div style={{ fontSize: '0.85rem', marginTop: 6 }}>
-                  Platform team must update AgnosticV catalog configs. Contact RHDP in Slack (<code>#forum-rhdp</code>) or check for pending catalog PRs.
-                </div>
+              <div style={{ padding: '10px 14px', background: '#e7f1fa', border: '1px solid #2b9af3', borderRadius: 4, fontSize: '0.85rem' }}>
+                <strong>💡 For a permanent fix, get these into AgnosticV.</strong> Fresh clusters work but are
+                slower and per-event. The lasting fix is a catalog <code>tenant_cluster</code> reference on each
+                tenant (an AgnosticV PR, like the <code>lb2596</code> one) plus a shared cluster pool — then no
+                per-event cluster is needed. Raise the PRs or ask the platform team in <code>#forum-rhdp</code>.
               </div>
             </Alert>
           )}
@@ -1409,7 +1545,7 @@ export const UploadTab: React.FC<Props> = ({
               <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
                 {clusterTenantValidation.errors.map((e: any, i: number) => (
                   <li key={i}>
-                    {e.tenant_name || e.tenant_ci}: {e.issue}
+                    {e.tenant_name || e.tenant_ci}: {e.message}
                   </li>
                 ))}
               </ul>
@@ -1460,7 +1596,7 @@ export const UploadTab: React.FC<Props> = ({
                   <Th>Item Type</Th>
                   <Th>CI Name</Th>
                   <Th>CI (Catalog Item)</Th>
-                  <Th>Cluster Link</Th>
+                  <Th>Cluster</Th>
                   {usePoolLookup && (
                     <Th>
                       Resource Pool{' '}
@@ -1521,6 +1657,11 @@ export const UploadTab: React.FC<Props> = ({
                   } else if (s.item_type === 'Tenant') {
                     rowStyle.backgroundColor = 'rgba(0, 204, 102, 0.1)'; // green tint
                   }
+                  if (s.auto_added) {
+                    // Flow-injected cluster — make it obvious and distinct.
+                    rowStyle.backgroundColor = 'rgba(62, 134, 53, 0.12)';
+                    rowStyle.borderLeft = '3px solid #3e8635';
+                  }
 
                   return (
                   <Fragment key={`${s.ci}-${s.namespace}-${i}`}>
@@ -1549,6 +1690,15 @@ export const UploadTab: React.FC<Props> = ({
                         </FormSelect>
                       </Td>
                       <Td dataLabel="CI Name">
+                        {s.auto_added && (
+                          <span style={{
+                            display: 'inline-block', marginBottom: 4, padding: '1px 8px',
+                            fontSize: '0.7rem', fontWeight: 600, color: '#fff',
+                            background: '#3e8635', borderRadius: 10,
+                          }}>
+                            added by Flow
+                          </span>
+                        )}
                         <TextInput
                           value={s.ci_name || ''}
                           onChange={(_e, value) => {
@@ -1590,29 +1740,29 @@ export const UploadTab: React.FC<Props> = ({
                           />
                         )}
                       </Td>
-                      <Td dataLabel="Cluster Link">
-                        {s.item_type === 'Tenant' ? (
-                          <FormSelect
-                            value={s.cluster_link || ''}
-                            onChange={(_e, value) => {
-                              const updated = schedules.map((sc, idx) => idx === i ? { ...sc, cluster_link: value as string } : sc);
-                              setSchedules(updated);
-                              api.updateSchedules(updated).catch(err => showToast(`Failed to update schedule: ${err}`, 'danger'));
-                            }}
-                            aria-label={`Cluster link for ${s.ci_name}`}
-                            style={{ minWidth: '200px' }}
-                          >
-                            <FormSelectOption key="none" value="" label="(select cluster)" />
-                            {schedules
-                              .filter((sc, idx) => sc.item_type === 'Cluster' && idx !== i)
-                              .map((clusterSched, idx) => (
-                                <FormSelectOption
-                                  key={idx}
-                                  value={clusterSched.ci_name}
-                                  label={clusterSched.ci_name}
-                                />
-                              ))}
-                          </FormSelect>
+                      <Td dataLabel="Cluster">
+                        {s.item_type === 'Tenant' && s.detected_cluster_ci ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span>{s.detected_cluster_ci}</span>
+                            {s.cluster_ci_source && (
+                              <Label
+                                isCompact
+                                color={
+                                  s.cluster_ci_source === 'agnosticv'
+                                    ? 'green'
+                                    : s.cluster_ci_source === 'override'
+                                    ? 'blue'
+                                    : 'grey'
+                                }
+                              >
+                                {s.cluster_ci_source === 'agnosticv'
+                                  ? 'AgnosticV'
+                                  : s.cluster_ci_source === 'override'
+                                  ? 'Manual override'
+                                  : 'Naming convention'}
+                              </Label>
+                            )}
+                          </div>
                         ) : (
                           <span style={{ color: 'var(--pf-v6-global--Color--200)' }}>-</span>
                         )}
@@ -2010,6 +2160,16 @@ export const UploadTab: React.FC<Props> = ({
                       label="Auto-Adjust Cluster Timing"
                       isChecked={enableAutoTiming}
                       onChange={(_e, checked) => setEnableAutoTiming(checked)}
+                    />
+                  </Tooltip>
+                </SplitItem>
+                <SplitItem>
+                  <Tooltip content="When a tenant workshop has no shared cluster pool and no matching cluster in your CSV, Flow adds a fresh cluster provisioner so it can still deploy. Injected rows are tagged 'added by Flow' and can be removed. Re-run the upload after changing this.">
+                    <Switch
+                      id="auto-provision-switch"
+                      label="Auto-Provision Missing Clusters"
+                      isChecked={enableAutoProvision}
+                      onChange={(_e, checked) => setEnableAutoProvision(checked)}
                     />
                   </Tooltip>
                 </SplitItem>

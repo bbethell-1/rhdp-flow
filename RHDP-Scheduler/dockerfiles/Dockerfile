@@ -43,6 +43,18 @@ RUN ARCH=$(uname -m) && \
     chmod +x /usr/local/bin/oc /usr/local/bin/kubectl && \
     oc version --client
 
+# Install git (for agnosticv_resolver.py's shallow clone of rhpds/agnosticv)
+RUN dnf install -y git && dnf clean all
+
+# Install the agnosticv CLI (same public, unauthenticated binary agnosticv-operator
+# vendors; pinned to v0.7.1 to match). Used by agnosticv_resolver.py to merge
+# catalog item YAML and read tenant_cluster.item.
+ARG AGNOSTICV_VERSION=0.7.1
+RUN curl -sL "https://github.com/redhat-cop/agnosticv/releases/download/v${AGNOSTICV_VERSION}/agnosticv_linux_amd64" \
+    -o /usr/local/bin/agnosticv && \
+    chmod +x /usr/local/bin/agnosticv && \
+    agnosticv --version
+
 # Copy Python venv from builder
 COPY --from=python-builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH" \
@@ -51,7 +63,7 @@ ENV PATH="/opt/venv/bin:$PATH" \
 
 # Copy version file and application source
 COPY VERSION ./
-COPY rhdp_flow.py rhdp_flow_wizard.py ./
+COPY rhdp_flow.py rhdp_flow_wizard.py agnosticv_resolver.py tenant_cluster_capacity.py ./
 COPY api/ ./api/
 COPY docs/ ./docs/
 COPY sample-csvs/ ./sample-csvs/

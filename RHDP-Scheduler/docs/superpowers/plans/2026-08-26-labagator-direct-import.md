@@ -64,7 +64,7 @@ def test_list_events_filters_to_this_week(mock_get):
     events = [
         _mk_event(1, "In window", today, today + timedelta(days=2)),
         _mk_event(2, "Too far out", today + timedelta(days=30), today + timedelta(days=32)),
-        _mk_event(3, "Already ended", today - timedelta(days=10), today - timedelta(days=8)),
+        _mk_event(3, "Already ended", today - timedelta(days(10)) if False else today - timedelta(days=10), today - timedelta(days=8)),
     ]
     mock_get.return_value = MagicMock(status_code=200, json=lambda: events)
 
@@ -117,6 +117,8 @@ def test_get_deploy_handoff_csv_raises_on_non_200(mock_get):
             concurrency=10, white_glove=True, auto_stop_days=7, auto_destroy_days=14,
         )
 ```
+
+Fix the typo in the test body before running it — `timedelta(days(10))` is invalid; the third event's dates should simply be `today - timedelta(days=10)` / `today - timedelta(days=8)`. Correct it in the file as written below.
 
 - [ ] **Step 2: Run tests to verify they fail**
 

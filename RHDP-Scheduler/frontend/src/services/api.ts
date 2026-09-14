@@ -29,6 +29,16 @@ import type {
   LabagatorPreviewResponse,
 } from '../types';
 
+export interface TenantClusterRef {
+  ci: string;
+  namespace: string;
+  cluster_ref: string;
+  cluster_ci_from_csv: string;
+  workshop_name: string;
+  pool_exists: boolean;
+  has_cluster_row: boolean;
+}
+
 const API = '/api';
 
 export function getApiKey(): string | null {
@@ -209,14 +219,22 @@ export const api = {
     }>('/schedules/cluster-needs'),
   checkTenantClusterRefs: () =>
     request<{
-      missing_refs: Array<{
-        ci: string;
-        namespace: string;
-        cluster_ci_from_csv: string;
-        workshop_name: string;
-      }>;
+      missing_refs: TenantClusterRef[];
+      ref_no_pool: TenantClusterRef[];
+      ready: TenantClusterRef[];
       total_tenant_count: number;
+      checked: boolean;
     }>('/schedules/tenant-cluster-refs'),
+  autoProvisionClusters: () =>
+    request<{
+      added: Array<{ tenant_ci: string; cluster_ci: string; workshop_name: string }>;
+      count: number;
+      needs_agv_prs: Array<{ tenant_ci: string; cluster_ci: string; workshop_name: string }>;
+      schedules: WorkshopSchedule[];
+    }>('/schedules/auto-provision-clusters', { method: 'POST' }),
+  removeAutoProvisioned: () =>
+    request<{ removed_count: number; schedules: WorkshopSchedule[] }>(
+      '/schedules/remove-auto-provisioned', { method: 'POST' }),
   autoFixClusterTenantTiming: () =>
     request<{
       fixed_count: number;

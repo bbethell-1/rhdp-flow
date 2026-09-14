@@ -86,6 +86,7 @@ from rhdp_flow import (
     WorkshopSchedule,
     _dedup_qa_results,
     _merge_qa1_qa2,
+    analyze_cluster_tenant_relationships,
     check_showroom_health,
     create_multi_workshop_from_group,
     derive_base_domain,
@@ -115,6 +116,7 @@ from rhdp_flow import (
     users_column_ignored_by_catalog_advisory,
     utc_timestamp_str,
     validate_catalog_item_exists,
+    validate_cluster_before_tenant,
 )
 
 logger = logging.getLogger("rhdp_flow.api")
@@ -430,6 +432,12 @@ def _get_config(
     config.white_glove = white_glove
     config.redirect = redirect
     config.base_domain = _detect_and_cache_base_domain()
+    config.agnosticv_repo_url = os.environ.get("AGNOSTICV_REPO_URL", config.agnosticv_repo_url)
+    config.agnosticv_cache_dir = os.environ.get("AGNOSTICV_CACHE_DIR", config.agnosticv_cache_dir)
+    config.agnosticv_ssh_key_path = os.environ.get("AGNOSTICV_SSH_KEY_PATH")
+    ttl = os.environ.get("AGNOSTICV_REFRESH_TTL_SECONDS")
+    if ttl:
+        config.agnosticv_refresh_ttl_seconds = int(ttl)
     return config
 
 
@@ -456,6 +464,12 @@ def _schedule_to_response(s: WorkshopSchedule) -> WorkshopScheduleResponse:
         showroom_zerotouch=s.showroom_zerotouch,
         item_type=s.item_type,
         cluster_ci_override=s.cluster_ci_override,
+        is_cluster=s.is_cluster,
+        is_tenant=s.is_tenant,
+        detected_cluster_ci=s.detected_cluster_ci,
+        detection_method=s.detection_method,
+        cluster_ci_source=s.cluster_ci_source,
+        auto_added=s.auto_added,
     )
 
 
@@ -1197,15 +1211,18 @@ def validate_cluster_tenant_scheduling(_key=Depends(verify_api_key)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
 
-    from cluster_tenant_validation import validate_cluster_before_tenant
+    config = _get_config()
+    analyze_cluster_tenant_relationships(_schedules, config=config)
+    validation = validate_cluster_before_tenant(_schedules, config=config)
 
-    validation = validate_cluster_before_tenant(_schedules)
+    tenants_checked = sum(1 for s in _schedules if s.is_tenant)
+    clusters_found = sum(1 for r in validation["relationships"] if r.get("status") in ("valid", "timing_violation", "found_on_cluster"))
 
     return ClusterTenantValidationResponse(
-        errors=[ClusterTenantValidationError(**e) for e in validation["errors"]],
-        warnings=[ClusterTenantValidationWarning(**w) for w in validation["warnings"]],
-        tenants_checked=validation["tenants_checked"],
-        clusters_found=validation["clusters_found"],
+        errors=[ClusterTenantValidationError(**e) for e in validation["error_details"]],
+        warnings=[ClusterTenantValidationWarning(**w) for w in validation["warning_details"]],
+        tenants_checked=tenants_checked,
+        clusters_found=clusters_found,
     )
 
 
@@ -2736,3 +2753,51 @@ def check_tenant_cluster_refs(_key=Depends(verify_api_key)):
         logger.exception("Tenant cluster reference check failed")
         return {"missing_refs": [], "total_tenant_count": 0}
 
+
+
+@router.post("/schedules/auto-provision-clusters")
+def auto_provision_clusters(_key=Depends(verify_api_key)):
+    """Inject fresh cluster provisioners for tenants that have nowhere to land.
+
+    For each tenant with no shared pool and no matching cluster row in the
+    batch, appends an auto_added cluster schedule (3h earlier) so the tenant
+    can deploy. Fully reversible via /schedules/remove-auto-provisioned.
+
+    Returns: {added, count, needs_agv_prs, schedules}
+    """
+    global _schedules
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+
+    try:
+        from rhdp_flow import auto_provision_missing_clusters
+
+        result = auto_provision_missing_clusters(_schedules)
+        result["schedules"] = [_schedule_to_response(s) for s in _schedules]
+        return result
+    except Exception:
+        logger.exception("Auto-provision clusters failed")
+        return {"added": [], "count": 0, "needs_agv_prs": [],
+                "schedules": [_schedule_to_response(s) for s in _schedules]}
+
+
+@router.post("/schedules/remove-auto-provisioned")
+def remove_auto_provisioned(_key=Depends(verify_api_key)):
+    """Remove all Flow-injected (auto_added) cluster rows.
+
+    Returns: {removed_count, schedules}
+    """
+    global _schedules
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+
+    try:
+        from rhdp_flow import remove_auto_provisioned_clusters
+
+        result = remove_auto_provisioned_clusters(_schedules)
+        result["schedules"] = [_schedule_to_response(s) for s in _schedules]
+        return result
+    except Exception:
+        logger.exception("Remove auto-provisioned clusters failed")
+        return {"removed_count": 0,
+                "schedules": [_schedule_to_response(s) for s in _schedules]}
