@@ -1067,13 +1067,10 @@ export const UploadTab: React.FC<Props> = ({
             <Alert
               variant="info"
               isInline
-              title={`${catalogNamespaceMismatches.length} item(s) auto-detected in different catalog`}
+              title={`${catalogNamespaceMismatches.length} items are in ${catalogNamespaceMismatches[0]?.found_catalog_namespace} (your CSV says ${catalogNamespaceMismatches[0]?.expected_catalog_namespace})`}
               style={{ marginBottom: 12 }}
             >
-              <div style={{ marginBottom: 8 }}>
-                Flow found these items in <code>{catalogNamespaceMismatches[0]?.found_catalog_namespace}</code> (they may only exist there):
-              </div>
-              <ul style={{ margin: '0 0 8px 20px', fontSize: '0.9rem' }}>
+              <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
                 {catalogNamespaceMismatches.slice(0, 5).map((m, i) => (
                   <li key={i}>{m.ci_name}</li>
                 ))}
@@ -1081,10 +1078,11 @@ export const UploadTab: React.FC<Props> = ({
                   <li style={{ fontStyle: 'italic' }}>...and {catalogNamespaceMismatches.length - 5} more</li>
                 )}
               </ul>
-              <div style={{ padding: '8px 12px', background: 'var(--pf-v6-global--BackgroundColor--200)', borderRadius: 4, fontSize: '0.9rem' }}>
-                <strong>Override catalog for ALL workshops:</strong> Use <strong>Deploy Settings</strong> below.
-                Note: these flagged items may only exist in {catalogNamespaceMismatches[0]?.found_catalog_namespace},
-                so overriding might cause them to fail.
+              <div style={{ padding: '10px 14px', background: '#e7f5e7', border: '1px solid #4caf50', borderRadius: 4, marginBottom: 8 }}>
+                <strong style={{ color: '#2e7d32' }}>✓ This is fine — Flow will deploy from the correct catalog</strong>
+              </div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)' }}>
+                To override catalog for <strong>all</strong> workshops: use Deploy Settings below
               </div>
             </Alert>
           )}
