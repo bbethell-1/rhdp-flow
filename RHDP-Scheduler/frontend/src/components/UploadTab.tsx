@@ -266,9 +266,9 @@ export const UploadTab: React.FC<Props> = ({
       if (s.auto_destroy && !destroy)
         warns.push({ index: i, field: 'auto_destroy', message: `"${s.ci_name}" has an unparseable auto-destroy date: "${s.auto_destroy}"` });
 
-      // Past provisioning date
+      // Past provisioning date (dates in CSV are UTC; now is also UTC internally)
       if (prov && prov < now)
-        warns.push({ index: i, field: 'provisioning_date', message: `"${s.ci_name}" provisioning date is in the past (${s.provisioning_date})` });
+        warns.push({ index: i, field: 'provisioning_date', message: `"${s.ci_name}" provisioning date is in the past — ${s.provisioning_date} UTC has already passed` });
 
       // Auto-stop before provisioning
       if (prov && stop && stop <= prov)
@@ -1473,7 +1473,8 @@ export const UploadTab: React.FC<Props> = ({
                     }
                   >
                     <div style={{ marginBottom: 8 }}>
-                      These workshops run <strong>on top of</strong> a cluster, but none is available — no shared cluster pool exists and no cluster is being deployed in this batch:
+                      These tenant workshops need a cluster to run on, but no <code>TenantClusterPool</code> exists
+                      in <code>shared-clusters</code> and no matching cluster CI is in this CSV:
                     </div>
                     <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
                       {willFail.slice(0, 5).map((ref: any, i: number) => (
@@ -1486,8 +1487,8 @@ export const UploadTab: React.FC<Props> = ({
                       )}
                     </ul>
                     <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)' }}>
-                      Or enable <strong>Auto-Add Missing Clusters</strong> in Deploy Settings as a temporary stopgap
-                      (deploys a fresh cluster per event, not a shared pool).
+                      Fix: click <strong>Create TenantClusterPools</strong> above to create the shared pool (Babylon will provision clusters automatically),
+                      or add the matching <code>-cluster.*</code> CI row to your CSV to deploy a dedicated cluster alongside.
                     </div>
                   </Alert>
                 )}
@@ -1495,12 +1496,13 @@ export const UploadTab: React.FC<Props> = ({
                   <Alert
                     variant="info"
                     isInline
-                    title={`${viaFreshCluster.length} workshop(s) will use a fresh cluster from this batch`}
+                    title={`${viaFreshCluster.length} workshop(s) covered by cluster CI in this CSV — OK`}
                     style={{ marginBottom: 12 }}
                   >
                     <div style={{ marginBottom: 6 }}>
-                      ✓ This is fine. There's no shared pool yet, so each of these workshops will run
-                      on the matching cluster you're deploying in this same CSV:
+                      No shared pool exists yet, but each of these tenant workshops has a matching
+                      <code> -cluster.*</code> CI row in this CSV and the same namespace.
+                      Babylon will route the tenant onto that dedicated cluster:
                     </div>
                     <ul style={{ margin: '0 0 6px 20px', fontSize: '0.9rem' }}>
                       {viaFreshCluster.slice(0, 5).map((ref: any, i: number) => (
@@ -1513,8 +1515,8 @@ export const UploadTab: React.FC<Props> = ({
                       )}
                     </ul>
                     <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)' }}>
-                      Fresh clusters take longer to provision than a ready pool. For a permanent
-                      shared pool, use the <strong>Create TenantClusterPools</strong> button above.
+                      Dedicated clusters provision from scratch (~2–4 h). A <code>TenantClusterPool</code> is faster
+                      for future events since Babylon keeps clusters warm in advance.
                     </div>
                   </Alert>
                 )}
@@ -1644,8 +1646,27 @@ export const UploadTab: React.FC<Props> = ({
           )}
 
           <Alert variant="info" isInline isPlain title="⏰ Schedule times are in UTC" style={{ marginBottom: 8 }}>
-            Your local timezone: <strong>{Intl.DateTimeFormat().resolvedOptions().timeZone}</strong> (UTC{new Date().getTimezoneOffset() === 0 ? '' : new Date().getTimezoneOffset() > 0 ? '-' : '+' + Math.abs(new Date().getTimezoneOffset() / 60).toString()}).
-            Enter dates in <strong>DD/MM/YYYY HH:MM</strong> format. Example: 25/12/2026 14:30
+            {(() => {
+              const offsetMins = new Date().getTimezoneOffset();
+              // getTimezoneOffset() is positive for west of UTC, negative for east.
+              // BST = -60 → UTC+1. Flip the sign so display matches convention.
+              const sign = offsetMins <= 0 ? '+' : '-';
+              const absH = Math.floor(Math.abs(offsetMins) / 60);
+              const absM = Math.abs(offsetMins) % 60;
+              const offsetStr = offsetMins === 0
+                ? ''
+                : absM > 0
+                  ? `${sign}${absH}:${String(absM).padStart(2, '0')}`
+                  : `${sign}${absH}`;
+              const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+              return (
+                <>
+                  Your local timezone: <strong>{tz}</strong> (UTC{offsetStr}).{' '}
+                  Enter dates in <strong>DD/MM/YYYY HH:MM</strong> format as <strong>UTC</strong> — not your local time.
+                  Example: if your event starts at 15:00 UTC, enter <code>14/09/2026 15:00</code>.
+                </>
+              );
+            })()}
           </Alert>
 
           <div className="table-sticky-wrapper">
