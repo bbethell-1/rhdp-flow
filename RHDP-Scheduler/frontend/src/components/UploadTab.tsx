@@ -179,14 +179,14 @@ export const UploadTab: React.FC<Props> = ({
   const [missingTenantRefs, setMissingTenantRefs] = useState<any>(null);
 
   // Auto-timing settings
-  const [enableAutoTiming, setEnableAutoTiming] = useState(true);
+  const [enableAutoTiming, setEnableAutoTiming] = useState(false);
   const [timingBufferHours, setTimingBufferHours] = useState(4);
   const [timingWarnings, setTimingWarnings] = useState<string[]>([]);
   const [showTimingWarnings, setShowTimingWarnings] = useState(false);
 
   // Auto-provision clusters: when a tenant has nowhere to land (no pool, no
   // cluster row), Flow injects a fresh cluster provisioner so it can deploy.
-  const [enableAutoProvision, setEnableAutoProvision] = useState(true);
+  const [enableAutoProvision, setEnableAutoProvision] = useState(false);
   const [autoProvisionResult, setAutoProvisionResult] = useState<{
     added: Array<{ tenant_ci: string; cluster_ci: string; workshop_name: string }>;
     needs_agv_prs: Array<{ tenant_ci: string; cluster_ci: string; workshop_name: string }>;
@@ -1353,7 +1353,7 @@ export const UploadTab: React.FC<Props> = ({
           )}
 
           {/* Cluster capacity needs */}
-          {clusterNeeds && clusterNeeds.total_deficit > 0 && (
+          {clusterNeeds && clusterNeeds.total_deficit > 0 && !missingTenantRefs && (
             <Alert
               variant="warning"
               isInline
@@ -1374,11 +1374,11 @@ export const UploadTab: React.FC<Props> = ({
                   </li>
                 ))}
               </ul>
-              <div style={{ padding: '10px 14px', background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 4 }}>
+              <div style={{ padding: '10px 14px', background: 'var(--pf-v6-global--BackgroundColor--200)', border: '1px solid var(--pf-v6-global--BorderColor--100)', borderRadius: 4 }}>
                 <strong>⚠️ Action needed:</strong> Add {clusterNeeds.total_deficit} cluster CI row(s) to your CSV, or ensure clusters already exist in the pool.
                 <br />
                 <span style={{ fontSize: '0.85rem', marginTop: 4, display: 'block' }}>
-                  Clusters take 3 hours to provision. Use <strong>Auto-Adjust Cluster Timing</strong> below to schedule them before tenants.
+                  Clusters take ~{timingBufferHours} hours to provision. Use <strong>Auto-Adjust Cluster Timing</strong> below to schedule them before tenants.
                 </span>
               </div>
             </Alert>
@@ -1421,7 +1421,7 @@ export const UploadTab: React.FC<Props> = ({
                         </li>
                       )}
                     </ul>
-                    <div style={{ padding: '10px 14px', background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 4 }}>
+                    <div style={{ padding: '10px 14px', background: 'var(--pf-v6-global--BackgroundColor--200)', border: '1px solid var(--pf-v6-global--BorderColor--100)', borderRadius: 4 }}>
                       <strong>Two ways to fix this:</strong>
                       <ol style={{ margin: '6px 0 0 18px', fontSize: '0.85rem' }}>
                         <li>
@@ -1498,7 +1498,7 @@ export const UploadTab: React.FC<Props> = ({
             >
               <div style={{ marginBottom: 8 }}>
                 These tenant workshops had no cluster to run on (no shared pool, no cluster in your CSV),
-                so Flow added a fresh cluster for each — scheduled 3 hours earlier and tagged
+                so Flow added a fresh cluster for each — scheduled <strong>{timingBufferHours} hours earlier</strong> and tagged
                 <strong> "added by Flow"</strong> in the table below. Remove them any time with the link above.
               </div>
               <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
@@ -1511,47 +1511,60 @@ export const UploadTab: React.FC<Props> = ({
                   </li>
                 )}
               </ul>
-              <div style={{ padding: '10px 14px', background: '#e7f1fa', border: '1px solid #2b9af3', borderRadius: 4, fontSize: '0.85rem' }}>
-                <strong>💡 For a permanent fix, get these into AgnosticV.</strong> Fresh clusters work but are
-                slower and per-event. The lasting fix is a catalog <code>tenant_cluster</code> reference on each
-                tenant (an AgnosticV PR, like the <code>lb2596</code> one) plus a shared cluster pool — then no
-                per-event cluster is needed. Raise the PRs or ask the platform team in <code>#forum-rhdp</code>.
+              <div style={{ padding: '10px 14px', background: 'var(--pf-v6-global--BackgroundColor--200)', border: '1px solid var(--pf-v6-global--BorderColor--100)', borderRadius: 4, fontSize: '0.85rem' }}>
+                <strong>💡 Permanent fix:</strong> Add a <code>tenant_cluster</code> reference in AgnosticV and create a shared cluster pool. Then no per-event cluster is needed. Ping <code>#forum-rhdp</code>.
               </div>
             </Alert>
           )}
 
-          {/* Cluster-tenant validation errors */}
-          {clusterTenantValidation?.errors?.length > 0 && (
-            <Alert variant="danger" isInline title={`${clusterTenantValidation.errors.length} cluster-tenant error(s)`} style={{ marginBottom: 12 }}
-              actionClose={
-                <Button
-                  variant="link"
-                  onClick={async () => {
-                    try {
-                      const result = await api.autoFixClusterTenantTiming(timingBufferHours);
-                      showToast(result.message, 'success');
-                      const updated = await api.getSchedules();
-                      setSchedules(updated);
-                      const ctRes = await api.validateClusterTenant();
-                      setClusterTenantValidation(ctRes);
-                    } catch (err) {
-                      showToast(`Auto-fix failed: ${err}`, 'danger');
-                    }
-                  }}
-                >
-                  Auto-fix timing
-                </Button>
-              }
-            >
-              <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
-                {clusterTenantValidation.errors.map((e: any, i: number) => (
-                  <li key={i}>
-                    {e.tenant_name || e.tenant_ci}: {e.message}
-                  </li>
-                ))}
-              </ul>
-            </Alert>
-          )}
+          {/* Cluster-tenant timing errors only — "not in batch" is already shown above via missingTenantRefs */}
+          {(() => {
+            const allErrors: any[] = clusterTenantValidation?.errors || [];
+            // Suppress "not in batch / not provisioned" errors when missingTenantRefs is loaded
+            // (those are already shown in the willFail / viaFreshCluster alerts above)
+            const timingErrors = missingTenantRefs
+              ? allErrors.filter((e: any) => {
+                  const m = (e.message || '').toLowerCase();
+                  return !m.includes('neither in this batch') && !m.includes('not in batch') && !m.includes('not provisioned');
+                })
+              : allErrors;
+            if (timingErrors.length === 0) return null;
+            return (
+              <Alert
+                variant="danger"
+                isInline
+                title={`${timingErrors.length} cluster timing issue(s) — cluster must deploy before its tenant`}
+                style={{ marginBottom: 12 }}
+                actionClose={
+                  <Button
+                    variant="link"
+                    onClick={async () => {
+                      try {
+                        const result = await api.autoFixClusterTenantTiming(timingBufferHours);
+                        showToast(result.message, 'success');
+                        const updated = await api.getSchedules();
+                        setSchedules(updated);
+                        const ctRes = await api.validateClusterTenant();
+                        setClusterTenantValidation(ctRes);
+                      } catch (err) {
+                        showToast(`Auto-fix failed: ${err}`, 'danger');
+                      }
+                    }}
+                  >
+                    Fix timing ({timingBufferHours}h buffer)
+                  </Button>
+                }
+              >
+                <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+                  {timingErrors.map((e: any, i: number) => (
+                    <li key={i}>
+                      <strong>{e.ci_name || e.tenant_ci}</strong>: {e.message}
+                    </li>
+                  ))}
+                </ul>
+              </Alert>
+            );
+          })()}
 
           {/* Timing adjustment warnings */}
           {showTimingWarnings && timingWarnings.length > 0 && (
@@ -1563,7 +1576,7 @@ export const UploadTab: React.FC<Props> = ({
               actionClose={<Button variant="plain" onClick={() => setShowTimingWarnings(false)}><i className="fas fa-times" /></Button>}
             >
               <div style={{ fontSize: '0.875rem', marginBottom: 8 }}>
-                Clusters adjusted to deploy <strong>3 hours before</strong> their tenants:
+                Clusters adjusted to deploy <strong>{timingBufferHours} hours before</strong> their tenants:
               </div>
               <ul style={{ margin: '0 0 4px', paddingLeft: 20, fontSize: '0.85rem', maxHeight: '200px', overflowY: 'auto' }}>
                 {timingWarnings.map((w, i) => (
