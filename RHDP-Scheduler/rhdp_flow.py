@@ -2576,7 +2576,16 @@ def validate_catalog_item_exists(ci: str, expected_namespace: str, config: RHDPC
             cmd = [config.oc_command, "get", "catalogitem", ci, "-n", ns, "-o", "json"]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)
             if result.returncode == 0:
-                suggestion = f"Item '{ci}' not found in {expected_namespace}. Found in {ns} instead. Update your CSV Catalog_Namespace column or CI suffix."
+                # Determine if CI suffix matches where it was found
+                ci_suffix = ci.split('.')[-1] if '.' in ci else None
+                if ci_suffix == 'event' and ns == 'babylon-catalog-event':
+                    suggestion = f"Item '{ci}' found in {ns} (correct for .event suffix). Remove 'Catalog_Namespace' column from CSV to use auto-detection, or change it to '{ns}'."
+                elif ci_suffix == 'prod' and ns == 'babylon-catalog-prod':
+                    suggestion = f"Item '{ci}' found in {ns} (correct for .prod suffix). Remove 'Catalog_Namespace' column from CSV to use auto-detection, or change it to '{ns}'."
+                elif ci_suffix == 'dev' and ns == 'babylon-catalog-dev':
+                    suggestion = f"Item '{ci}' found in {ns} (correct for .dev suffix). Remove 'Catalog_Namespace' column from CSV to use auto-detection, or change it to '{ns}'."
+                else:
+                    suggestion = f"Item '{ci}' not found in {expected_namespace}. Found in {ns} instead. Update your CSV Catalog_Namespace column to '{ns}' or fix the CI suffix."
                 return (False, ns, suggestion)
         except Exception:
             continue
