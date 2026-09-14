@@ -225,13 +225,13 @@ export const api = {
       total_tenant_count: number;
       checked: boolean;
     }>('/schedules/tenant-cluster-refs'),
-  autoProvisionClusters: () =>
+  autoProvisionClusters: (bufferHours = 4.0) =>
     request<{
       added: Array<{ tenant_ci: string; cluster_ci: string; workshop_name: string }>;
       count: number;
       needs_agv_prs: Array<{ tenant_ci: string; cluster_ci: string; workshop_name: string }>;
       schedules: WorkshopSchedule[];
-    }>('/schedules/auto-provision-clusters', { method: 'POST' }),
+    }>(`/schedules/auto-provision-clusters?buffer_hours=${bufferHours}`, { method: 'POST' }),
   removeAutoProvisioned: () =>
     request<{ removed_count: number; schedules: WorkshopSchedule[] }>(
       '/schedules/remove-auto-provisioned', { method: 'POST' }),

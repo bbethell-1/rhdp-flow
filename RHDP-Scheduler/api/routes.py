@@ -1227,7 +1227,7 @@ def validate_cluster_tenant_scheduling(_key=Depends(verify_api_key)):
 
 
 @router.post("/schedules/auto-fix-cluster-tenant")
-def auto_fix_cluster_tenant_timing(buffer_hours: float = 3.0, _key=Depends(verify_api_key)):
+def auto_fix_cluster_tenant_timing(buffer_hours: float = 4.0, _key=Depends(verify_api_key)):
     """Auto-fix cluster/tenant timing by ensuring clusters deploy BEFORE tenants.
 
     Adjusts cluster provisioning dates to be X hours before tenant provisioning.
@@ -2756,12 +2756,12 @@ def check_tenant_cluster_refs(_key=Depends(verify_api_key)):
 
 
 @router.post("/schedules/auto-provision-clusters")
-def auto_provision_clusters(_key=Depends(verify_api_key)):
+def auto_provision_clusters(buffer_hours: float = 4.0, _key=Depends(verify_api_key)):
     """Inject fresh cluster provisioners for tenants that have nowhere to land.
 
     For each tenant with no shared pool and no matching cluster row in the
-    batch, appends an auto_added cluster schedule (3h earlier) so the tenant
-    can deploy. Fully reversible via /schedules/remove-auto-provisioned.
+    batch, appends an auto_added cluster schedule (buffer_hours earlier) so
+    the tenant can deploy. Fully reversible via /schedules/remove-auto-provisioned.
 
     Returns: {added, count, needs_agv_prs, schedules}
     """
@@ -2772,7 +2772,7 @@ def auto_provision_clusters(_key=Depends(verify_api_key)):
     try:
         from rhdp_flow import auto_provision_missing_clusters
 
-        result = auto_provision_missing_clusters(_schedules)
+        result = auto_provision_missing_clusters(_schedules, buffer_hours=buffer_hours)
         result["schedules"] = [_schedule_to_response(s) for s in _schedules]
         return result
     except Exception:
