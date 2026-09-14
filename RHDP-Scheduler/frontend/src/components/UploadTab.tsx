@@ -1025,9 +1025,9 @@ export const UploadTab: React.FC<Props> = ({
           {/* Pool capacity warnings */}
           {(poolCapacityWarnings.length > 0 || poolsNotFound.length > 0) && (
             <Alert
-              variant={poolsNotFound.length > 0 || poolCapacityWarnings.some(w => w.severity === 'critical') ? 'danger' : 'warning'}
+              variant={poolCapacityWarnings.some(w => w.severity === 'critical') ? 'danger' : 'info'}
               isInline
-              title={`TenantClusterPool check: ${poolCapacityWarnings.length} warning(s), ${poolsNotFound.length} missing pool(s)`}
+              title={`TenantClusterPool capacity: ${poolCapacityWarnings.length} warning(s), ${poolsNotFound.length} pool(s) not found`}
               style={{ marginBottom: 12 }}
             >
               {poolCapacityWarnings.length > 0 && (
@@ -1047,7 +1047,7 @@ export const UploadTab: React.FC<Props> = ({
               {poolsNotFound.length > 0 && (
                 <>
                   <div style={{ marginTop: poolCapacityWarnings.length > 0 ? 12 : 0, marginBottom: 8, fontWeight: 600 }}>
-                    Missing tenant cluster pools:
+                    Pools not found:
                   </div>
                   <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
                     {poolsNotFound.map((p, i) => (
@@ -1056,11 +1056,8 @@ export const UploadTab: React.FC<Props> = ({
                       </li>
                     ))}
                   </ul>
-                  <div style={{ padding: '10px 14px', marginTop: 10, background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 4 }}>
-                    <strong>⚠️ These workshops need cluster pools to run.</strong>
-                    <div style={{ fontSize: '0.85rem', marginTop: 4 }}>
-                      Contact the platform team if pools are missing, or check if clusters need provisioning first.
-                    </div>
+                  <div style={{ marginTop: 8, fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--pf-v6-global--Color--200)' }}>
+                    These workshops can deploy using fresh cluster instances if needed (slower provisioning).
                   </div>
                 </>
               )}
@@ -1169,7 +1166,7 @@ export const UploadTab: React.FC<Props> = ({
               style={{ marginBottom: 12 }}
             >
               <div style={{ marginBottom: 8 }}>
-                These workshops need to run ON a cluster, but the catalog doesn't know which cluster to use:
+                These workshops need to run ON a cluster, but the catalog configuration is missing the cluster reference:
               </div>
               <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
                 {missingTenantRefs.missing_refs.slice(0, 5).map((ref: any, i: number) => (
@@ -1182,9 +1179,9 @@ export const UploadTab: React.FC<Props> = ({
                 )}
               </ul>
               <div style={{ padding: '10px 14px', background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 4 }}>
-                <strong>⚠️ Deploy will fail</strong> — catalog configuration needs updating.
+                <strong>⚠️ Deploy will fail</strong> — catalog needs <code>tenant_cluster</code> reference added.
                 <div style={{ fontSize: '0.85rem', marginTop: 6 }}>
-                  This is a platform-level fix. Contact the RHDP team in Slack (<code>#forum-rhdp</code>) or check for pending catalog updates.
+                  Platform team must update AgnosticV catalog configs. Contact RHDP in Slack (<code>#forum-rhdp</code>) or check for pending catalog PRs.
                 </div>
               </div>
             </Alert>
