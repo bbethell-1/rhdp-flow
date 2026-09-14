@@ -235,6 +235,25 @@ export const api = {
   removeAutoProvisioned: () =>
     request<{ removed_count: number; schedules: WorkshopSchedule[] }>(
       '/schedules/remove-auto-provisioned', { method: 'POST' }),
+  createTenantClusterPools: (body: {
+    cluster_cis: string[];
+    enabled?: boolean;
+    min_clusters?: number;
+    max_clusters?: number;
+    max_placements?: number;
+    environment_level?: string;
+    cloud?: string;
+    apply_to_cluster?: boolean;
+  }) =>
+    request<{
+      yaml: string;
+      applied: boolean;
+      results: Array<{ name: string; success: boolean; output: string; error: string }>;
+      count: number;
+    }>('/schedules/create-tenant-cluster-pools', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   autoFixClusterTenantTiming: (bufferHours = 4.0) =>
     request<{
       fixed_count: number;

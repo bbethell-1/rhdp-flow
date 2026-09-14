@@ -592,3 +592,23 @@ class ClusterNeedsResponse(BaseModel):
     needs: list[ClusterNeed] = Field(default_factory=list)
     total_tenant_count: int = 0
     total_deficit: int = 0
+
+
+class CreateTenantClusterPoolsRequest(BaseModel):
+    """Request to generate (and optionally apply) TenantClusterPool CRDs."""
+    cluster_cis: list[str]
+    enabled: bool = False
+    min_clusters: int = 1
+    max_clusters: int = 3
+    max_placements: int = 15
+    environment_level: str = "integration"
+    cloud: str = "osp"
+    apply_to_cluster: bool = False
+
+
+class TenantClusterPoolResult(BaseModel):
+    """Per-pool result from create-tenant-cluster-pools."""
+    name: str
+    success: bool
+    output: str = ""
+    error: str = ""

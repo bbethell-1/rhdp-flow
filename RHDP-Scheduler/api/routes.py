@@ -38,6 +38,7 @@ from api.models import (
     ClusterTenantValidationError,
     ClusterTenantValidationResponse,
     ClusterTenantValidationWarning,
+    CreateTenantClusterPoolsRequest,
     DeleteResultsRequest,
     DeploymentResultResponse,
     DeployRequest,
@@ -2801,3 +2802,96 @@ def remove_auto_provisioned(_key=Depends(verify_api_key)):
         logger.exception("Remove auto-provisioned clusters failed")
         return {"removed_count": 0,
                 "schedules": [_schedule_to_response(s) for s in _schedules]}
+
+
+@router.post("/schedules/create-tenant-cluster-pools")
+def create_tenant_cluster_pools(
+    body: CreateTenantClusterPoolsRequest,
+    _key=Depends(verify_api_key),
+):
+    """Generate (and optionally apply) TenantClusterPool CRDs for missing pools.
+
+    Generates a TenantClusterPool manifest for each cluster CI. If apply_to_cluster
+    is True, applies them via `oc apply -f -`. Otherwise returns the YAML only.
+
+    Returns: {yaml, applied, results, count}
+    """
+    import yaml as _yaml
+
+    yamls = []
+    for cluster_ci in body.cluster_cis:
+        # Derive lab annotation: strip namespace prefix and -cluster.<suffix>
+        parts = cluster_ci.split(".", 1)
+        ci_tail = parts[1] if len(parts) > 1 else cluster_ci
+        lab = re.sub(r"-cluster\.[^.]+$", "", ci_tail)
+
+        purpose = "prod" if body.environment_level == "production" else "dev"
+
+        pool = {
+            "apiVersion": "babylon.gpte.redhat.com/v1",
+            "kind": "TenantClusterPool",
+            "metadata": {
+                "name": cluster_ci,
+                "namespace": "shared-clusters",
+            },
+            "spec": {
+                "clusterProvisioning": {
+                    "provider": {
+                        "name": cluster_ci,
+                        "parameterValues": {"purpose": "Tenant Cluster"},
+                    }
+                },
+                "enabled": body.enabled,
+                "maxClusters": body.max_clusters,
+                "minAvailableSandboxPlacements": 0,
+                "minClusters": body.min_clusters,
+                "sandboxHost": {
+                    "annotations": {
+                        "cloud": body.cloud,
+                        "environment_level": body.environment_level,
+                        "lab": lab,
+                        "purpose": purpose,
+                    },
+                    "max_cpu_usage_percentage": 90,
+                    "max_memory_usage_percentage": 85,
+                    "max_placements": body.max_placements,
+                    "quota_required": False,
+                },
+            },
+        }
+        yamls.append(pool)
+
+    combined_yaml = "---\n".join(_yaml.dump(p, default_flow_style=False) for p in yamls)
+
+    results = []
+    if body.apply_to_cluster:
+        for pool in yamls:
+            pool_yaml = _yaml.dump(pool, default_flow_style=False)
+            try:
+                proc = subprocess.run(
+                    ["oc", "apply", "-f", "-"],
+                    input=pool_yaml,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                results.append({
+                    "name": pool["metadata"]["name"],
+                    "success": proc.returncode == 0,
+                    "output": proc.stdout.strip(),
+                    "error": proc.stderr.strip() if proc.returncode != 0 else "",
+                })
+            except Exception as exc:
+                results.append({
+                    "name": pool["metadata"]["name"],
+                    "success": False,
+                    "output": "",
+                    "error": str(exc),
+                })
+
+    return {
+        "yaml": combined_yaml,
+        "applied": body.apply_to_cluster,
+        "results": results,
+        "count": len(yamls),
+    }
