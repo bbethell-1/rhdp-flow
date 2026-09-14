@@ -223,6 +223,20 @@ export const UploadTab: React.FC<Props> = ({
   const [fillStopDate, setFillStopDate] = useState('');
   const [fillDestroyDate, setFillDestroyDate] = useState('');
 
+  // ── TenantClusterPool creation modal ──
+  const [showPoolCreateModal, setShowPoolCreateModal] = useState(false);
+  const [poolCreateCIs, setPoolCreateCIs] = useState<string[]>([]);
+  const [poolCreateEnabled, setPoolCreateEnabled] = useState(false);
+  const [poolCreateMin, setPoolCreateMin] = useState(1);
+  const [poolCreateMax, setPoolCreateMax] = useState(3);
+  const [poolCreateMaxPlacements, setPoolCreateMaxPlacements] = useState(15);
+  const [poolCreateEnvLevel, setPoolCreateEnvLevel] = useState('integration');
+  const [poolCreateCloud, setPoolCreateCloud] = useState('osp');
+  const [poolCreateYaml, setPoolCreateYaml] = useState('');
+  const [poolCreateResults, setPoolCreateResults] = useState<Array<{ name: string; success: boolean; output: string; error: string }>>([]);
+  const [poolCreateLoading, setPoolCreateLoading] = useState(false);
+  const [poolCreateApplied, setPoolCreateApplied] = useState(false);
+
   // ── Schedule validation warnings ──
   const warnings = useMemo(() => {
     const warns: ScheduleWarning[] = [];
@@ -1415,20 +1429,25 @@ export const UploadTab: React.FC<Props> = ({
                     isInline
                     title={`${willFail.length} workshop(s) will fail — no cluster to run on`}
                     style={{ marginBottom: 12 }}
-                    actionClose={
+                    actionLinks={
                       <Button
-                        variant="link"
-                        onClick={async () => {
-                          setEnableAutoProvision(true);
-                          await handleAutoProvision();
+                        variant="danger"
+                        size="sm"
+                        onClick={() => {
+                          const cis = [...new Set(willFail.map((r: any) => r.cluster_ref).filter(Boolean))] as string[];
+                          setPoolCreateCIs(cis.length > 0 ? cis : willFail.map((r: any) => r.ci));
+                          setPoolCreateYaml('');
+                          setPoolCreateResults([]);
+                          setPoolCreateApplied(false);
+                          setShowPoolCreateModal(true);
                         }}
                       >
-                        Auto-add cluster rows ({timingBufferHours}h before tenants)
+                        Create TenantClusterPools (recommended)
                       </Button>
                     }
                   >
                     <div style={{ marginBottom: 8 }}>
-                      These workshops run <strong>on top of</strong> a cluster, but none is available — no shared cluster pool exists and no cluster is being deployed in this batch. Click the button to let Flow add fresh cluster rows automatically:
+                      These workshops run <strong>on top of</strong> a cluster, but none is available — no shared cluster pool exists and no cluster is being deployed in this batch:
                     </div>
                     <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
                       {willFail.slice(0, 5).map((ref: any, i: number) => (
@@ -1440,10 +1459,9 @@ export const UploadTab: React.FC<Props> = ({
                         </li>
                       )}
                     </ul>
-                    <div style={{ padding: '10px 14px', background: 'var(--pf-v6-global--BackgroundColor--200)', border: '1px solid var(--pf-v6-global--BorderColor--100)', borderRadius: 4 }}>
-                      <strong>Permanent fix (platform team):</strong> add the
-                      <code>tenant_cluster</code> reference in AgnosticV and create a TenantClusterPool.
-                      Ping <code>#forum-rhdp</code>. Flow's auto-add is a stopgap — it deploys a fresh cluster per event, not a shared pool.
+                    <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)' }}>
+                      Or enable <strong>Auto-Add Missing Clusters</strong> in Deploy Settings as a temporary stopgap
+                      (deploys a fresh cluster per event, not a shared pool).
                     </div>
                   </Alert>
                 )}
@@ -2724,6 +2742,205 @@ export const UploadTab: React.FC<Props> = ({
             }}
           >
             Cancel
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* TenantClusterPool creation modal */}
+      <Modal
+        variant="large"
+        isOpen={showPoolCreateModal}
+        onClose={() => {
+          setShowPoolCreateModal(false);
+          setPoolCreateYaml('');
+          setPoolCreateResults([]);
+          setPoolCreateApplied(false);
+        }}
+        aria-labelledby="pool-create-title"
+      >
+        <ModalHeader title="Create TenantClusterPools" labelId="pool-create-title" />
+        <ModalBody>
+          <Alert variant="info" isInline title="What this does" style={{ marginBottom: 16 }}>
+            Creates a <code>TenantClusterPool</code> CRD in the <code>shared-clusters</code> namespace for each
+            missing cluster. Babylon uses these pools to pre-provision and share cluster capacity across events.
+            Review the YAML before applying — you can copy it and apply manually, or click Apply to push it directly.
+          </Alert>
+
+          {/* Config form */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 24px', marginBottom: 16 }}>
+            <div>
+              <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, fontSize: '0.875rem' }}>Cloud</label>
+              <select
+                value={poolCreateCloud}
+                onChange={e => setPoolCreateCloud(e.target.value)}
+                style={{ width: '100%', padding: '6px 8px', borderRadius: 4, border: '1px solid var(--pf-v6-global--BorderColor--100)', background: 'var(--pf-v6-global--BackgroundColor--100)', color: 'var(--pf-v6-global--Color--100)' }}
+              >
+                <option value="osp">osp (OpenStack)</option>
+                <option value="aws">aws</option>
+                <option value="cnv-dedicated-shared">cnv-dedicated-shared</option>
+                <option value="azure">azure</option>
+                <option value="gcp">gcp</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, fontSize: '0.875rem' }}>Environment Level</label>
+              <select
+                value={poolCreateEnvLevel}
+                onChange={e => setPoolCreateEnvLevel(e.target.value)}
+                style={{ width: '100%', padding: '6px 8px', borderRadius: 4, border: '1px solid var(--pf-v6-global--BorderColor--100)', background: 'var(--pf-v6-global--BackgroundColor--100)', color: 'var(--pf-v6-global--Color--100)' }}
+              >
+                <option value="integration">integration</option>
+                <option value="production">production</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, fontSize: '0.875rem' }}>Min Clusters</label>
+              <input type="number" min={0} max={10} value={poolCreateMin}
+                onChange={e => setPoolCreateMin(Number(e.target.value))}
+                style={{ width: '100%', padding: '6px 8px', borderRadius: 4, border: '1px solid var(--pf-v6-global--BorderColor--100)', background: 'var(--pf-v6-global--BackgroundColor--100)', color: 'var(--pf-v6-global--Color--100)' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, fontSize: '0.875rem' }}>Max Clusters</label>
+              <input type="number" min={1} max={20} value={poolCreateMax}
+                onChange={e => setPoolCreateMax(Number(e.target.value))}
+                style={{ width: '100%', padding: '6px 8px', borderRadius: 4, border: '1px solid var(--pf-v6-global--BorderColor--100)', background: 'var(--pf-v6-global--BackgroundColor--100)', color: 'var(--pf-v6-global--Color--100)' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, fontSize: '0.875rem' }}>Max Placements (tenants per cluster)</label>
+              <input type="number" min={1} max={50} value={poolCreateMaxPlacements}
+                onChange={e => setPoolCreateMaxPlacements(Number(e.target.value))}
+                style={{ width: '100%', padding: '6px 8px', borderRadius: 4, border: '1px solid var(--pf-v6-global--BorderColor--100)', background: 'var(--pf-v6-global--BackgroundColor--100)', color: 'var(--pf-v6-global--Color--100)' }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 24 }}>
+              <Switch
+                id="pool-create-enabled"
+                isChecked={poolCreateEnabled}
+                onChange={(_e, checked) => setPoolCreateEnabled(checked)}
+                label="Enable pool immediately"
+              />
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <Button
+              variant="secondary"
+              isLoading={poolCreateLoading && !poolCreateApplied}
+              isDisabled={poolCreateLoading}
+              onClick={async () => {
+                setPoolCreateLoading(true);
+                setPoolCreateApplied(false);
+                try {
+                  const res = await api.createTenantClusterPools({
+                    cluster_cis: poolCreateCIs,
+                    enabled: poolCreateEnabled,
+                    min_clusters: poolCreateMin,
+                    max_clusters: poolCreateMax,
+                    max_placements: poolCreateMaxPlacements,
+                    environment_level: poolCreateEnvLevel,
+                    cloud: poolCreateCloud,
+                    apply_to_cluster: false,
+                  });
+                  setPoolCreateYaml(res.yaml);
+                  setPoolCreateResults([]);
+                } catch (e) {
+                  showToast(`Failed to generate YAML: ${e}`, 'danger');
+                } finally {
+                  setPoolCreateLoading(false);
+                }
+              }}
+            >
+              Preview YAML
+            </Button>
+            <Button
+              variant="primary"
+              isLoading={poolCreateLoading && poolCreateApplied}
+              isDisabled={poolCreateLoading}
+              onClick={async () => {
+                setPoolCreateLoading(true);
+                setPoolCreateApplied(true);
+                try {
+                  const res = await api.createTenantClusterPools({
+                    cluster_cis: poolCreateCIs,
+                    enabled: poolCreateEnabled,
+                    min_clusters: poolCreateMin,
+                    max_clusters: poolCreateMax,
+                    max_placements: poolCreateMaxPlacements,
+                    environment_level: poolCreateEnvLevel,
+                    cloud: poolCreateCloud,
+                    apply_to_cluster: true,
+                  });
+                  setPoolCreateYaml(res.yaml);
+                  setPoolCreateResults(res.results);
+                  const allOk = res.results.every(r => r.success);
+                  if (allOk) {
+                    showToast(`Created ${res.count} TenantClusterPool(s) successfully`, 'success');
+                    // Re-validate to clear the danger alert
+                    try { setMissingTenantRefs(await api.checkTenantClusterRefs()); } catch { /* ignore */ }
+                  } else {
+                    showToast('Some pools failed to apply — see results below', 'danger');
+                  }
+                } catch (e) {
+                  showToast(`Apply failed: ${e}`, 'danger');
+                } finally {
+                  setPoolCreateLoading(false);
+                }
+              }}
+            >
+              Apply to Cluster
+            </Button>
+          </div>
+
+          {poolCreateResults.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              {poolCreateResults.map((r, i) => (
+                <Alert
+                  key={i}
+                  variant={r.success ? 'success' : 'danger'}
+                  isInline
+                  title={r.success ? `✓ ${r.name}` : `✗ ${r.name}`}
+                  style={{ marginBottom: 4 }}
+                >
+                  {r.success ? r.output : r.error}
+                </Alert>
+              ))}
+            </div>
+          )}
+
+          {poolCreateYaml && (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Generated YAML</span>
+                <Button variant="link" isInline onClick={() => navigator.clipboard.writeText(poolCreateYaml)}>
+                  Copy to clipboard
+                </Button>
+              </div>
+              <pre style={{
+                background: 'var(--pf-v6-global--BackgroundColor--200)',
+                border: '1px solid var(--pf-v6-global--BorderColor--100)',
+                borderRadius: 4,
+                padding: '12px 14px',
+                fontSize: '0.78rem',
+                overflow: 'auto',
+                maxHeight: 320,
+                whiteSpace: 'pre',
+                fontFamily: 'monospace',
+              }}>
+                {poolCreateYaml}
+              </pre>
+            </div>
+          )}
+        </ModalBody>
+        <ModalFooter>
+          <Button
+            variant="link"
+            onClick={() => {
+              setShowPoolCreateModal(false);
+              setPoolCreateYaml('');
+              setPoolCreateResults([]);
+              setPoolCreateApplied(false);
+            }}
+          >
+            Close
           </Button>
         </ModalFooter>
       </Modal>
