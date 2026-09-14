@@ -1077,7 +1077,11 @@ export const UploadTab: React.FC<Props> = ({
                   </li>
                 ))}
               </ul>
-              Update your CSV Catalog_Namespace column or CI suffix to avoid ghost workshops.
+              <div style={{ marginTop: 8, fontWeight: 600 }}>
+                💡 <strong>Quick Fix:</strong> Delete the entire <code>Catalog_Namespace</code> column from your CSV.
+                Flow will auto-detect the correct namespace from the CI suffix (.event→event, .prod→prod, .dev→dev).
+                This allows mixed .prod and .event items in the same deployment.
+              </div>
             </Alert>
           )}
 
