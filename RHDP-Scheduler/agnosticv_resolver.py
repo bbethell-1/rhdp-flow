@@ -18,7 +18,7 @@ import os
 import shlex
 import subprocess
 import time
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import yaml
 
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("rhdp_flow.agnosticv_resolver")
 
 
-def _git_env(config: "RHDPConfig") -> dict:
+def _git_env(config: RHDPConfig) -> dict:
     env = os.environ.copy()
     if config.agnosticv_ssh_key_path:
         env["GIT_SSH_COMMAND"] = (
@@ -38,7 +38,7 @@ def _git_env(config: "RHDPConfig") -> dict:
     return env
 
 
-def _ensure_repo_cloned(config: "RHDPConfig") -> bool:
+def _ensure_repo_cloned(config: RHDPConfig) -> bool:
     """Ensure a local clone of config.agnosticv_repo_url exists and is fresh.
 
     Returns True if the clone is ready to use, False on any failure.
@@ -82,7 +82,7 @@ def _ensure_repo_cloned(config: "RHDPConfig") -> bool:
         return False
 
 
-def _ci_to_agnosticv_path(ci: str) -> Optional[str]:
+def _ci_to_agnosticv_path(ci: str) -> str | None:
     """Convert a Babylon CI ('account.item.stage') to an AgnosticV path ('account/item/stage')."""
     parts = ci.split(".")
     if len(parts) != 3:
@@ -109,7 +109,7 @@ def _agnosticv_path_to_ci(path: str, default_stage: str) -> str:
     return f"{account}.{item}.{stage}"
 
 
-def resolve_tenant_cluster_item(ci: str, config: "RHDPConfig") -> Optional[str]:
+def resolve_tenant_cluster_item(ci: str, config: RHDPConfig) -> str | None:
     """Resolve the cluster CI a tenant CI binds to, via AgnosticV's tenant_cluster.item.
 
     Args:

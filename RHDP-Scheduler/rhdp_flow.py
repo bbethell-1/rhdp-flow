@@ -22,7 +22,7 @@ from argparse import ArgumentParser
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import yaml
 
@@ -207,7 +207,7 @@ class WorkshopSchedule:
     is_tenant: bool = False  # Detected as tenant CI (either via naming or explicit label)
     detected_cluster_ci: str | None = None  # For tenants: the associated cluster CI (from override or naming)
     detection_method: str = "none"  # How the type was detected: "csv_label", "naming", "none"
-    cluster_ci_source: Optional[str] = None  # For tenants: which tier resolved detected_cluster_ci ("override", "agnosticv", "naming")
+    cluster_ci_source: str | None = None  # For tenants: which tier resolved detected_cluster_ci ("override", "agnosticv", "naming")
     auto_added: bool = False  # True if Flow injected this row (e.g. auto-provisioned cluster for a tenant with nowhere to land)
 
 @dataclass
@@ -272,9 +272,7 @@ def is_tenant_ci(ci: str) -> bool:
         return True
     # Suffix convention: ends with "-tenant" AND has a dot somewhere
     # (excludes bare "workshop-tenant" which is ambiguous)
-    if lower_ci.endswith("-tenant") and "." in lower_ci:
-        return True
-    return False
+    return bool(lower_ci.endswith("-tenant") and "." in lower_ci)
 
 
 def get_cluster_ci_for_tenant(tenant_ci: str, override: str | None = None) -> str | None:
@@ -328,7 +326,7 @@ def get_cluster_ci_for_tenant(tenant_ci: str, override: str | None = None) -> st
     return None
 
 
-def _resolve_tenant_cluster(schedule: "WorkshopSchedule", config: Optional["RHDPConfig"] = None) -> Tuple[Optional[str], Optional[str]]:
+def _resolve_tenant_cluster(schedule: "WorkshopSchedule", config: Optional["RHDPConfig"] = None) -> tuple[str | None, str | None]:
     """Resolve a tenant schedule's cluster CI and the tier that produced it.
 
     Priority: CSV override > AgnosticV tenant_cluster.item > naming convention.
@@ -352,7 +350,7 @@ def _resolve_tenant_cluster(schedule: "WorkshopSchedule", config: Optional["RHDP
     return None, None
 
 
-def analyze_cluster_tenant_relationships(schedules: List[WorkshopSchedule], config: Optional["RHDPConfig"] = None) -> None:
+def analyze_cluster_tenant_relationships(schedules: list[WorkshopSchedule], config: Optional["RHDPConfig"] = None) -> None:
     """
     Analyze and populate cluster/tenant detection fields for all schedules.
 
@@ -590,7 +588,7 @@ def filter_pool_provided_clusters(schedules: list[WorkshopSchedule]) -> list[Wor
     return [s for s in schedules if not (s.is_cluster and s.ci in clusters_to_skip)]
 
 
-def validate_cluster_before_tenant(schedules: List[WorkshopSchedule], config: Optional["RHDPConfig"] = None) -> Dict[str, Any]:
+def validate_cluster_before_tenant(schedules: list[WorkshopSchedule], config: Optional["RHDPConfig"] = None) -> dict[str, Any]:
     """
     Validate that cluster schedules are provisioned before their tenant schedules.
 
@@ -619,11 +617,11 @@ def validate_cluster_before_tenant(schedules: List[WorkshopSchedule], config: Op
             "warning_details": List[Dict],  # Structured, additive: same warnings with ci_name/tenant_ci/namespace/message
         }
     """
-    errors: List[str] = []
-    warnings: List[str] = []
-    relationships: List[Dict[str, Any]] = []
-    error_details: List[Dict[str, Any]] = []
-    warning_details: List[Dict[str, Any]] = []
+    errors: list[str] = []
+    warnings: list[str] = []
+    relationships: list[dict[str, Any]] = []
+    error_details: list[dict[str, Any]] = []
+    warning_details: list[dict[str, Any]] = []
 
     # Build cluster CI -> schedule mapping
     cluster_map: dict[str, WorkshopSchedule] = {}
@@ -791,7 +789,7 @@ class RHDPConfig:
         # AgnosticV tenant->cluster resolution (see agnosticv_resolver.py)
         self.agnosticv_repo_url: str = "git@github.com:rhpds/agnosticv.git"
         self.agnosticv_cache_dir: str = "/tmp/agnosticv-cache"
-        self.agnosticv_ssh_key_path: Optional[str] = None
+        self.agnosticv_ssh_key_path: str | None = None
         self.agnosticv_cli_path: str = "agnosticv"
         self.agnosticv_refresh_ttl_seconds: int = 900
 
@@ -3649,7 +3647,7 @@ def verify_deployment(
 # QA FUNCTIONS
 # ============================================================================
 
-def find_provisioned_cluster_resourceclaim(cluster_ci: str, config: RHDPConfig) -> Optional[bool]:
+def find_provisioned_cluster_resourceclaim(cluster_ci: str, config: RHDPConfig) -> bool | None:
     """Check whether a cluster catalog item is already provisioned on the live cluster.
 
     Used when a tenant's detected cluster isn't part of the current CSV batch,

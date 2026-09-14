@@ -12,19 +12,18 @@ in workshop deployments. Covers:
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import List
-from unittest.mock import patch, ANY, MagicMock
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 
 from rhdp_flow import (
+    RHDPConfig,
     WorkshopSchedule,
     analyze_cluster_tenant_relationships,
     get_cluster_ci_for_tenant,
     is_cluster_ci,
     is_tenant_ci,
     validate_cluster_before_tenant,
-    RHDPConfig,
 )
 
 # ============================================================================
@@ -762,7 +761,8 @@ class TestAnalyzeClusterTenantRelationshipsAgnosticVTier:
 
 class TestFindProvisionedClusterResourceClaim:
     def test_returns_true_when_resourceclaim_found(self):
-        from rhdp_flow import find_provisioned_cluster_resourceclaim, RHDPConfig as _RHDPConfigForLookup
+        from rhdp_flow import RHDPConfig as _RHDPConfigForLookup
+        from rhdp_flow import find_provisioned_cluster_resourceclaim
         config = _RHDPConfigForLookup()
         fake_result = MagicMock(returncode=0, stdout='{"items": [{"metadata": {"name": "rc-1"}}]}')
         with patch("rhdp_flow.subprocess.run", return_value=fake_result):
@@ -770,7 +770,8 @@ class TestFindProvisionedClusterResourceClaim:
         assert found is True
 
     def test_returns_false_when_no_resourceclaims_found(self):
-        from rhdp_flow import find_provisioned_cluster_resourceclaim, RHDPConfig as _RHDPConfigForLookup
+        from rhdp_flow import RHDPConfig as _RHDPConfigForLookup
+        from rhdp_flow import find_provisioned_cluster_resourceclaim
         config = _RHDPConfigForLookup()
         fake_result = MagicMock(returncode=0, stdout='{"items": []}')
         with patch("rhdp_flow.subprocess.run", return_value=fake_result):
@@ -778,7 +779,8 @@ class TestFindProvisionedClusterResourceClaim:
         assert found is False
 
     def test_returns_none_on_oc_command_failure(self):
-        from rhdp_flow import find_provisioned_cluster_resourceclaim, RHDPConfig as _RHDPConfigForLookup
+        from rhdp_flow import RHDPConfig as _RHDPConfigForLookup
+        from rhdp_flow import find_provisioned_cluster_resourceclaim
         config = _RHDPConfigForLookup()
         fake_result = MagicMock(returncode=1, stdout="", stderr="Unauthorized")
         with patch("rhdp_flow.subprocess.run", return_value=fake_result):
@@ -786,7 +788,8 @@ class TestFindProvisionedClusterResourceClaim:
         assert found is None
 
     def test_returns_none_on_subprocess_exception(self):
-        from rhdp_flow import find_provisioned_cluster_resourceclaim, RHDPConfig as _RHDPConfigForLookup
+        from rhdp_flow import RHDPConfig as _RHDPConfigForLookup
+        from rhdp_flow import find_provisioned_cluster_resourceclaim
         config = _RHDPConfigForLookup()
         with patch("rhdp_flow.subprocess.run", side_effect=FileNotFoundError("oc not found")):
             found = find_provisioned_cluster_resourceclaim("ocp4-cluster.prod", config)

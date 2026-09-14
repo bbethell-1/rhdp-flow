@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from api.server import app
 import api.routes as routes_module
+from api.server import app
 
 client = TestClient(app)
 

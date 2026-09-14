@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import shlex
-import subprocess
 import time
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-from rhdp_flow import RHDPConfig
 from agnosticv_resolver import _ensure_repo_cloned, _git_env
+from rhdp_flow import RHDPConfig
 
 
 class TestRHDPConfigAgnosticVFields:
