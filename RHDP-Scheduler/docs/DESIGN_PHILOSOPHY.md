@@ -1,7 +1,7 @@
 # RHDP-Flow Design Philosophy
 
 **Author:** @bbethell  
-**Maintainer:** @rhjcd (Josh Israel)  
+**Maintainer:** @rhjcd (Josh Disraeli)  
 **Last Updated:** 2026-09-14
 
 Flow's mission: Make workshop deployment simple, safe, and resilient to platform changes.
@@ -337,4 +337,4 @@ When babylon changes, Flow adapts. When users make mistakes, Flow guides. When d
 
 ---
 
-**Questions or improvements?** Ping @rhjcd (Josh Israel) or @bbethell
+**Questions or improvements?** Ping @rhjcd (Josh Disraeli) or @bbethell
