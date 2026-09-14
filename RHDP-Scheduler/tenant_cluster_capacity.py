@@ -324,3 +324,59 @@ def calculate_cluster_needs(schedules: list[Any]) -> dict[str, Any]:
         "total_tenant_count": total_tenant_count,
         "total_deficit": total_deficit
     }
+
+
+def check_tenant_cluster_references(schedules: list[Any]) -> dict[str, Any]:
+    """
+    Check if tenant workshop catalog items have proper cluster references.
+
+    Queries the actual CatalogItem to see if tenant_cluster is configured.
+    Missing references cause immediate provision failures.
+
+    Args:
+        schedules: List of WorkshopSchedule objects
+
+    Returns:
+        Dict with:
+        - missing_refs: List of dicts with ci, namespace, cluster_ci_from_csv
+        - total_tenant_count: Total tenant workshops checked
+    """
+    missing_refs = []
+    tenant_schedules = [s for s in schedules if s.is_tenant]
+
+    for schedule in tenant_schedules:
+        try:
+            # Query the CatalogItem to check sandboxes config
+            cmd = f"oc get catalogitem {schedule.ci} -n {schedule.namespace} -o json"
+            result = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True, timeout=10
+            )
+
+            if result.returncode != 0:
+                continue
+
+            catalog_item = json.loads(result.stdout)
+            sandboxes = catalog_item.get("spec", {}).get("__meta__", {}).get("sandboxes", [])
+
+            has_tenant_cluster_ref = False
+            for sandbox in sandboxes:
+                if sandbox.get("kind") == "OcpSandbox" and sandbox.get("tenant_cluster"):
+                    has_tenant_cluster_ref = True
+                    break
+
+            if not has_tenant_cluster_ref:
+                missing_refs.append({
+                    "ci": schedule.ci,
+                    "namespace": schedule.namespace,
+                    "cluster_ci_from_csv": schedule.detected_cluster_ci or "none",
+                    "workshop_name": schedule.ci_name
+                })
+
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
+            # Skip items we can't query - don't block on network/permission issues
+            continue
+
+    return {
+        "missing_refs": missing_refs,
+        "total_tenant_count": len(tenant_schedules)
+    }

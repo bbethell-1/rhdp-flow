@@ -148,6 +148,7 @@ export const UploadTab: React.FC<Props> = ({
   // Cluster-tenant validation
   const [clusterTenantValidation, setClusterTenantValidation] = useState<any>(null);
   const [clusterNeeds, setClusterNeeds] = useState<any>(null);
+  const [missingTenantRefs, setMissingTenantRefs] = useState<any>(null);
 
   // Auto-timing settings
   const [enableAutoTiming, setEnableAutoTiming] = useState(true);
@@ -522,6 +523,14 @@ export const UploadTab: React.FC<Props> = ({
           setClusterNeeds(needsRes);
         } catch (e) {
           console.warn('Cluster needs check failed', e);
+        }
+
+        // Check tenant cluster references
+        try {
+          const refsRes = await api.checkTenantClusterRefs();
+          setMissingTenantRefs(refsRes);
+        } catch (e) {
+          console.warn('Tenant cluster reference check failed', e);
         }
 
         // Auto-adjust cluster timing if enabled
@@ -1144,6 +1153,36 @@ export const UploadTab: React.FC<Props> = ({
                 <span style={{ fontSize: '0.85rem', marginTop: 4, display: 'block' }}>
                   Clusters take 3 hours to provision. Use <strong>Auto-Adjust Cluster Timing</strong> below to schedule them before tenants.
                 </span>
+              </div>
+            </Alert>
+          )}
+
+          {/* Missing tenant cluster references */}
+          {missingTenantRefs && missingTenantRefs.missing_refs && missingTenantRefs.missing_refs.length > 0 && (
+            <Alert
+              variant="warning"
+              isInline
+              title={`${missingTenantRefs.missing_refs.length} workshop(s) will fail — cluster setup missing`}
+              style={{ marginBottom: 12 }}
+            >
+              <div style={{ marginBottom: 8 }}>
+                These workshops need to run ON a cluster, but the catalog doesn't know which cluster to use:
+              </div>
+              <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
+                {missingTenantRefs.missing_refs.slice(0, 5).map((ref: any, i: number) => (
+                  <li key={i}><strong>{ref.workshop_name}</strong></li>
+                ))}
+                {missingTenantRefs.missing_refs.length > 5 && (
+                  <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>
+                    ...and {missingTenantRefs.missing_refs.length - 5} more
+                  </li>
+                )}
+              </ul>
+              <div style={{ padding: '10px 14px', background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 4 }}>
+                <strong>⚠️ Deploy will fail</strong> — catalog configuration needs updating.
+                <div style={{ fontSize: '0.85rem', marginTop: 6 }}>
+                  This is a platform-level fix. Contact the RHDP team in Slack (<code>#forum-rhdp</code>) or check for pending catalog updates.
+                </div>
               </div>
             </Alert>
           )}

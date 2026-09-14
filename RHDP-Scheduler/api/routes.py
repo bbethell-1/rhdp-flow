@@ -2640,3 +2640,29 @@ def get_cluster_needs(_key=Depends(verify_api_key)):
         logger.exception("Cluster needs calculation failed")
         return ClusterNeedsResponse()
 
+
+@router.get("/schedules/tenant-cluster-refs")
+def check_tenant_cluster_refs(_key=Depends(verify_api_key)):
+    """Check if tenant workshops have proper catalog cluster references.
+
+    Queries CatalogItems to verify tenant_cluster configuration exists.
+    Missing references cause immediate provision failures.
+
+    Returns:
+        Dict with missing_refs list and total_tenant_count
+    """
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+
+    try:
+        from tenant_cluster_capacity import check_tenant_cluster_references
+
+        result = check_tenant_cluster_references(_schedules)
+        return result
+    except ImportError as e:
+        logger.warning(f"Tenant cluster reference check unavailable: {e}")
+        return {"missing_refs": [], "total_tenant_count": 0}
+    except Exception as e:
+        logger.exception("Tenant cluster reference check failed")
+        return {"missing_refs": [], "total_tenant_count": 0}
+

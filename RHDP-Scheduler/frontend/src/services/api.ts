@@ -173,6 +173,16 @@ export const api = {
       total_tenant_count: number;
       total_deficit: number;
     }>('/schedules/cluster-needs'),
+  checkTenantClusterRefs: () =>
+    request<{
+      missing_refs: Array<{
+        ci: string;
+        namespace: string;
+        cluster_ci_from_csv: string;
+        workshop_name: string;
+      }>;
+      total_tenant_count: number;
+    }>('/schedules/tenant-cluster-refs'),
   autoFixClusterTenantTiming: () =>
     request<{
       fixed_count: number;
