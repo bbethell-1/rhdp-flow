@@ -414,10 +414,18 @@ def analyze_cluster_tenant_relationships(schedules: list[WorkshopSchedule], conf
 
 
 def _shift_provisioning_earlier(provisioning_date: str, minutes: int = 180) -> str:
-    """Return provisioning_date shifted earlier by `minutes` (DD/MM/YYYY HH:MM)."""
+    """Return provisioning_date shifted earlier by `minutes` (DD/MM/YYYY HH:MM).
+
+    If the shifted time would be in the past, returns now + 30 min so the
+    cluster deploys immediately rather than failing with a past-date error.
+    """
     try:
         dt = datetime.strptime(provisioning_date.strip(), "%d/%m/%Y %H:%M")
-        return (dt - timedelta(minutes=minutes)).strftime("%d/%m/%Y %H:%M")
+        shifted = dt - timedelta(minutes=minutes)
+        now = datetime.now(UTC).replace(tzinfo=None)
+        if shifted < now:
+            shifted = now + timedelta(minutes=30)
+        return shifted.strftime("%d/%m/%Y %H:%M")
     except (ValueError, AttributeError):
         return provisioning_date
 

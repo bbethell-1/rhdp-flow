@@ -2155,39 +2155,39 @@ export const UploadTab: React.FC<Props> = ({
                   </Tooltip>
                 </SplitItem>
                 <SplitItem>
-                  <Tooltip content="Automatically adjust cluster deployment times to deploy before tenant deployments. Skips clusters provided by TenantClusterPools.">
-                    <Split hasGutter style={{ alignItems: 'center' }}>
-                      <SplitItem>
+                  <Split hasGutter style={{ alignItems: 'center' }}>
+                    <SplitItem>
+                      <Tooltip content="ON: Flow automatically moves cluster provisioning times to be X hours before their tenant deploys — so the cluster is ready when the tenant arrives. If the calculated time is already past, Flow uses now+30 min so it deploys immediately.">
                         <Switch
                           id="auto-timing-switch"
                           label="Auto-Adjust Cluster Timing"
                           isChecked={enableAutoTiming}
                           onChange={(_e, checked) => setEnableAutoTiming(checked)}
                         />
+                      </Tooltip>
+                    </SplitItem>
+                    {enableAutoTiming && (
+                      <SplitItem>
+                        <Tooltip content="Cluster will be provisioned this many hours before its tenant. If that time is already past, cluster is scheduled for now + 30 min.">
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--pf-v6-global--BackgroundColor--200)', borderRadius: 6, padding: '3px 10px 3px 8px', border: '1px solid var(--pf-v6-global--BorderColor--100)' }}>
+                            <input
+                              type="number"
+                              min={0.5}
+                              max={24}
+                              step={0.5}
+                              value={timingBufferHours}
+                              onChange={e => setTimingBufferHours(Number(e.target.value))}
+                              style={{ width: 40, padding: '1px 4px', borderRadius: 4, border: '1px solid var(--pf-v6-global--BorderColor--100)', fontSize: '0.85rem', textAlign: 'center', background: 'transparent' }}
+                            />
+                            <span style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)', whiteSpace: 'nowrap' }}>hr before tenant</span>
+                          </span>
+                        </Tooltip>
                       </SplitItem>
-                      {enableAutoTiming && (
-                        <SplitItem>
-                          <Tooltip content="How many hours before each tenant the cluster should be provisioned">
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--pf-v6-global--BackgroundColor--200)', borderRadius: 6, padding: '3px 10px 3px 8px', border: '1px solid var(--pf-v6-global--BorderColor--100)' }}>
-                              <input
-                                type="number"
-                                min={0.5}
-                                max={24}
-                                step={0.5}
-                                value={timingBufferHours}
-                                onChange={e => setTimingBufferHours(Number(e.target.value))}
-                                style={{ width: 40, padding: '1px 4px', borderRadius: 4, border: '1px solid var(--pf-v6-global--BorderColor--100)', fontSize: '0.85rem', textAlign: 'center', background: 'transparent' }}
-                              />
-                              <span style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)', whiteSpace: 'nowrap' }}>hr before tenant</span>
-                            </span>
-                          </Tooltip>
-                        </SplitItem>
-                      )}
-                    </Split>
-                  </Tooltip>
+                    )}
+                  </Split>
                 </SplitItem>
                 <SplitItem>
-                  <Tooltip content="When a tenant workshop has no shared cluster pool and no matching cluster in your CSV, Flow adds a fresh cluster provisioner so it can still deploy. Injected rows are tagged 'added by Flow' and can be removed. Re-run the upload after changing this.">
+                  <Tooltip content="ON: When a tenant has no shared cluster pool and no cluster row in your CSV, Flow automatically adds one — scheduled before the tenant so it's ready in time. The injected row is tagged 'added by Flow' in the table and can be removed. Turn off to manage cluster rows manually.">
                     <Switch
                       id="auto-provision-switch"
                       label="Auto-Provision Missing Clusters"
