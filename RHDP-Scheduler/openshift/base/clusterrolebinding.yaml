@@ -6,7 +6,16 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: rhdp-scheduler
+# This ClusterRole/ClusterRoleBinding pair is cluster-scoped and shared across
+# every environment overlay (dev, prod, ...). Kustomize's namespace transformer
+# does not rewrite subject namespaces here, so each environment's service
+# account must be listed explicitly below — applying one overlay must not drop
+# another environment's subject. Add a new subject entry whenever a new
+# environment/namespace is deployed.
 subjects:
   - kind: ServiceAccount
     name: rhdp-scheduler
     namespace: rhdp-scheduler
+  - kind: ServiceAccount
+    name: rhdp-scheduler
+    namespace: rhdp-scheduler-dev
