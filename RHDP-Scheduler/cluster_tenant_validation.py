@@ -107,38 +107,45 @@ def auto_fix_cluster_tenant_timing(schedules: list[Any], buffer_minutes: int = 2
         try:
             tenant_date = datetime.strptime(tenant_schedule.provisioning_date, "%d/%m/%Y %H:%M")
             cluster_date = datetime.strptime(cluster_schedule.provisioning_date, "%d/%m/%Y %H:%M")
-
-            # Always ensure cluster is buffer_minutes BEFORE tenant
-            ideal_cluster_date = tenant_date - timedelta(minutes=buffer_minutes)
-            # If the ideal time is already in the past, deploy ASAP (now + 30 min)
             now = datetime.now(UTC).replace(tzinfo=None)
-            if ideal_cluster_date < now:
+
+            # Ideal position: buffer_minutes before tenant; clamp to now+30min if already past
+            ideal_cluster_date = tenant_date - timedelta(minutes=buffer_minutes)
+            clamped_to_now = ideal_cluster_date < now
+            if clamped_to_now:
                 ideal_cluster_date = now + timedelta(minutes=30)
 
-            # Only adjust if cluster is too late or at same time as tenant
-            time_diff = (tenant_date - cluster_date).total_seconds() / 60  # minutes
+            # Needs adjustment if: not far enough before tenant, OR cluster is already in the past
+            time_diff = (tenant_date - cluster_date).total_seconds() / 60
+            needs_fix = time_diff < buffer_minutes or cluster_date < now
 
-            if time_diff < buffer_minutes:
+            if needs_fix:
                 old_date_str = cluster_schedule.provisioning_date
                 new_date_str = ideal_cluster_date.strftime("%d/%m/%Y %H:%M")
 
-                cluster_schedule.provisioning_date = new_date_str
+                if old_date_str == new_date_str:
+                    # Already at the right time (e.g., was already clamped to now+30min)
+                    continue
 
-                hours_early = buffer_minutes / 60
+                cluster_schedule.provisioning_date = new_date_str
+                actual_lead_h = (tenant_date - ideal_cluster_date).total_seconds() / 3600
+
                 fixed_items.append({
                     "ci_name": cluster_schedule.ci_name,
                     "cluster_ci": cluster_schedule.ci,
                     "tenant_ci": tenant_schedule.ci,
                     "old_date": old_date_str,
                     "new_date": new_date_str,
-                    "buffer_hours": hours_early,
+                    "buffer_hours": actual_lead_h,
                     "namespace": cluster_schedule.namespace,
                 })
 
+                if clamped_to_now:
+                    note = f"ASAP — only {actual_lead_h:.1f}h before tenant '{tenant_schedule.ci_name}' (tenant is soon)"
+                else:
+                    note = f"{actual_lead_h:.1f}h before tenant '{tenant_schedule.ci_name}'"
                 warnings.append(
-                    f"⚙️ Adjusted cluster '{cluster_schedule.ci_name}': "
-                    f"{old_date_str} → {new_date_str} "
-                    f"({hours_early:.1f}h before tenant '{tenant_schedule.ci_name}')"
+                    f"⚙️ Adjusted cluster '{cluster_schedule.ci_name}': {old_date_str} → {new_date_str} ({note})"
                 )
         except ValueError as e:
             logger.warning(f"Error parsing dates for {cluster_schedule.ci} during auto-fix: {e}")
@@ -151,7 +158,7 @@ def auto_fix_cluster_tenant_timing(schedules: list[Any], buffer_minutes: int = 2
         "warnings": warnings,
         "schedules": schedules,
         "message": (
-            f"Adjusted {len(fixed_items)} cluster(s) to deploy {buffer_minutes/60:.1f}h before tenants. "
+            f"Adjusted {len(fixed_items)} cluster(s) to deploy before their tenants. "
             f"Skipped {len(skipped_items)} pool-provided cluster(s)."
         )
     }
