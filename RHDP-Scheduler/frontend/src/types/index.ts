@@ -49,6 +49,25 @@ export interface UploadResponse {
   schedules: WorkshopSchedule[];
 }
 
+export interface LabagatorEventSummary {
+  id: number;
+  name: string;
+  start_date: string;
+  end_date: string;
+  location: string;
+}
+
+export interface LabagatorEventsResponse {
+  events: LabagatorEventSummary[];
+  error: string | null;
+}
+
+export interface LabagatorPreviewResponse {
+  event_name: string;
+  session_count: number;
+  csv_text: string;
+}
+
 /** Built-in example schedule (GET /api/schedules/examples). */
 export interface ScheduleExampleMeta {
   slug: string;

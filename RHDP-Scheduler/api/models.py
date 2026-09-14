@@ -289,6 +289,38 @@ class UploadResponse(BaseModel):
     schedules: list[WorkshopScheduleResponse]
 
 
+class LabagatorEventSummary(BaseModel):
+    """Summary of a single event from Labagator's events API."""
+
+    id: int
+    name: str
+    start_date: str
+    end_date: str
+    location: str = ""
+
+
+class LabagatorEventsResponse(BaseModel):
+    """Response for GET /api/labagator/events."""
+
+    events: list[LabagatorEventSummary]
+    error: str | None = None
+
+
+class LabagatorPreviewResponse(BaseModel):
+    """Response for GET /api/schedules/labagator-preview."""
+
+    event_name: str
+    session_count: int
+    csv_text: str
+
+
+class LabagatorImportRequest(BaseModel):
+    """Body for POST /api/schedules/import-from-labagator."""
+
+    csv_text: str
+    filename: str = "labagator-import.csv"
+
+
 class OperationResponse(BaseModel):
     success: bool
     message: str
