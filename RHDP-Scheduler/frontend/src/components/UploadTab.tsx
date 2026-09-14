@@ -247,13 +247,7 @@ export const UploadTab: React.FC<Props> = ({
       if (s.users !== null && s.ci in numUsersLimits && s.users > numUsersLimits[s.ci])
         warns.push({ index: i, field: 'users', message: `"${s.ci_name}" exceeds catalog limit: ${s.users} users requested, max ${numUsersLimits[s.ci]}` });
 
-      // Blank optional fields (informational)
-      if (!s.password?.trim())
-        warns.push({ index: i, field: 'password', message: `"${s.ci_name}" has no password set` });
-      if (!s.activity?.trim())
-        warns.push({ index: i, field: 'activity', message: `"${s.ci_name}" has a blank Activity field` });
-      if (!s.purpose?.trim())
-        warns.push({ index: i, field: 'purpose', message: `"${s.ci_name}" has a blank Purpose field` });
+      // Blank optional fields - removed informational warnings as these fields have defaults
     });
     return warns;
   }, [schedules, numUsersLimits]);
