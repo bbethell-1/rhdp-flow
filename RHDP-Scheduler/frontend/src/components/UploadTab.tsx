@@ -1067,24 +1067,19 @@ export const UploadTab: React.FC<Props> = ({
             <Alert
               variant="info"
               isInline
-              title={`${catalogNamespaceMismatches.length} item(s) found in different catalog namespace than CSV specifies`}
+              title={`${catalogNamespaceMismatches.length} item(s) are in a different catalog than your CSV says`}
               style={{ marginBottom: 12 }}
             >
-              <div style={{ fontSize: '0.9rem', marginBottom: 8 }}>
-                <strong>Why this matters:</strong> Your CSV says these should be in one catalog namespace, but they actually exist in another.
-                This is common when deploying .prod items for an event, or using a CSV exported with incorrect namespace overrides.
+              <div style={{ marginBottom: 8 }}>
+                Your CSV says these items are in <code>{catalogNamespaceMismatches[0]?.expected_catalog_namespace}</code>,
+                but they're actually in <code>{catalogNamespaceMismatches[0]?.found_catalog_namespace}</code>.
+                {catalogNamespaceMismatches.length > 3 && ` (${catalogNamespaceMismatches.length} total)`}
               </div>
-              <ul style={{ margin: '4px 0 8px', paddingLeft: 20, fontSize: '0.85rem' }}>
-                {catalogNamespaceMismatches.map((m, i) => (
-                  <li key={i}>
-                    <strong>{m.ci_name}</strong> — CSV says <code>{m.expected_catalog_namespace}</code>, but found in <code>{m.found_catalog_namespace}</code>
-                  </li>
-                ))}
-              </ul>
-              <div style={{ padding: '8px 12px', background: 'var(--pf-v6-global--BackgroundColor--200)', borderRadius: 4 }}>
-                <strong>✓ Safe to deploy as-is</strong> — Flow will use the actual catalog namespace ({catalogNamespaceMismatches[0]?.found_catalog_namespace}) where these items exist.
+              <div style={{ padding: '10px 14px', background: 'var(--pf-v6-global--BackgroundColor--200)', borderRadius: 4, fontSize: '0.95rem' }}>
+                <strong>✓ You can deploy now</strong> — Flow will use the correct catalog where items exist.
                 <br />
-                <strong>OR</strong> fix your CSV by deleting the <code>Catalog_Namespace</code> column to use auto-detection (.event→event, .prod→prod).
+                <strong style={{ marginTop: 6, display: 'block' }}>To fix the mismatch:</strong> Delete the <code>Catalog_Namespace</code> column
+                from your CSV to let Flow auto-detect based on CI suffix (.prod → prod, .event → event).
               </div>
             </Alert>
           )}
