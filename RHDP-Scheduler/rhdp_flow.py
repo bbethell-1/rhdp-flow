@@ -205,6 +205,7 @@ class WorkshopSchedule:
     is_tenant: bool = False  # Detected as tenant CI (either via naming or explicit label)
     detected_cluster_ci: str | None = None  # For tenants: the associated cluster CI (from override or naming)
     detection_method: str = "none"  # How the type was detected: "csv_label", "naming", "none"
+    auto_added: bool = False  # True if Flow injected this row (e.g. auto-provisioned cluster for a tenant with nowhere to land)
 
 @dataclass
 class DeploymentResult:
@@ -369,6 +370,113 @@ def analyze_cluster_tenant_relationships(schedules: list[WorkshopSchedule]) -> N
                 f"{schedule.ci_name}: Detected as tenant (naming convention), "
                 f"cluster CI: {schedule.detected_cluster_ci}"
             )
+
+
+def _shift_provisioning_earlier(provisioning_date: str, minutes: int = 180) -> str:
+    """Return provisioning_date shifted earlier by `minutes` (DD/MM/YYYY HH:MM)."""
+    try:
+        dt = datetime.strptime(provisioning_date.strip(), "%d/%m/%Y %H:%M")
+        return (dt - timedelta(minutes=minutes)).strftime("%d/%m/%Y %H:%M")
+    except (ValueError, AttributeError):
+        return provisioning_date
+
+
+def auto_provision_missing_clusters(schedules: list[WorkshopSchedule]) -> dict[str, Any]:
+    """
+    Inject a fresh cluster provisioner for every tenant that has nowhere to land.
+
+    A tenant will fail on deploy if there is no shared TenantClusterPool for it
+    AND no matching ``-cluster`` provisioner in this batch. This function finds
+    those tenants (via the live-catalog/pool check) and appends a cluster
+    WorkshopSchedule for each, so the tenant has somewhere to run.
+
+    Injected rows are tagged ``auto_added=True`` and named "... (Cluster — added
+    by Flow)" so they are obvious in the UI and fully reversible. They inherit
+    the tenant's namespace/dates/instances and are scheduled 3h earlier so the
+    cluster is ready before the tenant provisions.
+
+    This is a deploy-time convenience only. The permanent fix is a catalog
+    ``tenant_cluster`` reference (AgnosticV PR) + a shared cluster pool.
+
+    Returns dict: {added: [{tenant_ci, cluster_ci, workshop_name}], count, needs_agv_prs}.
+    """
+    from tenant_cluster_capacity import check_tenant_cluster_references
+
+    refs = check_tenant_cluster_references(schedules)
+    # Will-fail tenants: no pool and no cluster row already in the batch.
+    will_fail = [
+        r for r in (refs.get("missing_refs", []) + refs.get("ref_no_pool", []))
+        if not r.get("pool_exists") and not r.get("has_cluster_row")
+    ]
+
+    # CIs of clusters already present (manual or previously auto-added) — never double-add.
+    existing_cluster_cis = {s.ci for s in schedules if getattr(s, "is_cluster", False) or is_cluster_ci(s.ci)}
+
+    by_ci = {s.ci: s for s in schedules}
+    added: list[dict[str, str]] = []
+    needs_agv_prs: list[dict[str, str]] = []
+
+    for r in will_fail:
+        tenant = by_ci.get(r["ci"])
+        if tenant is None:
+            continue
+        cluster_ci = tenant.detected_cluster_ci or get_cluster_ci_for_tenant(
+            tenant.ci, tenant.cluster_ci_override
+        )
+        # Record what the user should do for a permanent fix regardless.
+        needs_agv_prs.append({
+            "tenant_ci": tenant.ci,
+            "cluster_ci": cluster_ci or "",
+            "workshop_name": tenant.ci_name,
+        })
+        if not cluster_ci or cluster_ci in existing_cluster_cis:
+            continue
+
+        cluster = WorkshopSchedule(
+            ci_name=f"{tenant.ci_name} (Cluster — added by Flow)",
+            ci=cluster_ci,
+            namespace=tenant.namespace,
+            enable_workshop_interface=False,
+            password="",
+            activity=tenant.activity,
+            purpose=tenant.purpose,
+            workshop_name=tenant.workshop_name,
+            provisioning_date=_shift_provisioning_earlier(tenant.provisioning_date, 180),
+            auto_stop=tenant.auto_stop,
+            auto_destroy=tenant.auto_destroy,
+            instances=tenant.instances,
+            catalog_namespace=tenant.catalog_namespace,
+            white_glove=tenant.white_glove,
+            redirect=False,
+            item_type="cluster",
+            is_cluster=True,
+            detection_method="auto_provisioned",
+            auto_added=True,
+        )
+        schedules.append(cluster)
+        existing_cluster_cis.add(cluster_ci)
+        added.append({
+            "tenant_ci": tenant.ci,
+            "cluster_ci": cluster_ci,
+            "workshop_name": tenant.ci_name,
+        })
+
+    # Re-analyze so the new cluster rows and tenant links are consistent.
+    if added:
+        analyze_cluster_tenant_relationships(schedules)
+
+    return {"added": added, "count": len(added), "needs_agv_prs": needs_agv_prs}
+
+
+def remove_auto_provisioned_clusters(schedules: list[WorkshopSchedule]) -> dict[str, Any]:
+    """Remove all Flow-injected (auto_added) rows. Returns {removed_count}."""
+    before = len(schedules)
+    kept = [s for s in schedules if not getattr(s, "auto_added", False)]
+    removed = before - len(kept)
+    schedules[:] = kept
+    if removed:
+        analyze_cluster_tenant_relationships(schedules)
+    return {"removed_count": removed}
 
 
 def filter_pool_provided_clusters(schedules: list[WorkshopSchedule]) -> list[WorkshopSchedule]:

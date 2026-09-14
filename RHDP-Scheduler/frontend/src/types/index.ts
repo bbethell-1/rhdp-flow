@@ -40,6 +40,11 @@ export interface WorkshopSchedule {
   showroom_zerotouch: boolean;
   item_type?: 'Workshop' | 'Cluster' | 'Tenant';
   cluster_link?: string;
+  cluster_ci_override?: string | null;
+  is_cluster?: boolean;
+  is_tenant?: boolean;
+  detected_cluster_ci?: string | null;
+  auto_added?: boolean;
 }
 
 export interface UploadResponse {

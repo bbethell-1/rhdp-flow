@@ -451,6 +451,10 @@ def _schedule_to_response(s: WorkshopSchedule) -> WorkshopScheduleResponse:
         showroom_zerotouch=s.showroom_zerotouch,
         item_type=s.item_type,
         cluster_ci_override=s.cluster_ci_override,
+        is_cluster=s.is_cluster,
+        is_tenant=s.is_tenant,
+        detected_cluster_ci=s.detected_cluster_ci,
+        auto_added=s.auto_added,
     )
 
 
@@ -2665,4 +2669,53 @@ def check_tenant_cluster_refs(_key=Depends(verify_api_key)):
     except Exception as e:
         logger.exception("Tenant cluster reference check failed")
         return {"missing_refs": [], "total_tenant_count": 0}
+
+
+@router.post("/schedules/auto-provision-clusters")
+def auto_provision_clusters(_key=Depends(verify_api_key)):
+    """Inject fresh cluster provisioners for tenants that have nowhere to land.
+
+    For each tenant with no shared pool and no matching cluster row in the
+    batch, appends an auto_added cluster schedule (3h earlier) so the tenant
+    can deploy. Fully reversible via /schedules/remove-auto-provisioned.
+
+    Returns: {added, count, needs_agv_prs, schedules}
+    """
+    global _schedules
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+
+    try:
+        from rhdp_flow import auto_provision_missing_clusters
+
+        result = auto_provision_missing_clusters(_schedules)
+        result["schedules"] = [_schedule_to_response(s) for s in _schedules]
+        return result
+    except Exception:
+        logger.exception("Auto-provision clusters failed")
+        # Degrade gracefully — never block the deploy flow on this enhancement.
+        return {"added": [], "count": 0, "needs_agv_prs": [],
+                "schedules": [_schedule_to_response(s) for s in _schedules]}
+
+
+@router.post("/schedules/remove-auto-provisioned")
+def remove_auto_provisioned(_key=Depends(verify_api_key)):
+    """Remove all Flow-injected (auto_added) cluster rows.
+
+    Returns: {removed_count, schedules}
+    """
+    global _schedules
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+
+    try:
+        from rhdp_flow import remove_auto_provisioned_clusters
+
+        result = remove_auto_provisioned_clusters(_schedules)
+        result["schedules"] = [_schedule_to_response(s) for s in _schedules]
+        return result
+    except Exception:
+        logger.exception("Remove auto-provisioned clusters failed")
+        return {"removed_count": 0,
+                "schedules": [_schedule_to_response(s) for s in _schedules]}
 
