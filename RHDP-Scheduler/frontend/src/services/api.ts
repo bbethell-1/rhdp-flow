@@ -243,7 +243,7 @@ export const api = {
       skipped_items: any[];
       warnings: string[];
       message: string
-    }>(`/schedules/auto-fix-cluster-tenant-timing?buffer_hours=${bufferHours}`, { method: 'POST' }),
+    }>(`/schedules/auto-fix-cluster-tenant?buffer_hours=${bufferHours}`, { method: 'POST' }),
   validatePoolCapacity: () =>
     request<PoolCapacityValidationResponse>('/schedules/validate-pool-capacity', { method: 'POST', body: '{}' }),
   diffSchedules: async (file: File): Promise<import('../types').DiffResponse> => {

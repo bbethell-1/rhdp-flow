@@ -1250,7 +1250,8 @@ export const UploadTab: React.FC<Props> = ({
           )}
 
           {/* Pool capacity warnings */}
-          {(poolCapacityWarnings.length > 0 || poolsNotFound.length > 0) && (
+          {(poolCapacityWarnings.length > 0 || poolsNotFound.length > 0)
+           && !(missingTenantRefs && poolCapacityWarnings.length === 0) && (
             <Alert
               variant={poolCapacityWarnings.some(w => w.severity === 'critical') ? 'danger' : 'info'}
               isInline
