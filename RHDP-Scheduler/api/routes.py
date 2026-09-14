@@ -1234,7 +1234,7 @@ def auto_fix_cluster_tenant_timing(buffer_hours: float = 4.0, _key=Depends(verif
     Skips clusters that will be provided by TenantClusterPools.
 
     Args:
-        buffer_hours: Hours to deploy cluster before tenant (default: 3.0)
+        buffer_hours: Hours to deploy cluster before tenant (default: 4.0)
     """
     global _schedules
     if not _schedules:

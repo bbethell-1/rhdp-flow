@@ -523,7 +523,7 @@ export const UploadTab: React.FC<Props> = ({
       setAutoProvisionResult({ added: prov.added || [], needs_agv_prs: prov.needs_agv_prs || [] });
       try { setMissingTenantRefs(await api.checkTenantClusterRefs()); } catch { /* ignore */ }
       if ((prov.added || []).length > 0) {
-        showToast(`Added ${prov.added.length} cluster pool row(s)`, 'success');
+        showToast(`Added ${prov.added.length} cluster provisioner row(s)`, 'success');
       }
     } catch (e) {
       showToast(`Auto-provision failed: ${e}`, 'danger');
@@ -1413,7 +1413,7 @@ export const UploadTab: React.FC<Props> = ({
                   <Alert
                     variant="danger"
                     isInline
-                    title={`${willFail.length} workshop(s) will fail — no cluster pool available`}
+                    title={`${willFail.length} workshop(s) will fail — no cluster to run on`}
                     style={{ marginBottom: 12 }}
                     actionClose={
                       <Button
@@ -1423,12 +1423,12 @@ export const UploadTab: React.FC<Props> = ({
                           await handleAutoProvision();
                         }}
                       >
-                        Auto-add cluster pools ({timingBufferHours}h before tenants)
+                        Auto-add cluster rows ({timingBufferHours}h before tenants)
                       </Button>
                     }
                   >
                     <div style={{ marginBottom: 8 }}>
-                      These workshops run <strong>on top of</strong> a cluster pool, but none is available — no shared pool exists and no cluster is being deployed in this batch. Click the button to let Flow add them automatically:
+                      These workshops run <strong>on top of</strong> a cluster, but none is available — no shared cluster pool exists and no cluster is being deployed in this batch. Click the button to let Flow add fresh cluster rows automatically:
                     </div>
                     <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
                       {willFail.slice(0, 5).map((ref: any, i: number) => (
@@ -1441,9 +1441,9 @@ export const UploadTab: React.FC<Props> = ({
                       )}
                     </ul>
                     <div style={{ padding: '10px 14px', background: 'var(--pf-v6-global--BackgroundColor--200)', border: '1px solid var(--pf-v6-global--BorderColor--100)', borderRadius: 4 }}>
-                      <strong>Permanent fix:</strong> platform team adds the
-                      <code>tenant_cluster</code> link in AgnosticV + shared cluster pool.
-                      Ping <code>#forum-rhdp</code>. Until then, Flow will add cluster rows automatically when the toggle is on.
+                      <strong>Permanent fix (platform team):</strong> add the
+                      <code>tenant_cluster</code> reference in AgnosticV and create a TenantClusterPool.
+                      Ping <code>#forum-rhdp</code>. Flow's auto-add is a stopgap — it deploys a fresh cluster per event, not a shared pool.
                     </div>
                   </Alert>
                 )}
@@ -2169,7 +2169,7 @@ export const UploadTab: React.FC<Props> = ({
                   </Tooltip>
                 </SplitItem>
                 <SplitItem>
-                  <Tooltip content="Tenant workshops run ON TOP of cluster pools. Flow reschedules each cluster pool row (including rows auto-added by Flow) to deploy this many hours BEFORE its tenant. If that calculated time is already in the past, Flow uses now + 30 min so it still deploys. Tenants always follow the cluster.">
+                  <Tooltip content="Tenant workshops run ON TOP of a cluster. Flow reschedules each cluster row (including rows auto-added by Flow) to deploy this many hours BEFORE its tenant. If that time is already past, Flow uses now + 30 min so it deploys immediately. Tenants always follow their cluster.">
                     <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <Switch
                         id="auto-timing-switch"
@@ -2197,10 +2197,10 @@ export const UploadTab: React.FC<Props> = ({
                   </Tooltip>
                 </SplitItem>
                 <SplitItem>
-                  <Tooltip content="Tenants run ON TOP of cluster pools. If a tenant has no existing pool and no cluster row in your CSV, Flow adds a cluster pool row automatically — scheduled before the tenant and tagged 'added by Flow'. Turn off to manage cluster rows yourself.">
+                  <Tooltip content="Tenants run ON TOP of a cluster. If a tenant has no shared cluster pool and no cluster row in your CSV, Flow adds a fresh cluster row automatically — scheduled before the tenant and tagged 'added by Flow'. This is a per-event stopgap; the lasting fix is a TenantClusterPool (platform team). Turn off to manage cluster rows yourself.">
                     <Switch
                       id="auto-provision-switch"
-                      label="Auto-Add Missing Cluster Pools"
+                      label="Auto-Add Missing Clusters"
                       isChecked={enableAutoProvision}
                       onChange={(_e, checked) => setEnableAutoProvision(checked)}
                     />
