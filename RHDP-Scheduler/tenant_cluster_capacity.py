@@ -247,3 +247,139 @@ def check_schedules_capacity(schedules: list[Any], ignore_warnings: bool = False
         "checked_count": checked_count,
         "capacity_info": capacity_info
     }
+
+
+def calculate_cluster_needs(schedules: list[Any]) -> dict[str, Any]:
+    """
+    Calculate how many cluster CIs are needed for tenant workshops.
+
+    Groups tenant schedules by their cluster CI, counts tenants, queries pool
+    capacity, and calculates cluster deficit.
+
+    Args:
+        schedules: List of WorkshopSchedule objects
+
+    Returns:
+        Dict with:
+        - needs: List of dicts with cluster_ci, tenant_count, capacity_per_cluster,
+                 clusters_needed, clusters_in_csv, deficit
+        - total_tenant_count: Total tenant workshops
+        - total_deficit: Total cluster shortage across all tenant types
+    """
+    import math
+
+    needs = []
+    total_tenant_count = 0
+    total_deficit = 0
+
+    # Group tenants by their detected cluster CI
+    tenant_groups = {}  # cluster_ci -> list of tenant schedules
+    cluster_counts = {}  # cluster_ci -> count of cluster rows in CSV
+
+    for schedule in schedules:
+        if schedule.is_tenant and schedule.detected_cluster_ci:
+            cluster_ci = schedule.detected_cluster_ci
+            if cluster_ci not in tenant_groups:
+                tenant_groups[cluster_ci] = []
+            tenant_groups[cluster_ci].append(schedule)
+            total_tenant_count += 1
+        elif schedule.is_cluster:
+            cluster_ci = schedule.ci
+            cluster_counts[cluster_ci] = cluster_counts.get(cluster_ci, 0) + 1
+
+    # Calculate needs for each tenant type
+    for cluster_ci, tenant_schedules in tenant_groups.items():
+        tenant_count = len(tenant_schedules)
+        clusters_in_csv = cluster_counts.get(cluster_ci, 0)
+
+        # Try to get capacity from pool
+        # Use first tenant schedule to query capacity
+        first_tenant = tenant_schedules[0]
+        capacity = check_cluster_capacity(first_tenant.ci, first_tenant.namespace)
+
+        if capacity:
+            capacity_per_cluster = capacity.max_placements_per_cluster
+        else:
+            # Fallback if can't query pool (assume conservative 20)
+            capacity_per_cluster = 20
+            logger.warning(f"Could not query capacity for {cluster_ci}, assuming {capacity_per_cluster} per cluster")
+
+        clusters_needed = math.ceil(tenant_count / capacity_per_cluster)
+        deficit = max(0, clusters_needed - clusters_in_csv)
+        total_deficit += deficit
+
+        needs.append({
+            "cluster_ci": cluster_ci,
+            "tenant_ci_example": first_tenant.ci,
+            "tenant_count": tenant_count,
+            "capacity_per_cluster": capacity_per_cluster,
+            "clusters_needed": clusters_needed,
+            "clusters_in_csv": clusters_in_csv,
+            "deficit": deficit,
+            "pool_available": capacity.available_clusters if capacity else None,
+        })
+
+    return {
+        "needs": needs,
+        "total_tenant_count": total_tenant_count,
+        "total_deficit": total_deficit
+    }
+
+
+def check_tenant_cluster_references(schedules: list[Any]) -> dict[str, Any]:
+    """
+    Check if tenant workshop catalog items have proper cluster references.
+
+    Queries the actual CatalogItem to see if tenant_cluster is configured.
+    Missing references cause immediate provision failures.
+
+    Args:
+        schedules: List of WorkshopSchedule objects
+
+    Returns:
+        Dict with:
+        - missing_refs: List of dicts with ci, namespace, cluster_ci_from_csv
+        - total_tenant_count: Total tenant workshops checked
+    """
+    import json
+    import subprocess
+
+    missing_refs = []
+    tenant_schedules = [s for s in schedules if s.is_tenant]
+
+    for schedule in tenant_schedules:
+        try:
+            # Query the CatalogItem to check sandboxes config
+            cmd = f"oc get catalogitem {schedule.ci} -n {schedule.namespace} -o json"
+            result = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True, timeout=10
+            )
+
+            if result.returncode != 0:
+                continue
+
+            catalog_item = json.loads(result.stdout)
+            sandboxes = catalog_item.get("spec", {}).get("__meta__", {}).get("sandboxes", [])
+
+            has_tenant_cluster_ref = False
+            for sandbox in sandboxes:
+                if sandbox.get("kind") == "OcpSandbox" and sandbox.get("tenant_cluster"):
+                    has_tenant_cluster_ref = True
+                    break
+
+            if not has_tenant_cluster_ref:
+                missing_refs.append({
+                    "ci": schedule.ci,
+                    "namespace": schedule.namespace,
+                    "cluster_ci_from_csv": schedule.detected_cluster_ci or "none",
+                    "workshop_name": schedule.ci_name
+                })
+
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
+            # Skip items we can't query - don't block on network/permission issues
+            continue
+
+    return {
+        "missing_refs": missing_refs,
+        "total_tenant_count": len(tenant_schedules)
+    }

@@ -157,6 +157,32 @@ export const api = {
     request<import('../types').CatalogNamespaceValidationResponse>('/schedules/validate-catalog-namespaces', { method: 'POST', body: '{}' }),
   validateClusterTenant: () =>
     request<any>('/schedules/validate-cluster-tenant', { method: 'POST', body: '{}' }),
+
+  getClusterNeeds: () =>
+    request<{
+      needs: Array<{
+        cluster_ci: string;
+        tenant_ci_example: string;
+        tenant_count: number;
+        capacity_per_cluster: number;
+        clusters_needed: number;
+        clusters_in_csv: number;
+        deficit: number;
+        pool_available: number | null;
+      }>;
+      total_tenant_count: number;
+      total_deficit: number;
+    }>('/schedules/cluster-needs'),
+  checkTenantClusterRefs: () =>
+    request<{
+      missing_refs: Array<{
+        ci: string;
+        namespace: string;
+        cluster_ci_from_csv: string;
+        workshop_name: string;
+      }>;
+      total_tenant_count: number;
+    }>('/schedules/tenant-cluster-refs'),
   autoFixClusterTenantTiming: () =>
     request<{
       fixed_count: number;

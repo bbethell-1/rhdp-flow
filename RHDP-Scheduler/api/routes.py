@@ -33,6 +33,8 @@ from api.models import (
     CatalogItemParameter,
     CatalogNamespaceMismatch,
     CatalogNamespaceValidationResponse,
+    ClusterNeed,
+    ClusterNeedsResponse,
     ClusterTenantValidationError,
     ClusterTenantValidationResponse,
     ClusterTenantValidationWarning,
@@ -2604,3 +2606,63 @@ async def export_for_labagator(_key=Depends(verify_api_key)):
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=flow-export-for-labagator.csv"},
     )
+
+
+@router.get("/schedules/cluster-needs", response_model=ClusterNeedsResponse)
+def get_cluster_needs(_key=Depends(verify_api_key)):
+    """Calculate cluster capacity needs for tenant workshops.
+
+    Analyzes loaded schedules to determine:
+    - How many tenant workshops are being deployed
+    - How many cluster CIs are needed based on pool capacity
+    - Deficit (if any) between needed clusters and clusters in CSV
+
+    Returns:
+        ClusterNeedsResponse with capacity calculations per tenant type
+    """
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+
+    try:
+        from tenant_cluster_capacity import calculate_cluster_needs
+
+        result = calculate_cluster_needs(_schedules)
+
+        return ClusterNeedsResponse(
+            needs=[ClusterNeed(**n) for n in result["needs"]],
+            total_tenant_count=result["total_tenant_count"],
+            total_deficit=result["total_deficit"]
+        )
+    except ImportError as e:
+        logger.warning(f"Cluster needs calculation unavailable: {e}")
+        return ClusterNeedsResponse()
+    except Exception as e:
+        logger.exception("Cluster needs calculation failed")
+        return ClusterNeedsResponse()
+
+
+@router.get("/schedules/tenant-cluster-refs")
+def check_tenant_cluster_refs(_key=Depends(verify_api_key)):
+    """Check if tenant workshops have proper catalog cluster references.
+
+    Queries CatalogItems to verify tenant_cluster configuration exists.
+    Missing references cause immediate provision failures.
+
+    Returns:
+        Dict with missing_refs list and total_tenant_count
+    """
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+
+    try:
+        from tenant_cluster_capacity import check_tenant_cluster_references
+
+        result = check_tenant_cluster_references(_schedules)
+        return result
+    except ImportError as e:
+        logger.warning(f"Tenant cluster reference check unavailable: {e}")
+        return {"missing_refs": [], "total_tenant_count": 0}
+    except Exception as e:
+        logger.exception("Tenant cluster reference check failed")
+        return {"missing_refs": [], "total_tenant_count": 0}
+

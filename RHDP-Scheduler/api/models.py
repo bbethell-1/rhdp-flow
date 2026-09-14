@@ -535,3 +535,22 @@ class FillMissingDatesRequest(BaseModel):
     provisioning_date: str
     auto_stop: str
     auto_destroy: str
+
+
+class ClusterNeed(BaseModel):
+    """Details about cluster capacity needs for a tenant type."""
+    cluster_ci: str
+    tenant_ci_example: str
+    tenant_count: int
+    capacity_per_cluster: int
+    clusters_needed: int
+    clusters_in_csv: int
+    deficit: int
+    pool_available: int | None = None
+
+
+class ClusterNeedsResponse(BaseModel):
+    """Response for GET /schedules/cluster-needs."""
+    needs: list[ClusterNeed] = Field(default_factory=list)
+    total_tenant_count: int = 0
+    total_deficit: int = 0
