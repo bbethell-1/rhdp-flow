@@ -2576,7 +2576,11 @@ def validate_catalog_item_exists(ci: str, expected_namespace: str, config: RHDPC
             cmd = [config.oc_command, "get", "catalogitem", ci, "-n", ns, "-o", "json"]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)
             if result.returncode == 0:
-                suggestion = f"Item '{ci}' not found in {expected_namespace}. Found in {ns} instead. Update your CSV Catalog_Namespace column or CI suffix."
+                # Item exists but in different namespace - this is OK to deploy
+                suggestion = (
+                    f"Expected in {expected_namespace}, found in {ns}. "
+                    f"Will deploy from {ns} (where item actually exists)."
+                )
                 return (False, ns, suggestion)
         except Exception:
             continue

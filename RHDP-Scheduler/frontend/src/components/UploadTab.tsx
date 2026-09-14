@@ -247,13 +247,7 @@ export const UploadTab: React.FC<Props> = ({
       if (s.users !== null && s.ci in numUsersLimits && s.users > numUsersLimits[s.ci])
         warns.push({ index: i, field: 'users', message: `"${s.ci_name}" exceeds catalog limit: ${s.users} users requested, max ${numUsersLimits[s.ci]}` });
 
-      // Blank optional fields (informational)
-      if (!s.password?.trim())
-        warns.push({ index: i, field: 'password', message: `"${s.ci_name}" has no password set` });
-      if (!s.activity?.trim())
-        warns.push({ index: i, field: 'activity', message: `"${s.ci_name}" has a blank Activity field` });
-      if (!s.purpose?.trim())
-        warns.push({ index: i, field: 'purpose', message: `"${s.ci_name}" has a blank Purpose field` });
+      // Blank optional fields - removed informational warnings as these fields have defaults
     });
     return warns;
   }, [schedules, numUsersLimits]);
@@ -1071,19 +1065,26 @@ export const UploadTab: React.FC<Props> = ({
           {/* Catalog namespace mismatches */}
           {catalogNamespaceMismatches.length > 0 && (
             <Alert
-              variant="warning"
+              variant="info"
               isInline
-              title={`${catalogNamespaceMismatches.length} catalog item(s) found in different namespace`}
+              title={`${catalogNamespaceMismatches.length} items are in ${catalogNamespaceMismatches[0]?.found_catalog_namespace} (your CSV says ${catalogNamespaceMismatches[0]?.expected_catalog_namespace})`}
               style={{ marginBottom: 12 }}
             >
-              <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
-                {catalogNamespaceMismatches.map((m, i) => (
-                  <li key={i}>
-                    <strong>{m.ci_name}</strong> ({m.ci}): {m.suggestion}
-                  </li>
+              <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
+                {catalogNamespaceMismatches.slice(0, 5).map((m, i) => (
+                  <li key={i}>{m.ci_name}</li>
                 ))}
+                {catalogNamespaceMismatches.length > 5 && (
+                  <li style={{ fontStyle: 'italic' }}>...and {catalogNamespaceMismatches.length - 5} more</li>
+                )}
               </ul>
-              Update your CSV Catalog_Namespace column or CI suffix to avoid ghost workshops.
+              <div style={{ padding: '10px 14px', background: '#e7f5e7', border: '1px solid #4caf50', borderRadius: 4, marginBottom: 8 }}>
+                <strong style={{ color: '#2e7d32' }}>✓ This is fine — Flow will deploy from {catalogNamespaceMismatches[0]?.found_catalog_namespace} (these items don't exist in {catalogNamespaceMismatches[0]?.expected_catalog_namespace})</strong>
+              </div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)' }}>
+                Note: Catalog item config may differ between event and prod catalogs.
+                To override catalog for <strong>all</strong> workshops: use Deploy Settings below.
+              </div>
             </Alert>
           )}
 
@@ -1162,11 +1163,11 @@ export const UploadTab: React.FC<Props> = ({
             </Alert>
           )}
 
-          {/* Multi-asset password warning */}
+          {/* Multi-asset password info */}
           {needsPasswordWarning && (
-            <Alert variant="warning" isInline title="Multi-asset passwords not loaded" style={{ marginBottom: 12 }}>
-              Multi-asset workshop(s) detected but no password file uploaded. Each asset CI may need its own password.
-              Upload a passwords CSV above to avoid deployment failures.
+            <Alert variant="info" isInline title="Multi-asset passwords (optional)" style={{ marginBottom: 12 }}>
+              Multi-asset workshop(s) detected. If each asset CI needs its own password, upload a passwords CSV above.
+              Otherwise, the main CSV password will be used for all assets.
             </Alert>
           )}
 
