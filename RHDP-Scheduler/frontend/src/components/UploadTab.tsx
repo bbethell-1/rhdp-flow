@@ -1071,7 +1071,7 @@ export const UploadTab: React.FC<Props> = ({
               style={{ marginBottom: 12 }}
             >
               <div style={{ marginBottom: 8 }}>
-                Flow found these items in <code>{catalogNamespaceMismatches[0]?.found_catalog_namespace}</code> and will deploy from there:
+                Flow found these items in <code>{catalogNamespaceMismatches[0]?.found_catalog_namespace}</code> (they may only exist there):
               </div>
               <ul style={{ margin: '0 0 8px 20px', fontSize: '0.9rem' }}>
                 {catalogNamespaceMismatches.slice(0, 5).map((m, i) => (
@@ -1081,8 +1081,10 @@ export const UploadTab: React.FC<Props> = ({
                   <li style={{ fontStyle: 'italic' }}>...and {catalogNamespaceMismatches.length - 5} more</li>
                 )}
               </ul>
-              <div style={{ fontSize: '0.9rem', color: 'var(--pf-v6-global--Color--200)' }}>
-                <strong>Deploy Settings</strong> below to override catalog namespace if needed.
+              <div style={{ padding: '8px 12px', background: 'var(--pf-v6-global--BackgroundColor--200)', borderRadius: 4, fontSize: '0.9rem' }}>
+                <strong>Override catalog for ALL workshops:</strong> Use <strong>Deploy Settings</strong> below.
+                Note: these flagged items may only exist in {catalogNamespaceMismatches[0]?.found_catalog_namespace},
+                so overriding might cause them to fail.
               </div>
             </Alert>
           )}
