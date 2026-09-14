@@ -1499,7 +1499,7 @@ export const UploadTab: React.FC<Props> = ({
                     </ul>
                     <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)' }}>
                       Fresh clusters take longer to provision than a ready pool. For a permanent
-                      shared pool, ask the platform team to add the <code>tenant_cluster</code> link + pool.
+                      shared pool, use the <strong>Create TenantClusterPools</strong> button above.
                     </div>
                   </Alert>
                 )}
@@ -1555,23 +1555,24 @@ export const UploadTab: React.FC<Props> = ({
             </Alert>
           )}
 
-          {/* Cluster-tenant timing errors only — "not in batch" is already shown above via missingTenantRefs */}
+          {/* Cluster row timing errors — only relevant when cluster rows exist in the batch
+              (auto-add or manual). Workshops backed by a TenantClusterPool don't need this
+              since Babylon handles provisioning timing internally. */}
           {(() => {
+            const hasClusterRows = schedules.some(s => (s as any).is_cluster || (s as any).auto_added);
+            if (!hasClusterRows) return null;
+
             const allErrors: any[] = clusterTenantValidation?.errors || [];
-            // Suppress "not in batch / not provisioned" errors when missingTenantRefs is loaded
-            // (those are already shown in the willFail / viaFreshCluster alerts above)
-            const timingErrors = missingTenantRefs
-              ? allErrors.filter((e: any) => {
-                  const m = (e.message || '').toLowerCase();
-                  return !m.includes('neither in this batch') && !m.includes('not in batch') && !m.includes('not provisioned');
-                })
-              : allErrors;
+            const timingErrors = allErrors.filter((e: any) => {
+              const m = (e.message || '').toLowerCase();
+              return !m.includes('neither in this batch') && !m.includes('not in batch') && !m.includes('not provisioned');
+            });
             if (timingErrors.length === 0) return null;
             return (
               <Alert
                 variant="danger"
                 isInline
-                title={`${timingErrors.length} cluster timing issue(s) — cluster must deploy before its tenant`}
+                title={`${timingErrors.length} cluster row timing issue(s) — cluster must deploy before its tenant`}
                 style={{ marginBottom: 12 }}
                 actionClose={
                   <Button
