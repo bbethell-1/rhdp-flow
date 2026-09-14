@@ -1079,10 +1079,11 @@ export const UploadTab: React.FC<Props> = ({
                 )}
               </ul>
               <div style={{ padding: '10px 14px', background: '#e7f5e7', border: '1px solid #4caf50', borderRadius: 4, marginBottom: 8 }}>
-                <strong style={{ color: '#2e7d32' }}>✓ This is fine — Flow will deploy from the correct catalog</strong>
+                <strong style={{ color: '#2e7d32' }}>✓ This is fine — Flow will deploy from {catalogNamespaceMismatches[0]?.found_catalog_namespace} (these items don't exist in {catalogNamespaceMismatches[0]?.expected_catalog_namespace})</strong>
               </div>
               <div style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)' }}>
-                To override catalog for <strong>all</strong> workshops: use Deploy Settings below
+                Note: Catalog item config may differ between event and prod catalogs.
+                To override catalog for <strong>all</strong> workshops: use Deploy Settings below.
               </div>
             </Alert>
           )}
