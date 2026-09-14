@@ -341,6 +341,9 @@ def check_tenant_cluster_references(schedules: list[Any]) -> dict[str, Any]:
         - missing_refs: List of dicts with ci, namespace, cluster_ci_from_csv
         - total_tenant_count: Total tenant workshops checked
     """
+    import json
+    import subprocess
+
     missing_refs = []
     tenant_schedules = [s for s in schedules if s.is_tenant]
 
