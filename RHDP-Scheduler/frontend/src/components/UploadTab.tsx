@@ -1025,9 +1025,9 @@ export const UploadTab: React.FC<Props> = ({
           {/* Pool capacity warnings */}
           {(poolCapacityWarnings.length > 0 || poolsNotFound.length > 0) && (
             <Alert
-              variant={poolCapacityWarnings.some(w => w.severity === 'critical') ? 'danger' : 'warning'}
+              variant={poolsNotFound.length > 0 || poolCapacityWarnings.some(w => w.severity === 'critical') ? 'danger' : 'warning'}
               isInline
-              title={`TenantClusterPool capacity check: ${poolCapacityWarnings.length} warning(s), ${poolsNotFound.length} pool(s) not found`}
+              title={`TenantClusterPool check: ${poolCapacityWarnings.length} warning(s), ${poolsNotFound.length} missing pool(s)`}
               style={{ marginBottom: 12 }}
             >
               {poolCapacityWarnings.length > 0 && (
@@ -1047,17 +1047,20 @@ export const UploadTab: React.FC<Props> = ({
               {poolsNotFound.length > 0 && (
                 <>
                   <div style={{ marginTop: poolCapacityWarnings.length > 0 ? 12 : 0, marginBottom: 8, fontWeight: 600 }}>
-                    Pools not found:
+                    Missing tenant cluster pools:
                   </div>
                   <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
                     {poolsNotFound.map((p, i) => (
                       <li key={i}>
-                        <strong>{p.ci_name}</strong> ({p.ci}): No TenantClusterPool found for base CI "{p.base_ci}"
+                        <strong>{p.ci_name}</strong>
                       </li>
                     ))}
                   </ul>
-                  <div style={{ marginTop: 8, fontSize: '0.85rem', fontStyle: 'italic' }}>
-                    Workshops will deploy to fresh clusters instead of tenant pools.
+                  <div style={{ padding: '10px 14px', marginTop: 10, background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 4 }}>
+                    <strong>⚠️ These workshops need cluster pools to run.</strong>
+                    <div style={{ fontSize: '0.85rem', marginTop: 4 }}>
+                      Contact the platform team if pools are missing, or check if clusters need provisioning first.
+                    </div>
                   </div>
                 </>
               )}
