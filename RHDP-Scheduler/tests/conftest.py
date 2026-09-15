@@ -85,6 +85,108 @@ Tenant Workshop,openshift-cnv.ocp-virt-roadshow-multi-user.prod-tenant,user-bbet
 
 
 # ============================================================================
+# Auto-Provision Test Fixtures
+# ============================================================================
+
+@pytest.fixture
+def make_tenant_schedule():
+    """Factory for creating tenant WorkshopSchedule instances."""
+    def _make(
+        ci: str = "workshop.prod-tenant",
+        ci_name: str = "Test Tenant Workshop",
+        namespace: str = "test-ns",
+        provisioning_date: str = "15/02/2026 11:00",
+        detected_cluster_ci: str | None = None,
+        cluster_ci_override: str | None = None,
+    ):
+        return WorkshopSchedule(
+            ci_name=ci_name,
+            ci=ci,
+            namespace=namespace,
+            users=10,
+            enable_workshop_interface=True,
+            password="test123",
+            activity="Admin",
+            purpose="QA",
+            workshop_name="test-workshop",
+            provisioning_date=provisioning_date,
+            auto_stop="15/02/2026 19:00",
+            auto_destroy="17/02/2026 11:00",
+            instances=1,
+            catalog_namespace="babylon-catalog-prod",
+            item_type="tenant",
+            is_tenant=True,
+            detected_cluster_ci=detected_cluster_ci,
+            cluster_ci_override=cluster_ci_override,
+        )
+    return _make
+
+
+@pytest.fixture
+def make_cluster_schedule():
+    """Factory for creating cluster WorkshopSchedule instances."""
+    def _make(
+        ci: str = "ocp4-cluster.prod",
+        ci_name: str = "Test Cluster",
+        namespace: str = "test-ns",
+        provisioning_date: str = "15/02/2026 10:00",
+        auto_added: bool = False,
+    ):
+        return WorkshopSchedule(
+            ci_name=ci_name,
+            ci=ci,
+            namespace=namespace,
+            users=0,
+            enable_workshop_interface=False,
+            password="",
+            activity="Admin",
+            purpose="QA",
+            workshop_name="test-workshop",
+            provisioning_date=provisioning_date,
+            auto_stop="15/02/2026 19:00",
+            auto_destroy="17/02/2026 11:00",
+            instances=1,
+            catalog_namespace="babylon-catalog-prod",
+            item_type="cluster",
+            is_cluster=True,
+            auto_added=auto_added,
+        )
+    return _make
+
+
+@pytest.fixture
+def mock_pool_list_empty():
+    """Mock empty TenantClusterPool list response."""
+    return {
+        "returncode": 0,
+        "stdout": json.dumps({"items": []}),
+        "stderr": "",
+    }
+
+
+@pytest.fixture
+def mock_pool_list_with_ready_pool():
+    """Mock TenantClusterPool list with one Ready pool."""
+    return {
+        "returncode": 0,
+        "stdout": json.dumps({
+            "items": [
+                {
+                    "metadata": {"name": "ocp4-cluster"},
+                    "status": {
+                        "clusters": {
+                            "ready": 3,
+                            "provisioning": 0,
+                        }
+                    },
+                }
+            ]
+        }),
+        "stderr": "",
+    }
+
+
+# ============================================================================
 # Factory functions
 # ============================================================================
 
