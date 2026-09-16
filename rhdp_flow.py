@@ -26,7 +26,7 @@ from typing import Any, Optional
 
 import yaml
 
-from agnosticv_resolver import resolve_tenant_cluster_item
+from lib.agnosticv_resolver import resolve_tenant_cluster_item
 
 # ============================================================================
 # CONFIGURATION & LOGGING SETUP
@@ -449,7 +449,7 @@ def auto_provision_missing_clusters(schedules: list[WorkshopSchedule], buffer_ho
 
     Returns dict: {added: [{tenant_ci, cluster_ci, workshop_name}], count, needs_agv_prs}.
     """
-    from tenant_cluster_capacity import check_tenant_cluster_references
+    from lib.tenant_cluster_capacity import check_tenant_cluster_references
 
     refs = check_tenant_cluster_references(schedules)
     # Will-fail tenants: no pool and no cluster row already in the batch.

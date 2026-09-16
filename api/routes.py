@@ -1242,7 +1242,7 @@ def auto_fix_cluster_tenant_timing(buffer_hours: float = 4.0, _key=Depends(verif
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
 
-    from cluster_tenant_validation import auto_fix_cluster_tenant_timing
+    from lib.cluster_tenant_validation import auto_fix_cluster_tenant_timing
 
     buffer_minutes = int(buffer_hours * 60)
     result = auto_fix_cluster_tenant_timing(_schedules, buffer_minutes=buffer_minutes)

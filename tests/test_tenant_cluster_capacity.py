@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tenant_cluster_capacity import check_tenant_cluster_references
+from lib.tenant_cluster_capacity import check_tenant_cluster_references
 
 
 def test_check_refs_ready_tier(make_tenant_schedule, mock_pool_list_with_ready_pool):
