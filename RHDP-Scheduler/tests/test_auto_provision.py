@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from rhdp_flow import WorkshopSchedule, auto_provision_missing_clusters
+from rhdp_flow import WorkshopSchedule, auto_provision_missing_clusters, remove_auto_provisioned_clusters
 
 
 def test_auto_provision_adds_cluster_for_missing_ref_tenant(
@@ -210,3 +210,48 @@ def test_auto_provision_idempotent_no_duplicates(
     cluster = schedules[1]
     assert cluster.ci == "openshift-cnv.prod-cluster"
     assert cluster.is_cluster is True
+
+
+def test_remove_auto_provisioned_removes_auto_added_only(make_cluster_schedule):
+    """Remove only removes auto_added=True clusters, keeps manual ones."""
+    manual_cluster = make_cluster_schedule(
+        ci="manual-cluster.prod",
+        ci_name="Manual Cluster",
+        auto_added=False,
+    )
+    auto_cluster = make_cluster_schedule(
+        ci="auto-cluster.prod",
+        ci_name="Auto Cluster",
+        auto_added=True,
+    )
+    schedules = [manual_cluster, auto_cluster]
+
+    result = remove_auto_provisioned_clusters(schedules)
+
+    assert result["removed_count"] == 1
+    assert len(schedules) == 1
+    assert schedules[0].ci == "manual-cluster.prod"
+
+
+def test_remove_auto_provisioned_noop_when_none(make_cluster_schedule):
+    """Remove returns 0 when no auto-added clusters exist."""
+    cluster = make_cluster_schedule(ci="manual-cluster.prod", auto_added=False)
+    schedules = [cluster]
+
+    result = remove_auto_provisioned_clusters(schedules)
+
+    assert result["removed_count"] == 0
+    assert len(schedules) == 1
+
+
+def test_remove_auto_provisioned_idempotent(make_cluster_schedule):
+    """Remove is idempotent — second call removes nothing."""
+    auto_cluster = make_cluster_schedule(ci="auto-cluster.prod", auto_added=True)
+    schedules = [auto_cluster]
+
+    result1 = remove_auto_provisioned_clusters(schedules)
+    result2 = remove_auto_provisioned_clusters(schedules)
+
+    assert result1["removed_count"] == 1
+    assert result2["removed_count"] == 0
+    assert len(schedules) == 0
