@@ -10,7 +10,7 @@ If you're on macOS, use our automated migration script:
 
 ```bash
 # Download and run the migration script
-curl -fsSL https://raw.githubusercontent.com/rhjcd/rhdp-flow/main/migrate-rhdp-flow.sh -o migrate-rhdp-flow.sh
+curl -fsSL https://raw.githubusercontent.com/rhpds/rhdp-flow/main/migrate-rhdp-flow.sh -o migrate-rhdp-flow.sh
 chmod +x migrate-rhdp-flow.sh
 ./migrate-rhdp-flow.sh
 ```
@@ -33,7 +33,7 @@ If you prefer manual setup or are not on macOS, follow these steps:
 cd ~/repos
 
 # Clone the new rhdp-flow repository
-git clone git@github.com:rhjcd/rhdp-flow.git
+git clone git@github.com:rhpds/rhdp-flow.git
 
 # Navigate into the new repo
 cd rhdp-flow
@@ -84,7 +84,7 @@ grep -r "rhpds-utils/RHDP-Scheduler" ~/.bashrc ~/.zshrc ~/repos 2>/dev/null
 If you had forked `rhpds-utils` and want to fork the new repo:
 
 ```bash
-# Visit https://github.com/rhjcd/rhdp-flow and click "Fork"
+# Visit https://github.com/rhpds/rhdp-flow and click "Fork"
 # Then update your local remote:
 cd ~/repos/rhdp-flow
 git remote set-url origin git@github.com:YOUR_USERNAME/rhdp-flow.git
@@ -95,7 +95,7 @@ git remote set-url origin git@github.com:YOUR_USERNAME/rhdp-flow.git
 ```bash
 # Check git remote
 cd ~/repos/rhdp-flow
-git remote -v  # Should show git@github.com:rhjcd/rhdp-flow.git
+git remote -v  # Should show git@github.com:rhpds/rhdp-flow.git
 
 # Check version
 cat VERSION  # Should show current version
@@ -109,7 +109,7 @@ python3 -m pytest tests/ -v  # Should run tests successfully
 | Old Location | New Location |
 |-------------|--------------|
 | `~/repos/rhpds-utils/RHDP-Scheduler` | `~/repos/rhdp-flow` |
-| `git@github.com:rhpds/rhpds-utils.git` | `git@github.com:rhjcd/rhdp-flow.git` |
+| `git@github.com:rhpds/rhpds-utils.git` | `git@github.com:rhpds/rhdp-flow.git` |
 
 ### Changes Summary
 
@@ -167,7 +167,7 @@ If your git remote is still pointing to the old location:
 
 ```bash
 cd ~/repos/rhdp-flow
-git remote set-url origin git@github.com:rhjcd/rhdp-flow.git
+git remote set-url origin git@github.com:rhpds/rhdp-flow.git
 git remote -v  # Verify the change
 ```
 
@@ -202,7 +202,7 @@ python3 -m pytest tests/ -v --tb=short
 
 ## Additional Resources
 
-- **New Repository**: https://github.com/rhjcd/rhdp-flow
+- **New Repository**: https://github.com/rhpds/rhdp-flow
 - **Documentation**: See README.md in the new repository
 - **Issues**: Report issues in the new repository
 
@@ -212,7 +212,7 @@ If you encounter any issues during migration:
 
 1. Check the troubleshooting section above
 2. Review the main README.md in the new repository
-3. Open an issue on the new repository: https://github.com/rhjcd/rhdp-flow/issues
+3. Open an issue on the new repository: https://github.com/rhpds/rhdp-flow/issues
 
 ---
 
