@@ -1,6 +1,7 @@
 """API endpoints — thin wrappers around rhdp_flow functions."""
 
 import asyncio
+import copy
 import csv
 import io
 import json
@@ -2757,14 +2758,18 @@ def check_tenant_cluster_refs(_key=Depends(verify_api_key)):
 
 
 @router.post("/schedules/auto-provision-clusters")
-def auto_provision_clusters(buffer_hours: float = 4.0, _key=Depends(verify_api_key)):
+def auto_provision_clusters(buffer_hours: float = 4.0, dry_run: bool = False, _key=Depends(verify_api_key)):
     """Inject fresh cluster provisioners for tenants that have nowhere to land.
 
     For each tenant with no shared pool and no matching cluster row in the
     batch, appends an auto_added cluster schedule (buffer_hours earlier) so
     the tenant can deploy. Fully reversible via /schedules/remove-auto-provisioned.
 
-    Returns: {added, count, needs_agv_prs, schedules}
+    Args:
+        buffer_hours: Hours to schedule cluster before tenant (default 4.0)
+        dry_run: If True, return what would be added without mutating schedules
+
+    Returns: {added, count, needs_agv_prs, schedules} or {would_add, count: 0} if dry_run
     """
     global _schedules
     if not _schedules:
@@ -2772,8 +2777,31 @@ def auto_provision_clusters(buffer_hours: float = 4.0, _key=Depends(verify_api_k
 
     try:
         from rhdp_flow import auto_provision_missing_clusters
+        from api.audit import audit_log
+
+        if dry_run:
+            # Clone schedules to avoid mutation
+            schedules_copy = copy.deepcopy(_schedules)
+            result = auto_provision_missing_clusters(schedules_copy, buffer_hours=buffer_hours)
+            return {
+                "would_add": result["added"],
+                "count": 0,
+                "needs_agv_prs": result["needs_agv_prs"],
+            }
 
         result = auto_provision_missing_clusters(_schedules, buffer_hours=buffer_hours)
+
+        # Audit log the operation
+        audit_log(
+            action="auto_provision_clusters",
+            user=str(_key) if _key else "unauthenticated",
+            details={
+                "buffer_hours": buffer_hours,
+                "added_count": result["count"],
+                "cluster_cis": [a["cluster_ci"] for a in result["added"]],
+            },
+        )
+
         result["schedules"] = [_schedule_to_response(s) for s in _schedules]
         return result
     except Exception:

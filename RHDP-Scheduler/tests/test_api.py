@@ -1816,3 +1816,87 @@ def test_validate_cluster_tenant_with_basic_csv(client):
     assert data["tenants_checked"] == 0
     assert len(data["errors"]) == 0
     assert len(data["warnings"]) == 0
+
+
+# ---------------------------------------------------------------------------
+# Auto-Provision Cluster Tests
+# ---------------------------------------------------------------------------
+
+@patch("subprocess.run")
+def test_auto_provision_dry_run_mode(mock_run, client, mock_pool_list_empty):
+    """Auto-provision with dry_run=true returns what would be added without mutating schedules."""
+    # Upload a schedule first
+    csv_content = BASIC_WORKSHOP_CSV
+    resp = client.post(
+        "/api/schedules/upload",
+        files={"file": ("test.csv", csv_content.encode(), "text/csv")},
+    )
+    assert resp.status_code == 200
+
+    def dispatcher(*args, **kwargs):
+        cmd = args[0] if args else kwargs.get("args", "")
+        if "catalogitem" in str(cmd):
+            return MagicMock(
+                returncode=0,
+                stdout=json.dumps({"spec": {"sandboxes": []}}),
+                stderr="",
+            )
+        if "tenantclusterpool" in str(cmd):
+            return MagicMock(**mock_pool_list_empty)
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    mock_run.side_effect = dispatcher
+
+    # Dry-run should not mutate schedules
+    resp_dry = client.post("/api/schedules/auto-provision-clusters?dry_run=true")
+    resp_schedules = client.get("/api/schedules")
+
+    assert resp_dry.status_code == 200
+    data = resp_dry.json()
+
+    # Should report what WOULD be added
+    assert "would_add" in data
+    assert data["count"] == 0  # Nothing actually added
+
+    # Schedules should be unchanged
+    schedules = resp_schedules.json()
+    assert len(schedules) == 1  # Only original tenant
+
+
+@patch("subprocess.run")
+def test_auto_provision_audit_log(mock_run, client, caplog, mock_pool_list_empty):
+    """Auto-provision writes audit log with user/action/details."""
+    import logging
+    caplog.set_level(logging.INFO, logger="rhdp_flow.audit")
+
+    csv_content = BASIC_WORKSHOP_CSV
+    client.post(
+        "/api/schedules/upload",
+        files={"file": ("test.csv", csv_content.encode(), "text/csv")},
+    )
+
+    def dispatcher(*args, **kwargs):
+        cmd = args[0] if args else kwargs.get("args", "")
+        if "catalogitem" in str(cmd):
+            return MagicMock(
+                returncode=0,
+                stdout=json.dumps({"spec": {"sandboxes": []}}),
+                stderr="",
+            )
+        if "tenantclusterpool" in str(cmd):
+            return MagicMock(**mock_pool_list_empty)
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    mock_run.side_effect = dispatcher
+    resp = client.post("/api/schedules/auto-provision-clusters?buffer_hours=4.0")
+
+    assert resp.status_code == 200
+
+    # Check audit log was written
+    audit_records = [r for r in caplog.records if r.name == "rhdp_flow.audit"]
+    assert len(audit_records) >= 1
+
+    log_data = json.loads(audit_records[0].message)
+    assert log_data["action"] == "auto_provision_clusters"
+    assert "buffer_hours" in log_data["details"]
+    assert log_data["details"]["buffer_hours"] == 4.0
