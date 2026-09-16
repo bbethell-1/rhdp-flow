@@ -1,4 +1,0 @@
-CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Showroom_Repo,Showroom_Ref,Showroom_NoVNC,Showroom_Zerotouch
-Showroom Demo,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-demo-redhat-com,15,True,ShowroomPass,Admin,Demo,Showroom Demo,20/03/2026 10:00,20/03/2026 18:00,22/03/2026 10:00,https://github.com/rhpds/showroom-virt.git,main,False,False
-Showroom Advanced,openshift-cnv.advanced-workshop.prod,user-advanced-redhat-com,20,True,AdvancedPass,Admin,QA,Advanced Showroom,21/03/2026 09:00,21/03/2026 17:00,23/03/2026 09:00,https://github.com/rhpds/showroom-demo.git,v2.0,True,True
-Regular Workshop,openshift-basic.workshop.prod,user-basic-redhat-com,10,True,BasicPass,Admin,QA,Regular Workshop,22/03/2026 11:00,22/03/2026 19:00,24/03/2026 11:00,,,,

@@ -1,6 +1,0 @@
-CI Name,CI,Namespace,Users,Instances,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Concurrency,Count,AWS_Region
-OpenShift Virt,openshift-cnv.ocp-virt-roadshow-multi-user.prod,user-bbethell-redhat-com,5,,True,summit2026,Admin,QA,OCP Virt Workshop,04/08/2026 13:30,04/08/2026 19:00,04/08/2026 20:00,2,1,
-RHEL Podman,zt-rhelbu.zt-podman-basics.prod,user-bbethell-redhat-com,,5,True,rhel2026,Admin,QA,RHEL Podman Basics,04/08/2026 13:30,04/08/2026 19:00,04/08/2026 20:00,5,1,
-Ansible Network,zt-ansiblebu.ansible-network-automation-basics-lab-2.prod,user-bbethell-redhat-com,,5,True,ansible2026,Admin,QA,Ansible Network,04/08/2026 13:30,04/08/2026 19:00,04/08/2026 20:00,5,1,
-AI Workshop,agd-v2.openshift-ai-v3-aws.prod,user-bbethell-redhat-com,,5,True,ai2026,Admin,QA,OpenShift AI v3,04/08/2026 13:30,04/08/2026 19:00,04/08/2026 20:00,1,1,
-Ansible Roadshow,zt-ansiblebu.zt-ans-bu-roadshow01.prod,user-bbethell-redhat-com,,5,True,ansible-rs2026,Admin,QA,Ansible Roadshow,04/08/2026 13:30,04/08/2026 19:00,04/08/2026 20:00,2,1,
