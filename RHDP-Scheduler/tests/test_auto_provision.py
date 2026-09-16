@@ -95,3 +95,118 @@ def test_auto_provision_schedules_cluster_earlier(
     # Cluster should be 4 hours (240 minutes) earlier
     diff_minutes = (tenant_time - cluster_time).total_seconds() / 60
     assert diff_minutes == 240
+
+
+def test_auto_provision_noop_when_pool_exists(
+    make_tenant_schedule,
+    mock_pool_list_with_ready_pool,
+):
+    """Auto-provision does nothing when tenant has a ready pool."""
+    tenant = make_tenant_schedule(
+        ci="workshop.prod-tenant",
+        detected_cluster_ci="ocp4-cluster.prod",
+    )
+    schedules = [tenant]
+
+    with patch("subprocess.run") as mock_run:
+        def dispatcher(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", "")
+            if "catalogitem" in str(cmd):
+                # Tenant has tenantCluster ref matching the pool
+                catalog_item = {
+                    "spec": {
+                        "sandboxes": [{
+                            "kind": "OcpSandbox",
+                            "tenantCluster": {"componentName": "ocp4-cluster"}
+                        }]
+                    }
+                }
+                return MagicMock(
+                    returncode=0,
+                    stdout=json.dumps(catalog_item),
+                    stderr="",
+                )
+            if "tenantclusterpool" in str(cmd):
+                return MagicMock(**mock_pool_list_with_ready_pool)
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = dispatcher
+        result = auto_provision_missing_clusters(schedules, buffer_hours=4.0)
+
+    assert result["count"] == 0
+    assert len(result["added"]) == 0
+    assert len(schedules) == 1  # No cluster added
+
+
+def test_auto_provision_noop_when_cluster_row_exists(
+    make_tenant_schedule,
+    make_cluster_schedule,
+    mock_pool_list_empty,
+):
+    """Auto-provision does nothing when matching cluster row already in batch."""
+    cluster = make_cluster_schedule(ci="ocp4-cluster.prod")
+    tenant = make_tenant_schedule(
+        ci="workshop.prod-tenant",
+        detected_cluster_ci="ocp4-cluster.prod",
+    )
+    schedules = [cluster, tenant]
+
+    with patch("subprocess.run") as mock_run:
+        def dispatcher(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", "")
+            if "catalogitem" in str(cmd):
+                return MagicMock(
+                    returncode=0,
+                    stdout=json.dumps({"spec": {"sandboxes": []}}),
+                    stderr="",
+                )
+            if "tenantclusterpool" in str(cmd):
+                return MagicMock(**mock_pool_list_empty)
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = dispatcher
+        result = auto_provision_missing_clusters(schedules, buffer_hours=4.0)
+
+    assert result["count"] == 0
+    assert len(schedules) == 2  # No new cluster added
+
+
+def test_auto_provision_idempotent_no_duplicates(
+    make_tenant_schedule,
+    mock_pool_list_empty,
+):
+    """Auto-provision never adds duplicate cluster CIs when called multiple times."""
+    # Use cluster_ci_override to keep cluster CI constant across calls
+    tenant = make_tenant_schedule(
+        ci="openshift-cnv.prod-tenant",
+        detected_cluster_ci=None,
+        cluster_ci_override="openshift-cnv.prod-cluster",
+    )
+    schedules = [tenant]
+
+    with patch("subprocess.run") as mock_run:
+        def dispatcher(*args, **kwargs):
+            cmd = args[0] if args else kwargs.get("args", "")
+            if "catalogitem" in str(cmd):
+                return MagicMock(
+                    returncode=0,
+                    stdout=json.dumps({"spec": {"sandboxes": []}}),
+                    stderr="",
+                )
+            if "tenantclusterpool" in str(cmd):
+                return MagicMock(**mock_pool_list_empty)
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = dispatcher
+
+        # Call twice
+        result1 = auto_provision_missing_clusters(schedules, buffer_hours=4.0)
+        result2 = auto_provision_missing_clusters(schedules, buffer_hours=4.0)
+
+    assert result1["count"] == 1
+    assert result2["count"] == 0  # Second call adds nothing
+    assert len(schedules) == 2  # Only one cluster added total
+    # Verify the added cluster has the correct CI
+    cluster = schedules[1]
+    assert cluster.ci == "openshift-cnv.prod-cluster"
+    assert cluster.is_cluster is True
