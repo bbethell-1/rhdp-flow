@@ -1,0 +1,139 @@
+name: RHDP-Flow Release
+
+on:
+  workflow_run:
+    workflows: ["RHDP-Flow CI"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      !contains(github.event.workflow_run.head_commit.message, '[skip ci]')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Detect bump type
+        id: bump
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_MSG: ${{ github.event.workflow_run.head_commit.message }}
+        run: |
+          BUMP="patch"
+          LABEL_MATCH=""
+
+          # Try PR labels first (highest priority)
+          PR_NUMBER=$(gh pr list --state merged --search "${{ github.event.workflow_run.head_sha }}" --json number --jq '.[0].number' 2>/dev/null || echo "")
+          if [ -n "$PR_NUMBER" ]; then
+            LABELS=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name' 2>/dev/null || echo "")
+            if echo "$LABELS" | grep -qi 'semver:major'; then
+              BUMP="major"; LABEL_MATCH="true"
+            elif echo "$LABELS" | grep -qi 'semver:minor'; then
+              BUMP="minor"; LABEL_MATCH="true"
+            elif echo "$LABELS" | grep -qi 'semver:patch'; then
+              BUMP="patch"; LABEL_MATCH="true"
+            fi
+          fi
+
+          # Fall back to commit message keywords (only if no PR label matched)
+          if [ -z "$LABEL_MATCH" ]; then
+            if echo "$COMMIT_MSG" | grep -qi '\[major\]'; then
+              BUMP="major"
+            elif echo "$COMMIT_MSG" | grep -qi '\[minor\]'; then
+              BUMP="minor"
+            elif echo "$COMMIT_MSG" | grep -qi '\[patch\]'; then
+              BUMP="patch"
+            fi
+          fi
+
+          echo "type=$BUMP" >> "$GITHUB_OUTPUT"
+          echo "Bump type: $BUMP"
+
+      - name: Bump version and capture output
+        id: version
+        run: |
+          CURRENT=$(tr -d '[:space:]' < VERSION)
+          chmod +x scripts/bump-version.sh
+          NEW=$(scripts/bump-version.sh "${{ steps.bump.outputs.type }}")
+          TAG="rhdp-flow/v${NEW}"
+
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Version: $CURRENT -> $NEW (tag: $TAG)"
+
+      - name: Check if tag already exists
+        id: guard
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists — skipping release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit version bump
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add VERSION frontend/package.json api/server.py
+          git commit -m "RHDP-Flow: Release v${{ steps.version.outputs.new }} [skip ci]"
+          git push
+
+      - name: Create annotated tag
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          git tag -a "$TAG" -m "RHDP-Flow v${{ steps.version.outputs.new }}"
+          git push origin "$TAG"
+
+      - name: Generate changelog
+        if: steps.guard.outputs.skip != 'true'
+        id: changelog
+        run: |
+          PREV_TAG=$(git tag -l 'rhdp-flow/v*' --sort=-v:refname | sed -n '2p' || echo "")
+          NEW_TAG="${{ steps.version.outputs.tag }}"
+
+          NOTES_FILE=$(mktemp)
+          {
+            echo "## RHDP-Flow v${{ steps.version.outputs.new }}"
+            echo ""
+            if [ -n "$PREV_TAG" ]; then
+              echo "### Changes since ${PREV_TAG}"
+              echo ""
+              git log "${PREV_TAG}..HEAD~1" --oneline --no-merges \
+                | grep -v '\[skip ci\]' \
+                | sed 's/^/- /'
+            else
+              echo "### Initial versioned release"
+              echo ""
+              echo "Baseline release with semantic versioning automation."
+            fi
+            echo ""
+            echo "---"
+            echo "*Full diff: [\`${PREV_TAG:-initial}...${NEW_TAG}\`](https://github.com/${{ github.repository }}/compare/${PREV_TAG:-main}...${NEW_TAG})*"
+          } > "$NOTES_FILE"
+
+          echo "file=$NOTES_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --title "RHDP-Flow v${{ steps.version.outputs.new }}" \
+            --notes-file "${{ steps.changelog.outputs.file }}"

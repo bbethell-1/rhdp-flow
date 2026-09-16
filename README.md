@@ -6,8 +6,8 @@ Automates scheduling, deployment, and lifecycle management for RHDP workshops â€
 
 ```bash
 # 1. Clone
-git clone git@github.com:rhpds/rhpds-utils.git
-cd rhpds-utils/RHDP-Scheduler
+git clone git@github.com:rhjcd/rhdp-flow.git
+cd rhdp-flow
 
 # 2. Log in to the RHDP cluster
 oc login <cluster-url> --token=<your-token>
@@ -72,8 +72,8 @@ brew install node
 brew install openshift-cli
 
 # Clone and set up
-git clone git@github.com:rhpds/rhpds-utils.git
-cd rhpds-utils/RHDP-Scheduler
+git clone git@github.com:rhjcd/rhdp-flow.git
+cd rhdp-flow
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -97,8 +97,8 @@ sudo dnf install nodejs npm
 # or extract from your cluster's "Command Line Tools" page
 
 # Clone and set up
-git clone git@github.com:rhpds/rhpds-utils.git
-cd rhpds-utils/RHDP-Scheduler
+git clone git@github.com:rhjcd/rhdp-flow.git
+cd rhdp-flow
 
 python3 -m venv .venv
 source .venv/bin/activate
