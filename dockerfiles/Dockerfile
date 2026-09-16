@@ -63,10 +63,10 @@ ENV PATH="/opt/venv/bin:$PATH" \
 
 # Copy version file and application source
 COPY VERSION ./
-COPY rhdp_flow.py rhdp_flow_wizard.py agnosticv_resolver.py tenant_cluster_capacity.py ./
+COPY rhdp_flow.py ./
+COPY lib/ ./lib/
 COPY api/ ./api/
-COPY docs/ ./docs/
-COPY sample-csvs/ ./sample-csvs/
+COPY docs/examples/ ./docs/examples/
 
 # Copy built frontend from stage 1
 COPY --from=frontend-builder /build/dist ./frontend/dist
