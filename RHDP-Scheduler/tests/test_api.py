@@ -1900,3 +1900,65 @@ def test_auto_provision_audit_log(mock_run, client, caplog, mock_pool_list_empty
     assert log_data["action"] == "auto_provision_clusters"
     assert "buffer_hours" in log_data["details"]
     assert log_data["details"]["buffer_hours"] == 4.0
+
+
+@patch("subprocess.run")
+def test_remove_auto_provisioned_dry_run_mode(mock_run, client, make_cluster_schedule):
+    """Remove auto-provisioned with dry_run=true returns what would be removed."""
+    # Upload schedule first
+    csv_content = BASIC_WORKSHOP_CSV
+    client.post(
+        "/api/schedules/upload",
+        files={"file": ("test.csv", csv_content.encode(), "text/csv")},
+    )
+
+    # Manually inject an auto-added cluster (simulating previous auto-provision)
+    auto_cluster = make_cluster_schedule(ci="auto-cluster.prod", auto_added=True)
+    routes._schedules.append(auto_cluster)
+
+    # Dry-run should not mutate schedules
+    resp_dry = client.post("/api/schedules/remove-auto-provisioned?dry_run=true")
+    resp_schedules = client.get("/api/schedules")
+
+    assert resp_dry.status_code == 200
+    data = resp_dry.json()
+
+    # Should report what WOULD be removed
+    assert "would_remove_count" in data
+    assert data["would_remove_count"] == 1
+    assert data["removed_count"] == 0  # Nothing actually removed
+
+    # Schedules should be unchanged
+    schedules = resp_schedules.json()
+    assert len(schedules) == 2  # Original + auto-added cluster still there
+
+
+@patch("subprocess.run")
+def test_remove_auto_provisioned_audit_log(mock_run, client, make_cluster_schedule, caplog):
+    """Remove auto-provisioned writes audit log."""
+    import logging
+    caplog.set_level(logging.INFO, logger="rhdp_flow.audit")
+
+    csv_content = BASIC_WORKSHOP_CSV
+    client.post(
+        "/api/schedules/upload",
+        files={"file": ("test.csv", csv_content.encode(), "text/csv")},
+    )
+
+    # Inject auto-added cluster
+    auto_cluster = make_cluster_schedule(ci="auto-cluster.prod", auto_added=True)
+    routes._schedules.append(auto_cluster)
+
+    resp = client.post("/api/schedules/remove-auto-provisioned")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["removed_count"] == 1
+
+    # Check audit log
+    audit_records = [r for r in caplog.records if r.name == "rhdp_flow.audit"]
+    assert len(audit_records) >= 1
+
+    log_data = json.loads(audit_records[0].message)
+    assert log_data["action"] == "remove_auto_provisioned_clusters"
+    assert log_data["details"]["removed_count"] == 1

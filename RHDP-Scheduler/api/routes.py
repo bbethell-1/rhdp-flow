@@ -2811,10 +2811,13 @@ def auto_provision_clusters(buffer_hours: float = 4.0, dry_run: bool = False, _k
 
 
 @router.post("/schedules/remove-auto-provisioned")
-def remove_auto_provisioned(_key=Depends(verify_api_key)):
+def remove_auto_provisioned(dry_run: bool = False, _key=Depends(verify_api_key)):
     """Remove all Flow-injected (auto_added) cluster rows.
 
-    Returns: {removed_count, schedules}
+    Args:
+        dry_run: If True, return what would be removed without mutating schedules
+
+    Returns: {removed_count, schedules} or {would_remove_count, removed_count: 0} if dry_run
     """
     global _schedules
     if not _schedules:
@@ -2822,8 +2825,22 @@ def remove_auto_provisioned(_key=Depends(verify_api_key)):
 
     try:
         from rhdp_flow import remove_auto_provisioned_clusters
+        from api.audit import audit_log
+
+        if dry_run:
+            # Count auto-added without mutation
+            count = sum(1 for s in _schedules if getattr(s, "auto_added", False))
+            return {"would_remove_count": count, "removed_count": 0}
 
         result = remove_auto_provisioned_clusters(_schedules)
+
+        # Audit log the operation
+        audit_log(
+            action="remove_auto_provisioned_clusters",
+            user=str(_key) if _key else "unauthenticated",
+            details={"removed_count": result["removed_count"]},
+        )
+
         result["schedules"] = [_schedule_to_response(s) for s in _schedules]
         return result
     except Exception:
