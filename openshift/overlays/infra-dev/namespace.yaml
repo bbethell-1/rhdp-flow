@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: rhdp-flow-dev
+  name: rhdp-flow
   labels:
     app.kubernetes.io/name: rhdp-flow
     app.kubernetes.io/part-of: rhdp-flow

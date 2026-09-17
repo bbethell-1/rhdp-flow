@@ -4,8 +4,10 @@ metadata:
   name: rhdp-scheduler
 spec:
   source:
-    type: Binary
-    binary: {}
+    type: Git
+    git:
+      uri: https://github.com/rhpds/rhdp-flow.git
+      ref: main
   strategy:
     type: Docker
     dockerStrategy:
@@ -16,6 +18,10 @@ spec:
       name: rhdp-scheduler:latest
   triggers:
     - type: ConfigChange
+    - type: GitHub
+      github:
+        secretReference:
+          name: rhdp-flow-build-webhook
   resources:
     limits:
       memory: 2Gi

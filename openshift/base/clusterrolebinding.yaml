@@ -19,3 +19,6 @@ subjects:
   - kind: ServiceAccount
     name: rhdp-scheduler
     namespace: rhdp-scheduler-dev
+  - kind: ServiceAccount
+    name: rhdp-scheduler
+    namespace: rhdp-flow

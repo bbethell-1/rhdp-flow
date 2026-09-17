@@ -1,7 +1,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: rhdp-flow-dev
+namespace: rhdp-flow
 
 resources:
   - ../../base
@@ -25,7 +25,7 @@ patches:
     patch: |-
       - op: replace
         path: /spec/host
-        value: rhdp-flow-dev.apps.ocpv-infra01.dal12.infra.demo.redhat.com
+        value: rhdp-flow.apps.ocpv-infra01.dal12.infra.demo.redhat.com
 
   - target:
       kind: ClusterRoleBinding
@@ -33,4 +33,19 @@ patches:
     patch: |-
       - op: replace
         path: /subjects/0/namespace
-        value: rhdp-flow-dev
+        value: rhdp-flow
+
+  - target:
+      kind: Secret
+      name: rhdp-flow-api
+    patch: |-
+      - op: add
+        path: /stringData/OPENSHIFT_SERVER
+        value: "https://api.ocpv-infra01.dal12.infra.demo.redhat.com:6443"
+      # OPENSHIFT_TOKEN is intentionally NOT stored here. It is a live
+      # ServiceAccount credential and must never be committed to git.
+      # Set it directly on the in-cluster secret instead, e.g.:
+      #   oc create secret generic rhdp-flow-api -n rhdp-flow \
+      #     --from-literal=OPENSHIFT_TOKEN=<token> --dry-run=client -o yaml \
+      #     | oc apply -f -
+      # (Feature 2 / External Secrets Operator will manage this going forward.)
