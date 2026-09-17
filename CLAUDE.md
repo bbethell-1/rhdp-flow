@@ -21,7 +21,7 @@ RHDP-Flow Workshop Automation tool. Automates OpenShift workshop deployment from
 
 ## CRITICAL RULES
 
-- **NEVER mention Claude, AI, Co-Authored-By, or any AI attribution in git commits or pushes.**
+- **NEVER mention Claude, AI, Co-Authored-By, or any AI attribution in git commits or pushes.** All commits must be clean without AI attribution lines.
 - Always run `git status` and `git diff` after any code change.
 - Never push without user confirmation.
 
