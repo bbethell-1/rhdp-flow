@@ -1,0 +1,22 @@
+# Allows GitHub webhook POSTs (which arrive unauthenticated) to trigger builds
+# in this namespace. Required because this cluster is hardened: the default
+# cluster-wide system:webhooks binding only grants system:authenticated, so
+# anonymous webhook calls are rejected with 403.
+#
+# This is scoped to the rhdp-flow namespace only. The BuildConfig's GitHub
+# trigger still requires the correct WebHookSecretKey in the URL path, so this
+# does not allow arbitrary anonymous builds — only correctly-signed webhook
+# deliveries to the rhdp-scheduler BuildConfig.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rhdp-flow-webhook
+  namespace: rhdp-flow
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:webhook
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: system:unauthenticated

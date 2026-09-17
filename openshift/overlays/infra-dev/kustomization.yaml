@@ -6,6 +6,7 @@ namespace: rhdp-flow
 resources:
   - ../../base
   - namespace.yaml
+  - webhook-rolebinding.yaml
 
 configMapGenerator:
   - name: rhdp-scheduler-config  # Match base name for merge to work
