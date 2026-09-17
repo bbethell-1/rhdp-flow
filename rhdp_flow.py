@@ -548,7 +548,7 @@ def filter_pool_provided_clusters(schedules: list[WorkshopSchedule]) -> list[Wor
         Filtered list with pool-provided cluster rows removed
     """
     try:
-        from tenant_cluster_pool_linkage import find_matching_pool, is_tenant_catalog_item
+        from lib.tenant_cluster_pool_linkage import find_matching_pool, is_tenant_catalog_item
     except ImportError:
         logger.debug("tenant_cluster_pool_linkage not available - skipping pool filter")
         return schedules
@@ -1555,7 +1555,7 @@ def build_resource_claim_payload(
 
     # Add TenantClusterPool linkage for tenant catalog items
     try:
-        from tenant_cluster_pool_linkage import add_pool_linkage_to_payload
+        from lib.tenant_cluster_pool_linkage import add_pool_linkage_to_payload
         payload = add_pool_linkage_to_payload(payload, schedule.ci, schedule.namespace, schedule.pool_name)
     except Exception as e:
         logger.debug(f"Pool linkage failed (non-blocking): {e}")
@@ -5127,7 +5127,7 @@ def process_schedule(
     cluster_name = ""
     cluster_capacity_str = ""
     try:
-        from tenant_cluster_capacity import check_cluster_capacity, is_tenant_catalog_item
+        from lib.tenant_cluster_capacity import check_cluster_capacity, is_tenant_catalog_item
         if is_tenant_catalog_item(schedule.ci):
             capacity = check_cluster_capacity(schedule.ci, schedule.namespace)
             if capacity:
@@ -6791,7 +6791,7 @@ def main():
 
         # Check tenant cluster capacity warnings
         if not args.ignore_capacity_warnings:
-            from tenant_cluster_capacity import check_schedules_capacity
+            from lib.tenant_cluster_capacity import check_schedules_capacity
             capacity_check = check_schedules_capacity(schedules, ignore_warnings=args.ignore_capacity_warnings)
 
             if capacity_check['errors']:

@@ -1,0 +1,25 @@
+# OAuth email allowlist for the infra01 rhdp-flow instance.
+#
+# The oauth-proxy sidecar (added by oauth-patches.yaml) gates the entire web UI
+# behind cluster login and only admits the operators listed below. This is the
+# "obfuscation" for Feature 2 — nobody but these users can reach the app.
+#
+# Safe to commit (no secrets). The companion cookie Secret (rhdp-scheduler-oauth)
+# is NOT committed — it is a random session-signing key created directly
+# in-cluster:
+#
+#   oc create secret generic rhdp-scheduler-oauth -n rhdp-flow \
+#     --from-literal=cookie-secret="$(openssl rand -base64 32)"
+#
+# The serving cert Secret (rhdp-scheduler-tls) is minted automatically by the
+# service-ca operator from the annotation on the Service.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rhdp-scheduler-oauth-emails
+data:
+  # One email per line. Only these users can reach the app at all. Keep this in
+  # sync with DEPLOY_PICKER_ALLOWED_EMAILS (the in-app deploy-target allowlist).
+  authenticated-emails.txt: |
+    jdisrael@redhat.com
+    bbethell@redhat.com

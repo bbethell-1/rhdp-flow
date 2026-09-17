@@ -7,6 +7,7 @@ resources:
   - ../../base
   - namespace.yaml
   - webhook-rolebinding.yaml
+  - oauth-proxy.yaml
 
 configMapGenerator:
   - name: rhdp-scheduler-config  # Match base name for merge to work
@@ -20,6 +21,13 @@ commonLabels:
   environment: dev
 
 patches:
+  # OAuth-proxy sidecar + supporting Service/Route/SA/NetworkPolicy changes.
+  - path: patch-oauth-sa.yaml
+  - path: patch-oauth-service.yaml
+  - path: patch-oauth-route.yaml
+  - path: patch-oauth-networkpolicy.yaml
+  - path: patch-oauth-deployment.yaml
+
   - target:
       kind: Route
       name: rhdp-scheduler
@@ -28,13 +36,9 @@ patches:
         path: /spec/host
         value: rhdp-flow.apps.ocpv-infra01.dal12.infra.demo.redhat.com
 
-  - target:
-      kind: ClusterRoleBinding
-      name: rhdp-scheduler
-    patch: |-
-      - op: replace
-        path: /subjects/0/namespace
-        value: rhdp-flow
+  # NOTE: the ClusterRoleBinding already lists the rhdp-flow ServiceAccount as an
+  # explicit subject in base/clusterrolebinding.yaml, so no subject patch is
+  # needed here.
 
   - target:
       kind: Secret

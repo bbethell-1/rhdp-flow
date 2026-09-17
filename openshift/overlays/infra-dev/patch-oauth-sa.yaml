@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rhdp-scheduler
+  annotations:
+    # Lets this ServiceAccount act as an OAuth client so the oauth-proxy sidecar
+    # can authenticate users and redirect back to the app's Route after login.
+    serviceaccounts.openshift.io/oauth-redirectreference.primary: >-
+      {"kind":"OAuthRedirectReference","apiVersion":"v1","reference":{"kind":"Route","name":"rhdp-scheduler"}}

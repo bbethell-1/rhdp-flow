@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rhdp-scheduler
+spec:
+  template:
+    spec:
+      containers:
+        # OAuth proxy sidecar — authenticates every request against the cluster
+        # OAuth server and only forwards it to the app when the user is on the
+        # allowlist (authenticated-emails.txt). The app trusts the resulting
+        # X-Forwarded-Email / X-Forwarded-User headers because this proxy is the
+        # only ingress path (the Route targets :8443, not the app's :8000).
+        - name: oauth-proxy
+          image: image-registry.openshift-image-registry.svc:5000/openshift/oauth-proxy:v4.4
+          ports:
+            - containerPort: 8443
+              protocol: TCP
+              name: https
+          args:
+            - --provider=openshift
+            - --https-address=:8443
+            - --http-address=
+            - --upstream=http://localhost:8000
+            - --openshift-service-account=rhdp-scheduler
+            - --tls-cert=/etc/tls/private/tls.crt
+            - --tls-key=/etc/tls/private/tls.key
+            - --cookie-secret-file=/etc/oauth/cookie-secret
+            - --email-domain=*
+            - --authenticated-emails-file=/etc/oauth/authenticated-emails.txt
+            - --pass-user-headers=true
+            - --pass-access-token=false
+            - --skip-provider-button=true
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 20m
+            limits:
+              memory: 128Mi
+              cpu: 100m
+          livenessProbe:
+            httpGet:
+              path: /oauth/healthz
+              port: 8443
+              scheme: HTTPS
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /oauth/healthz
+              port: 8443
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: oauth-tls
+              mountPath: /etc/tls/private
+              readOnly: true
+            - name: oauth-config
+              mountPath: /etc/oauth
+              readOnly: true
+      volumes:
+        - name: oauth-tls
+          secret:
+            secretName: rhdp-scheduler-tls
+            defaultMode: 0400
+        - name: oauth-config
+          projected:
+            defaultMode: 0400
+            sources:
+              - secret:
+                  name: rhdp-scheduler-oauth
+                  items:
+                    - key: cookie-secret
+                      path: cookie-secret
+              - configMap:
+                  name: rhdp-scheduler-oauth-emails
+                  items:
+                    - key: authenticated-emails.txt
+                      path: authenticated-emails.txt

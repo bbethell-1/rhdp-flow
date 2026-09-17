@@ -1,0 +1,13 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: rhdp-scheduler
+spec:
+  port:
+    # Terminate at the oauth-proxy sidecar (HTTPS on :8443), not the app.
+    targetPort: https
+  tls:
+    # Re-encrypt: router terminates external TLS, re-encrypts to the sidecar,
+    # which serves with the service-ca-issued cert.
+    termination: reencrypt
+    insecureEdgeTerminationPolicy: Redirect

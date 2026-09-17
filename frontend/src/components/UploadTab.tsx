@@ -161,6 +161,27 @@ export const UploadTab: React.FC<Props> = ({
   const [useCatalogLookup, setUseCatalogLookup] = useState(false);
   const [ignoreCapacityWarnings, setIgnoreCapacityWarnings] = useState(false);
 
+  // Multi-cluster deploy target picker (Feature 2 — identity-gated to approved operators)
+  const [pickerAllowed, setPickerAllowed] = useState(false);
+  const [deployClusters, setDeployClusters] = useState<import('../types').ClusterTarget[]>([]);
+  const [targetCluster, setTargetCluster] = useState<string>('');
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getClusters()
+      .then((resp) => {
+        if (cancelled) return;
+        setPickerAllowed(resp.allowed);
+        setDeployClusters(resp.clusters ?? []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPickerAllowed(false);
+        setDeployClusters([]);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
   // Namespace validation
   const [missingNamespaces, setMissingNamespaces] = useState<string[]>([]);
 
@@ -765,7 +786,7 @@ export const UploadTab: React.FC<Props> = ({
   const handleDryRun = async () => {
     if (schedules.length === 0) { showToast('Upload a CSV first', 'danger'); return; }
     try {
-      const data = await api.dryRun({ dry_run: true, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect, showroom_novnc: showroomNovnc, showroom_zerotouch: showroomZerotouch });
+      const data = await api.dryRun({ dry_run: true, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect, showroom_novnc: showroomNovnc, showroom_zerotouch: showroomZerotouch, target_cluster: targetCluster || null });
       setResults(data);
       showToast(`Dry-run: ${data.length} result(s)`, 'success');
     } catch (e) {
@@ -793,7 +814,7 @@ export const UploadTab: React.FC<Props> = ({
     setLogLines([]);
 
     try {
-      const job = await api.deploy({ dry_run: dryRun, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect, showroom_novnc: showroomNovnc, showroom_zerotouch: showroomZerotouch, ignore_capacity_warnings: ignoreCapacityWarnings });
+      const job = await api.deploy({ dry_run: dryRun, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect, showroom_novnc: showroomNovnc, showroom_zerotouch: showroomZerotouch, ignore_capacity_warnings: ignoreCapacityWarnings, target_cluster: targetCluster || null });
       jobIdRef.current = job.job_id;
       const ws = api.deployWebSocket(job.job_id);
       wsRef.current = ws;
@@ -2272,6 +2293,27 @@ export const UploadTab: React.FC<Props> = ({
                     />
                   </Tooltip>
                 </SplitItem>
+                {pickerAllowed && deployClusters.length > 0 && (
+                  <SplitItem>
+                    <Tooltip content="Choose which physical cluster to deploy to. Restricted to approved operators. Defaults to this app's own cluster.">
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontSize: '0.875rem', whiteSpace: 'nowrap' }}>Deploy to</span>
+                        <FormSelect
+                          id="target-cluster-select"
+                          aria-label="Deploy target cluster"
+                          value={targetCluster}
+                          onChange={(_e, value) => setTargetCluster(value)}
+                          style={{ width: 'auto', minWidth: 180 }}
+                        >
+                          <FormSelectOption value="" label="This cluster (default)" />
+                          {deployClusters.map((c) => (
+                            <FormSelectOption key={c.key} value={c.key} label={c.display_name} />
+                          ))}
+                        </FormSelect>
+                      </span>
+                    </Tooltip>
+                  </SplitItem>
+                )}
               </Split>
               {schedules.some(s => s.showroom_repo) && (
                 <Split hasGutter style={{ marginTop: 8 }}>

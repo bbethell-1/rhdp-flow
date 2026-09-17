@@ -1,0 +1,25 @@
+# Lets the app ServiceAccount read the per-target-cluster Secrets it uses to
+# build ephemeral kubeconfigs for multi-cluster deploys (Feature 2). Namespaced
+# to the app's own namespace only. The cluster ClusterRole (clusterrole.yaml)
+# intentionally does NOT grant secret access cluster-wide; this Role scopes it
+# to just this namespace, where the cluster-<key> target secrets live.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rhdp-scheduler-cluster-targets
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rhdp-scheduler-cluster-targets
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: rhdp-scheduler-cluster-targets
+subjects:
+  - kind: ServiceAccount
+    name: rhdp-scheduler

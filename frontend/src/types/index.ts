@@ -141,6 +141,18 @@ export interface DeployRequest {
   showroom_novnc?: boolean;
   showroom_zerotouch?: boolean;
   ignore_capacity_warnings?: boolean;
+  target_cluster?: string | null;
+}
+
+export interface ClusterTarget {
+  key: string;
+  display_name: string;
+}
+
+export interface ClusterListResponse {
+  allowed: boolean;
+  user: string | null;
+  clusters: ClusterTarget[];
 }
 
 export interface OperationResponse {

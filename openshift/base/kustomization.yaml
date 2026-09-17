@@ -13,6 +13,7 @@ resources:
   - serviceaccount.yaml
   - clusterrole.yaml
   - clusterrolebinding.yaml
+  - cluster-targets-rbac.yaml
   - configmap.yaml
   - secret.yaml
   - deployment.yaml

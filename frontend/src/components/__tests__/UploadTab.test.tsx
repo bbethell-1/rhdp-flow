@@ -1,8 +1,17 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import { afterEach, vi } from 'vitest';
 import { UploadTab } from '../UploadTab';
+import { api } from '../../services/api';
 import { mockSchedule } from '../../test/mocks/api';
 
 const noop = () => {};
+
+// Keep the deploy-target picker out of the way by default: most tests run as an
+// unauthenticated (non-allowlisted) user, so the picker is hidden. Individual
+// tests override api.getClusters as needed.
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('UploadTab', () => {
   it('renders empty state when no schedules loaded', () => {
@@ -89,6 +98,54 @@ describe('UploadTab', () => {
     expect(screen.getByText('Dry-run')).toBeInTheDocument();
     expect(screen.getByText('Download YAML')).toBeInTheDocument();
     expect(screen.getByText('Deploy (dry-run)')).toBeInTheDocument();
+  });
+
+  it('shows the deploy-target cluster picker for allowlisted operators', async () => {
+    vi.spyOn(api, 'getClusters').mockResolvedValue({
+      allowed: true,
+      user: 'jdisrael@redhat.com',
+      clusters: [
+        { key: 'events', display_name: 'Events (us-west-2)' },
+        { key: 'prod', display_name: 'Prod (us-east-1)' },
+      ],
+    });
+    render(
+      <UploadTab
+        dryRun={true}
+        schedules={[mockSchedule]}
+        setSchedules={noop}
+        results={[]}
+        setResults={noop}
+        showToast={noop}
+        onClear={noop}
+      />
+    );
+    const picker = await screen.findByRole('combobox', { name: 'Deploy target cluster' });
+    expect(picker).toBeInTheDocument();
+    expect(screen.getByText('Events (us-west-2)')).toBeInTheDocument();
+    expect(screen.getByText('Prod (us-east-1)')).toBeInTheDocument();
+  });
+
+  it('hides the deploy-target cluster picker for non-allowlisted users', async () => {
+    vi.spyOn(api, 'getClusters').mockResolvedValue({
+      allowed: false,
+      user: null,
+      clusters: [],
+    });
+    render(
+      <UploadTab
+        dryRun={true}
+        schedules={[mockSchedule]}
+        setSchedules={noop}
+        results={[]}
+        setResults={noop}
+        showToast={noop}
+        onClear={noop}
+      />
+    );
+    // Deploy Settings render synchronously; give the effect a chance to resolve.
+    await waitFor(() => expect(api.getClusters).toHaveBeenCalled());
+    expect(screen.queryByRole('combobox', { name: 'Deploy target cluster' })).not.toBeInTheDocument();
   });
 
   it('shows "Deploy" button text when not in dry-run mode', () => {

@@ -108,6 +108,10 @@ class DeployRequest(BaseModel):
     ci_filter: str | None = Field(
         None, description="Optional Catalog Item ID to filter (process only this CI)"
     )
+    target_cluster: str | None = Field(
+        None,
+        description="Optional deploy-target cluster key (e.g. 'events'). Defaults to the in-cluster ServiceAccount.",
+    )
     dry_run: bool = Field(False, description="Override global dry-run toggle")
     resource_lock: bool = Field(True, description="Apply lock-enabled label")
     enable_resource_pools: bool = Field(False, description="Enable Poolboy resource pools")

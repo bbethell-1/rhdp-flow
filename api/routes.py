@@ -26,6 +26,8 @@ from api.auth import verify_api_key
 # Ensure parent directory is on sys.path so we can import rhdp_flow
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from api import cluster_targets
+from api import identity
 from api import jobs
 from api.limiter import limiter as _route_limiter
 from api.log_capture import get_log_dir, start_log_capture, stop_log_capture
@@ -425,10 +427,18 @@ def _get_config(
     enable_resource_pools: bool = False,
     white_glove: bool = True,
     redirect: bool = True,
+    target_cluster: str | None = None,
 ) -> RHDPConfig:
     config = RHDPConfig()
     config.dry_run = dry_run
-    config.kubeconfig_path = os.environ.get("KUBECONFIG")
+    # When a deploy-target cluster is chosen, build an ephemeral kubeconfig for
+    # it; otherwise fall back to KUBECONFIG / the in-cluster ServiceAccount.
+    # Callers that pass target_cluster must clean up config.kubeconfig_path via
+    # cluster_targets.cleanup_kubeconfig when finished.
+    if target_cluster:
+        config.kubeconfig_path = cluster_targets.resolve_kubeconfig(target_cluster)
+    else:
+        config.kubeconfig_path = os.environ.get("KUBECONFIG")
     config.resource_lock = resource_lock
     config.enable_resource_pools = enable_resource_pools
     config.white_glove = white_glove
@@ -1280,8 +1290,8 @@ def validate_pool_capacity(_key=Depends(verify_api_key)):
     pools_queried = 0
 
     try:
-        from tenant_cluster_capacity import check_schedules_capacity
-        from tenant_cluster_pool_linkage import get_catalog_item_base, is_tenant_catalog_item
+        from lib.tenant_cluster_capacity import check_schedules_capacity
+        from lib.tenant_cluster_pool_linkage import get_catalog_item_base, is_tenant_catalog_item
 
         # Check capacity for all schedules
         capacity_result = check_schedules_capacity(_schedules, ignore_warnings=False)
@@ -1498,20 +1508,32 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
 
     schedules = _filter_schedules(body.ci_filter)
 
+    # Choosing a non-default target cluster is restricted to approved operators.
+    if body.target_cluster:
+        identity.require_picker_access(request)
+    # Validate the deploy-target cluster early so a bad target fails fast.
+    try:
+        cluster_targets.resolve_and_cleanup_check(body.target_cluster)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
     # Pre-deploy num_users limit check (live deploys only)
     if not body.dry_run:
-        config_check = _get_config()
-        ci_cache: dict[str, dict | None] = {}
-        limit_errors: list[str] = []
-        for s in schedules:
-            if s.users is not None and s.users > 0:
-                if s.ci not in ci_cache:
-                    ci_cache[s.ci] = get_catalog_item_num_users_limit(s.ci, config_check)
-                info = ci_cache[s.ci]
-                if info and info.get("maximum") is not None and s.users > info["maximum"]:
-                    limit_errors.append(
-                        f"{s.ci_name} ({s.ci}): {s.users} requested, max {info['maximum']}"
-                    )
+        config_check = _get_config(target_cluster=body.target_cluster)
+        try:
+            ci_cache: dict[str, dict | None] = {}
+            limit_errors: list[str] = []
+            for s in schedules:
+                if s.users is not None and s.users > 0:
+                    if s.ci not in ci_cache:
+                        ci_cache[s.ci] = get_catalog_item_num_users_limit(s.ci, config_check)
+                    info = ci_cache[s.ci]
+                    if info and info.get("maximum") is not None and s.users > info["maximum"]:
+                        limit_errors.append(
+                            f"{s.ci_name} ({s.ci}): {s.users} requested, max {info['maximum']}"
+                        )
+        finally:
+            cluster_targets.cleanup_kubeconfig(config_check.kubeconfig_path if body.target_cluster else None)
         if limit_errors:
             raise HTTPException(
                 400,
@@ -1523,6 +1545,7 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
     async def _run():
         global _deploy_log_path
         handler, log_path = start_log_capture("deploy", job.job_id)
+        config = None
         try:
             config = _get_config(
                 dry_run=body.dry_run,
@@ -1530,6 +1553,7 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                 enable_resource_pools=body.enable_resource_pools,
                 white_glove=body.white_glove,
                 redirect=body.redirect,
+                target_cluster=body.target_cluster,
             )
             # U3: Propagate showroom deploy settings to schedules
             for s in schedules:
@@ -1593,6 +1617,8 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                 log_path=log_path,
             )
         finally:
+            if body.target_cluster and config is not None:
+                cluster_targets.cleanup_kubeconfig(config.kubeconfig_path)
             stop_log_capture(handler)
 
     asyncio.create_task(_run())
@@ -1601,12 +1627,14 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
 
 @router.post("/deploy/session", response_model=JobResponse)
 async def deploy_session(
+    request: Request,
     file: UploadFile = File(...),
     dry_run: bool = Form(False),
     resource_lock: bool = Form(True),
     enable_resource_pools: bool = Form(False),
     white_glove: bool = Form(True),
     redirect: bool = Form(True),
+    target_cluster: str | None = Form(None),
     _key: None = Depends(verify_api_key),
 ):
     """Deploy an explicitly-uploaded CSV, deploying the LOCAL parsed list.
@@ -1620,6 +1648,8 @@ async def deploy_session(
     best-effort (a concurrent human upload may overwrite the displayed set).
     Per-workshop results are also on the job (``GET /api/deploy/status/{id}``).
     """
+    if target_cluster:
+        identity.require_picker_access(request)
     raw = await file.read()
     if len(raw) > MAX_UPLOAD_SIZE_BYTES:
         raise HTTPException(413, "File exceeds 10 MB size limit")
@@ -1649,13 +1679,17 @@ async def deploy_session(
     with _state_lock:
         _schedules = schedules
 
-    config = _get_config(
-        dry_run=dry_run,
-        resource_lock=resource_lock,
-        enable_resource_pools=enable_resource_pools,
-        white_glove=white_glove,
-        redirect=redirect,
-    )
+    try:
+        config = _get_config(
+            dry_run=dry_run,
+            resource_lock=resource_lock,
+            enable_resource_pools=enable_resource_pools,
+            white_glove=white_glove,
+            redirect=redirect,
+            target_cluster=target_cluster,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     job = jobs.create_job()
 
     async def _run():
@@ -1703,6 +1737,9 @@ async def deploy_session(
                 error=str(exc),
                 message=f"Deployment failed: {exc}",
             )
+        finally:
+            if target_cluster:
+                cluster_targets.cleanup_kubeconfig(config.kubeconfig_path)
 
     asyncio.create_task(_run())
     return JobResponse(job_id=job.job_id, status=JobStatus(job.status.value), progress=job.progress)
@@ -1715,14 +1752,20 @@ def deploy_dry_run(request: Request, body: DeployRequest = DeployRequest(), _key
     if not _schedules:
         raise HTTPException(400, "No schedules loaded. Upload a CSV first.")
 
+    if body.target_cluster:
+        identity.require_picker_access(request)
     schedules = _filter_schedules(body.ci_filter)
-    config = _get_config(
-        dry_run=True,
-        resource_lock=body.resource_lock,
-        enable_resource_pools=body.enable_resource_pools,
-        white_glove=body.white_glove,
-        redirect=body.redirect,
-    )
+    try:
+        config = _get_config(
+            dry_run=True,
+            resource_lock=body.resource_lock,
+            enable_resource_pools=body.enable_resource_pools,
+            white_glove=body.white_glove,
+            redirect=body.redirect,
+            target_cluster=body.target_cluster,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     if body.export_yaml_dir:
         config.dry_run_export_yaml_dir = _validate_export_yaml_dir(body.export_yaml_dir)
         config.dry_run_yaml_export_seq = 0
@@ -1779,6 +1822,8 @@ def deploy_dry_run(request: Request, body: DeployRequest = DeployRequest(), _key
         _save_results(results)
         return [_result_to_response(r) for r in results]
     finally:
+        if body.target_cluster:
+            cluster_targets.cleanup_kubeconfig(config.kubeconfig_path)
         stop_log_capture(handler)
 
 
@@ -1793,16 +1838,23 @@ def deploy_dry_run_yaml(request: Request, body: DeployRequest = DeployRequest(),
     if not _schedules:
         raise HTTPException(400, "No schedules loaded. Upload a CSV first.")
 
+    if body.target_cluster:
+        identity.require_picker_access(request)
     schedules = _filter_schedules(body.ci_filter)
     tmpdir = tempfile.mkdtemp(prefix="rhdp-dryrun-yaml-")
+    config = None
     try:
-        config = _get_config(
-            dry_run=True,
-            resource_lock=body.resource_lock,
-            enable_resource_pools=body.enable_resource_pools,
-            white_glove=body.white_glove,
-            redirect=body.redirect,
-        )
+        try:
+            config = _get_config(
+                dry_run=True,
+                resource_lock=body.resource_lock,
+                enable_resource_pools=body.enable_resource_pools,
+                white_glove=body.white_glove,
+                redirect=body.redirect,
+                target_cluster=body.target_cluster,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
         config.dry_run_export_yaml_dir = tmpdir
         config.dry_run_yaml_export_seq = 0
         for s in schedules:
@@ -1834,6 +1886,8 @@ def deploy_dry_run_yaml(request: Request, body: DeployRequest = DeployRequest(),
         parts = [p.read_text(encoding="utf-8").strip() for p in yaml_paths]
         combined = "\n---\n".join(parts)
     finally:
+        if body.target_cluster and config is not None:
+            cluster_targets.cleanup_kubeconfig(config.kubeconfig_path)
         shutil.rmtree(tmpdir, ignore_errors=True)
 
     return Response(
@@ -1843,6 +1897,23 @@ def deploy_dry_run_yaml(request: Request, body: DeployRequest = DeployRequest(),
             "Content-Disposition": 'attachment; filename="rhdp-dry-run-manifests.yaml"',
         },
     )
+
+
+@router.get("/clusters")
+def list_clusters(request: Request, _key=Depends(verify_api_key)):
+    """List deploy-target clusters available to the requesting user.
+
+    Returns ``allowed`` (is this user on the picker allowlist) and, when allowed,
+    the configured target clusters. Non-allowlisted users get ``allowed: false``
+    and an empty list, so the UI simply hides the picker. Selection is also
+    enforced server-side on the deploy endpoints, so this is not the only gate.
+    """
+    allowed = identity.is_picker_allowed(request)
+    return {
+        "allowed": allowed,
+        "user": identity.get_user_email(request),
+        "clusters": cluster_targets.list_target_clusters() if allowed else [],
+    }
 
 
 @router.get("/deploy/status/{job_id}", response_model=JobResponse)
@@ -2713,7 +2784,7 @@ def get_cluster_needs(_key=Depends(verify_api_key)):
         raise HTTPException(400, "No schedules loaded.")
 
     try:
-        from tenant_cluster_capacity import calculate_cluster_needs
+        from lib.tenant_cluster_capacity import calculate_cluster_needs
 
         result = calculate_cluster_needs(_schedules)
 
@@ -2744,7 +2815,7 @@ def check_tenant_cluster_refs(_key=Depends(verify_api_key)):
         raise HTTPException(400, "No schedules loaded.")
 
     try:
-        from tenant_cluster_capacity import check_tenant_cluster_references
+        from lib.tenant_cluster_capacity import check_tenant_cluster_references
 
         result = check_tenant_cluster_references(_schedules)
         return result

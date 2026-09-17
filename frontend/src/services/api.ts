@@ -27,6 +27,7 @@ import type {
   PoolLookupResponse,
   LabagatorEventsResponse,
   LabagatorPreviewResponse,
+  ClusterListResponse,
 } from '../types';
 
 export interface TenantClusterRef {
@@ -276,6 +277,9 @@ export const api = {
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
+
+  // Multi-cluster deploy targets (Feature 2 — identity-gated picker)
+  getClusters: () => request<ClusterListResponse>('/clusters'),
 
   // Deploy
   deploy: (body: DeployRequest) =>
