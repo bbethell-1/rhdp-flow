@@ -3,8 +3,6 @@
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from lib.tenant_cluster_capacity import check_tenant_cluster_references
 
 

@@ -26,9 +26,7 @@ from api.auth import verify_api_key
 # Ensure parent directory is on sys.path so we can import rhdp_flow
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from api import cluster_targets
-from api import identity
-from api import jobs
+from api import cluster_targets, identity, jobs
 from api.limiter import limiter as _route_limiter
 from api.log_capture import get_log_dir, start_log_capture, stop_log_capture
 from api.models import (
@@ -2853,8 +2851,8 @@ def auto_provision_clusters(buffer_hours: float = 4.0, dry_run: bool = False, _k
         raise HTTPException(400, "No schedules loaded.")
 
     try:
-        from rhdp_flow import auto_provision_missing_clusters
         from api.audit import audit_log
+        from rhdp_flow import auto_provision_missing_clusters
 
         if dry_run:
             # Clone schedules to avoid mutation
@@ -2901,8 +2899,8 @@ def remove_auto_provisioned(dry_run: bool = False, _key=Depends(verify_api_key))
         raise HTTPException(400, "No schedules loaded.")
 
     try:
-        from rhdp_flow import remove_auto_provisioned_clusters
         from api.audit import audit_log
+        from rhdp_flow import remove_auto_provisioned_clusters
 
         if dry_run:
             # Count auto-added without mutation

@@ -4,9 +4,7 @@ import json
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-from rhdp_flow import WorkshopSchedule, auto_provision_missing_clusters, remove_auto_provisioned_clusters
+from rhdp_flow import auto_provision_missing_clusters, remove_auto_provisioned_clusters
 
 
 def test_auto_provision_adds_cluster_for_missing_ref_tenant(

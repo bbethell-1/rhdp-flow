@@ -2,7 +2,7 @@
 # bump-version.sh - Increment semantic version across all source files.
 # Usage: ./scripts/bump-version.sh [major|minor|patch]
 # Reads VERSION, increments the requested component, writes to:
-#   VERSION, frontend/package.json, api/server.py
+#   VERSION, frontend/package.json, frontend/package-lock.json, api/server.py
 # Prints the new version to stdout.
 
 set -euo pipefail
@@ -53,6 +53,25 @@ PACKAGE_JSON="$PROJECT_DIR/frontend/package.json"
 if [[ -f "$PACKAGE_JSON" ]]; then
   sed -i.bak "s/\"version\": \"$CURRENT\"/\"version\": \"$NEW_VERSION\"/" "$PACKAGE_JSON"
   rm -f "$PACKAGE_JSON.bak"
+fi
+
+# Keep the npm lockfile's package versions aligned with package.json.
+PACKAGE_LOCK="$PROJECT_DIR/frontend/package-lock.json"
+if [[ -f "$PACKAGE_LOCK" ]]; then
+  python3 - "$PACKAGE_LOCK" "$NEW_VERSION" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+raw = path.read_bytes()
+newline = "\r\n" if b"\r\n" in raw else "\n"
+data = json.loads(raw)
+data["version"] = sys.argv[2]
+if "" in data.get("packages", {}):
+    data["packages"][""]["version"] = sys.argv[2]
+path.write_bytes((json.dumps(data, indent=2) + "\n").replace("\n", newline).encode())
+PY
 fi
 
 # Update api/server.py

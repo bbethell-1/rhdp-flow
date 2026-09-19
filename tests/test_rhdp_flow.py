@@ -544,7 +544,7 @@ class TestBuildResourceClaimPayload(unittest.TestCase):
 
     def test_provider_fields(self):
         config = make_config(dry_run=True)
-        schedule = make_schedule()
+        schedule = make_schedule(enable_workshop_interface=False)
         payload = build_resource_claim_payload(schedule, config)
 
         provider = payload["spec"]["provider"]
@@ -621,7 +621,7 @@ class TestBuildResourceClaimPayload(unittest.TestCase):
             returncode=0, stdout=json.dumps(ci_json), stderr=""
         )
         config = make_config(dry_run=False)
-        schedule = make_schedule()
+        schedule = make_schedule(enable_workshop_interface=False)
         payload = build_resource_claim_payload(schedule, config)
         pv = payload["spec"]["provider"]["parameterValues"]
         self.assertEqual(pv["aws_region"], "eu-central-1")
@@ -1793,7 +1793,7 @@ class TestMultiWorkshopFromGroupDeep(unittest.TestCase):
 
     @patch("rhdp_flow.subprocess.run")
     def test_grouped_mixed_concurrency(self, mock_run):
-        """WorkshopProvision payloads reflect per-item concurrency values."""
+        """Grouped workshops leave provisioning to the MultiWorkshop controller."""
         created_payloads = []
 
         def capturing_dispatcher(*args, **kwargs):
@@ -1820,9 +1820,10 @@ class TestMultiWorkshopFromGroupDeep(unittest.TestCase):
         provision_payloads = [
             p for p in created_payloads if p.get("kind") == "WorkshopProvision"
         ]
-        concurrencies = [p["spec"].get("concurrency") for p in provision_payloads]
-        self.assertIn(2, concurrencies)
-        self.assertIn(5, concurrencies)
+        self.assertEqual(provision_payloads, [])
+        groups = [p for p in created_payloads if p.get("kind") == "MultiWorkshop"]
+        self.assertEqual(len(groups), 1)
+        self.assertEqual({a["key"] for a in groups[0]["spec"]["assets"]}, {"ci1.prod", "ci2.event"})
 
     @patch("rhdp_flow.subprocess.run")
     def test_grouped_one_asset_fails_others_continue(self, mock_run):
@@ -2443,7 +2444,7 @@ class TestDeriveBaseDomain(unittest.TestCase):
     def test_different_cluster(self):
         """Different cluster URL produces correct domain."""
         result = derive_base_domain("https://api.ocp-integration.infra.open.redhat.com:6443")
-        self.assertEqual(result, "integration.demo.redhat.com")
+        self.assertEqual(result, "babylon-catalog.apps.ocp-integration.infra.open.redhat.com")
 
 
 # ============================================================================

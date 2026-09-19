@@ -70,7 +70,7 @@ def list_target_clusters() -> list[dict[str, str]]:
     clusters: list[dict[str, str]] = []
     for item in items:
         name = item.get("metadata", {}).get("name", "")
-        key = name[len("cluster-"):] if name.startswith("cluster-") else name
+        key = name.removeprefix("cluster-")
         if not key:
             continue
         data = item.get("data", {})

@@ -89,15 +89,26 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add VERSION frontend/package.json api/server.py
-          git commit -m "RHDP-Flow: Release v${{ steps.version.outputs.new }} [skip ci]"
+          git add VERSION frontend/package.json frontend/package-lock.json api/server.py
+          git commit -m "Release RHDP-Flow v${{ steps.version.outputs.new }} [skip ci]"
           git push
+
+      - name: Name the update
+        if: steps.guard.outputs.skip != 'true'
+        id: title
+        env:
+          COMMIT_MSG: ${{ github.event.workflow_run.head_commit.message }}
+        run: |
+          SUBJECT="${COMMIT_MSG%%$'\n'*}"
+          echo "name=RHDP-Flow v${{ steps.version.outputs.new }} — ${SUBJECT}" >> "$GITHUB_OUTPUT"
 
       - name: Create annotated tag
         if: steps.guard.outputs.skip != 'true'
+        env:
+          RELEASE_TITLE: ${{ steps.title.outputs.name }}
         run: |
           TAG="${{ steps.version.outputs.tag }}"
-          git tag -a "$TAG" -m "RHDP-Flow v${{ steps.version.outputs.new }}"
+          git tag -a "$TAG" -m "$RELEASE_TITLE"
           git push origin "$TAG"
 
       - name: Generate changelog
@@ -133,7 +144,8 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TITLE: ${{ steps.title.outputs.name }}
         run: |
           gh release create "${{ steps.version.outputs.tag }}" \
-            --title "RHDP-Flow v${{ steps.version.outputs.new }}" \
+            --title "$RELEASE_TITLE" \
             --notes-file "${{ steps.changelog.outputs.file }}"
