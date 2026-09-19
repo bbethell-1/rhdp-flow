@@ -1905,8 +1905,10 @@ class TestCountExpansion(unittest.TestCase):
         self.assertEqual(len(rows), 2)
 
     @patch("rhdp_flow.process_schedule")
-    def test_count_field_reset_to_1(self, mock_ps):
+    @patch("rhdp_flow.subprocess.run")
+    def test_count_field_reset_to_1(self, mock_run, mock_ps):
         """Each expanded instance has count=1 when passed to process_schedule."""
+        mock_run.side_effect = make_oc_dispatcher()
         mock_ps.return_value = DeploymentResult(
             ci_name="AI Workshop", ci="openshift-ai.ai-workshop-multi-user.prod",
             namespace="user-bbethell-redhat-com", guid="dryrun-test",
@@ -1963,8 +1965,10 @@ Single Workshop,openshift-ai.ai-workshop-multi-user.prod,user-bbethell-redhat-co
         self.assertEqual(len(rows), 1)
 
     @patch("rhdp_flow.process_schedule")
-    def test_count_users_not_divided(self, mock_ps):
+    @patch("rhdp_flow.subprocess.run")
+    def test_count_users_not_divided(self, mock_run, mock_ps):
         """Count=2 with Users=40: each instance still has users=40 (not divided)."""
+        mock_run.side_effect = make_oc_dispatcher()
         mock_ps.return_value = DeploymentResult(
             ci_name="AI Workshop", ci="openshift-ai.ai-workshop-multi-user.prod",
             namespace="user-bbethell-redhat-com", guid="dryrun-test",
@@ -1994,8 +1998,10 @@ Single Workshop,openshift-ai.ai-workshop-multi-user.prod,user-bbethell-redhat-co
             self.assertEqual(schedule.users, 40)
 
     @patch("rhdp_flow.process_schedule")
-    def test_count_preserves_other_fields(self, mock_ps):
+    @patch("rhdp_flow.subprocess.run")
+    def test_count_preserves_other_fields(self, mock_run, mock_ps):
         """Expanded instances retain original ci, namespace, password, concurrency."""
+        mock_run.side_effect = make_oc_dispatcher()
         mock_ps.return_value = DeploymentResult(
             ci_name="AI Workshop", ci="openshift-ai.ai-workshop-multi-user.prod",
             namespace="user-bbethell-redhat-com", guid="dryrun-test",
