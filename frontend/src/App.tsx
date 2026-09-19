@@ -162,7 +162,7 @@ const App: React.FC = () => {
           <ToolbarContent>
             <ToolbarItem>
               <div className="masthead-controls">
-                <Tooltip content="When enabled, deployments preview JSON payloads without provisioning real resources. Disable for live deployments.">
+                <Tooltip content="Makes deployment jobs simulate without provisioning resources. Check prerequisites and Preview deployment never provision resources, regardless of this setting. All require the backend.">
                   <Checkbox
                     label="Dry-Run Mode"
                     isChecked={dryRun}

@@ -7,6 +7,8 @@ import {
   CardTitle,
   FormSelect,
   FormSelectOption,
+  HelperText,
+  HelperTextItem,
   Label,
   PageSection,
   Title,
@@ -2424,16 +2426,16 @@ export const UploadTab: React.FC<Props> = ({
           {/* Deploy buttons */}
           <Split hasGutter style={{ marginBottom: 16, flexWrap: 'wrap' }}>
             <SplitItem>
-              <Tooltip content="Check namespaces on the cluster and compare Users to each catalog item num_users maximum.">
+              <Tooltip content="Check namespaces, catalog items, user limits, and pool capacity. No resources are created.">
                 <Button variant="secondary" onClick={handleValidate} isDisabled={deploying || validating || yamlDownloading}>
-                  {validating ? 'Validating…' : 'Validate'}
+                  {validating ? 'Checking…' : 'Check prerequisites'}
                 </Button>
               </Tooltip>
             </SplitItem>
             <SplitItem>
               <Tooltip content="Simulate deploy and update results preview; no resources created.">
                 <Button variant="secondary" onClick={handleDryRun} isDisabled={deploying || validating || yamlDownloading}>
-                  Dry-run
+                  Preview deployment
                 </Button>
               </Tooltip>
             </SplitItem>
@@ -2446,10 +2448,21 @@ export const UploadTab: React.FC<Props> = ({
             </SplitItem>
             <SplitItem>
               <Button variant="primary" onClick={handleDeploy} isDisabled={deploying || validating || yamlDownloading} isDanger={!dryRun}>
-                {dryRun ? 'Deploy (dry-run)' : 'Deploy'}
+                {dryRun ? 'Run dry-run' : 'Deploy'}
               </Button>
             </SplitItem>
           </Split>
+          <HelperText>
+            <HelperTextItem>
+              Check prerequisites checks cluster requirements. Preview deployment simulates deployment without creating resources.
+              Both require the RHDP-Flow backend.
+            </HelperTextItem>
+            <HelperTextItem>
+              {dryRun
+                ? 'Dry-Run Mode is on: Run dry-run runs the deployment job with progress and logs, without provisioning resources.'
+                : 'Dry-Run Mode is off: Deploy provisions real resources. Preview deployment remains a simulation.'}
+            </HelperTextItem>
+          </HelperText>
 
           {/* Diff view */}
           <DiffView hasSchedules={schedules.length > 0} showToast={showToast} />

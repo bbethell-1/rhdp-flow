@@ -60,6 +60,25 @@ export function clearApiKey(): void {
   sessionStorage.removeItem('rhdp-api-key');
 }
 
+async function responseError(res: Response): Promise<Error> {
+  const body = await res.text();
+  const status = `HTTP ${res.status}`;
+  if (res.headers?.get('content-type')?.includes('text/html') || /^\s*</.test(body)) {
+    return new Error(
+      [502, 503, 504].includes(res.status)
+        ? `RHDP-Flow backend is unavailable (${status}). Validation and dry-run both require the backend. Wait for service recovery, then retry.`
+        : `Expected an API response but received a web page (${status}). Reload to check your sign-in session, then retry.`,
+    );
+  }
+  try {
+    const data = JSON.parse(body);
+    if (typeof data.detail === 'string') return new Error(data.detail);
+  } catch {
+    // Plain-text errors are also supported.
+  }
+  return new Error(body || res.statusText || status);
+}
+
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -67,9 +86,8 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   };
   Object.assign(headers, getApiKeyHeader());
   const res = await fetch(`${API}${path}`, { ...opts, headers });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(body || res.statusText);
+  if (!res.ok || res.headers?.get('content-type')?.includes('text/html')) {
+    throw await responseError(res);
   }
   return res.json();
 }
@@ -111,7 +129,7 @@ export const api = {
       body: form,
       headers: getApiKeyHeader(),
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok || res.headers?.get('content-type')?.includes('text/html')) throw await responseError(res);
     return res.json();
   },
   listLabagatorEvents: () => cachedRequest<LabagatorEventsResponse>('/labagator/events'),
@@ -167,7 +185,7 @@ export const api = {
       body: form,
       headers: getApiKeyHeader(),
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok || res.headers?.get('content-type')?.includes('text/html')) throw await responseError(res);
     return res.json();
   },
 
@@ -184,7 +202,7 @@ export const api = {
       body: form,
       headers: getApiKeyHeader(),
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok || res.headers?.get('content-type')?.includes('text/html')) throw await responseError(res);
     return res.json();
   },
   listScheduleExamples: () => cachedRequest<ScheduleExampleMeta[]>('/schedules/examples'),
@@ -274,7 +292,7 @@ export const api = {
       body: form,
       headers: getApiKeyHeader(),
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok || res.headers?.get('content-type')?.includes('text/html')) throw await responseError(res);
     return res.json();
   },
 
@@ -298,7 +316,7 @@ export const api = {
       headers,
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok || res.headers?.get('content-type')?.includes('text/html')) throw await responseError(res);
     const blob = await res.blob();
     const cd = res.headers.get('Content-Disposition');
     const m = cd?.match(/filename="([^"]+)"/);

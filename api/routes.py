@@ -701,15 +701,21 @@ def debug_config(_key=Depends(verify_api_key)):
 # Health
 # ---------------------------------------------------------------------------
 
+@router.get("/healthz")
+async def healthz():
+    """Pod probe: API responsiveness must not depend on external clusters."""
+    return {"status": "ok"}
+
+
 @router.get("/health", response_model=HealthResponse)
 async def health():
-    config = _get_config()
+    config = await asyncio.to_thread(_get_config)
     env = os.environ.copy()
     if config.kubeconfig_path:
         env["KUBECONFIG"] = config.kubeconfig_path
 
     # 1. Check oc binary exists
-    oc_installed = config.validate()
+    oc_installed = await asyncio.to_thread(config.validate)
     if not oc_installed:
         return HealthResponse(
             status="error",

@@ -71,3 +71,41 @@ describe('api multipart requests', () => {
     );
   });
 });
+
+describe('API errors', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each([
+    ['validation', () => api.validateNamespaces()],
+    ['dry-run', () => api.dryRun({ dry_run: true })],
+    ['YAML download', () => api.downloadDryRunYaml({ dry_run: true })],
+    ['CSV upload', () => api.uploadCSV(new File(['a,b'], 'test.csv'))],
+  ])('explains backend unavailability for %s without exposing router HTML', async (_name, action) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      '<html><h1>Application is not available</h1></html>',
+      { status: 503, headers: { 'Content-Type': 'text/html' } },
+    )));
+    await expect(action()).rejects.toThrow(
+      'RHDP-Flow backend is unavailable (HTTP 503). Validation and dry-run both require the backend.',
+    );
+  });
+
+  it('recognizes HTML even when the router omits its content type', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>Unavailable</html>', { status: 502 })));
+    await expect(api.validateNamespaces()).rejects.toThrow('backend is unavailable (HTTP 502)');
+  });
+
+  it('explains a successful HTML sign-in response instead of trying to parse JSON', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>Sign in</html>', {
+      headers: { 'Content-Type': 'text/html' },
+    })));
+    await expect(api.validateNamespaces()).rejects.toThrow('Reload to check your sign-in session');
+  });
+
+  it('preserves the backend detail for a JSON error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ detail: 'Invalid or missing API key' }), { status: 403 },
+    )));
+    await expect(api.validateNamespaces()).rejects.toThrow('Invalid or missing API key');
+  });
+});

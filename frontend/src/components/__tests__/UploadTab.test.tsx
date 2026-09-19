@@ -94,10 +94,10 @@ describe('UploadTab', () => {
         onClear={noop}
       />
     );
-    expect(screen.getByText('Validate')).toBeInTheDocument();
-    expect(screen.getByText('Dry-run')).toBeInTheDocument();
+    expect(screen.getByText('Check prerequisites')).toBeInTheDocument();
+    expect(screen.getByText('Preview deployment')).toBeInTheDocument();
     expect(screen.getByText('Download YAML')).toBeInTheDocument();
-    expect(screen.getByText('Deploy (dry-run)')).toBeInTheDocument();
+    expect(screen.getByText('Run dry-run')).toBeInTheDocument();
   });
 
   it('shows the deploy-target cluster picker for allowlisted operators', async () => {

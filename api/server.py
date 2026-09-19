@@ -142,7 +142,7 @@ app.add_middleware(CSPMiddleware)
 
 # ---------------------------------------------------------------------------
 # API-key gate — require X-API-Key on ALL /api endpoints (reads included),
-# except the health probe (k8s liveness/readiness call it unauthenticated)
+# except health diagnostics and the lightweight pod probe
 # and CORS preflight. Fail closed: if RHDP_API_KEY is not set, the API
 # refuses to serve (503) rather than running open — UNLESS
 # RHDP_ALLOW_UNAUTHENTICATED=true is set for local development. Note: the
@@ -155,7 +155,7 @@ def _unauth_allowed() -> bool:
 
 
 class ApiKeyGateMiddleware(BaseHTTPMiddleware):
-    _EXEMPT = {"/api/health", "/api/v1/health"}
+    _EXEMPT = {"/api/health", "/api/v1/health", "/api/healthz", "/api/v1/healthz"}
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[override]
         path = request.url.path

@@ -1,5 +1,6 @@
 """Tests for the FastAPI endpoints using TestClient."""
 
+import asyncio
 import csv
 import io
 import json
@@ -72,6 +73,49 @@ def uploaded_client(client):
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("path", ["/api/healthz", "/api/v1/healthz"])
+@pytest.mark.parametrize("api_key", ["", "configured-key"])
+def test_pod_probe_does_not_require_cluster_or_credentials(client, monkeypatch, path, api_key):
+    monkeypatch.setenv("RHDP_API_KEY", api_key)
+    monkeypatch.delenv("RHDP_ALLOW_UNAUTHENTICATED", raising=False)
+    with patch.object(routes, "_get_config") as config, patch("subprocess.run") as run:
+        response = client.get(path)
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    config.assert_not_called()
+    run.assert_not_called()
+
+
+@pytest.mark.parametrize("blocking_step", ["config", "validate"])
+def test_health_setup_does_not_block_event_loop(blocking_step):
+    import threading
+
+    async def check():
+        loop_thread = threading.get_ident()
+        called_threads = []
+
+        def record_thread():
+            called_threads.append(threading.get_ident())
+            return False
+
+        config = MagicMock()
+        config.kubeconfig_path = None
+        config.validate.side_effect = record_thread
+
+        def get_config():
+            if blocking_step == "config":
+                record_thread()
+            return config
+
+        with patch.object(routes, "_get_config", side_effect=get_config):
+            response = await routes.health()
+        assert response.oc_installed is False
+        assert called_threads
+        assert all(thread != loop_thread for thread in called_threads)
+
+    asyncio.run(check())
+
 
 @patch("subprocess.run")
 def test_health_connected(mock_run, client):
