@@ -207,28 +207,6 @@ export const UploadTab: React.FC<Props> = ({
   const [timingWarnings, setTimingWarnings] = useState<string[]>([]);
   const [showTimingWarnings, setShowTimingWarnings] = useState(false);
 
-  // Auto-provision clusters: when a tenant has nowhere to land (no pool, no
-  // cluster row), Flow injects a fresh cluster provisioner so it can deploy.
-  const [enableAutoProvision, setEnableAutoProvision] = useState(false);
-  const [autoProvisionResult, setAutoProvisionResult] = useState<{
-    added: Array<{
-      tenant_ci: string;
-      cluster_ci: string;
-      workshop_name: string;
-      reason: string;
-      tenant_adjusted: boolean;
-      tenant_original_date: string | null;
-      tenant_new_date: string | null;
-    }>;
-    adjusted: Array<{
-      tenant_ci: string;
-      workshop_name: string;
-      tenant_original_date: string | null;
-      tenant_new_date: string | null;
-      reason: string;
-    }>;
-    needs_agv_prs: Array<{ tenant_ci: string; cluster_ci: string; workshop_name: string }>;
-  } | null>(null);
 
   // Pool capacity validation
   const [poolCapacityWarnings, setPoolCapacityWarnings] = useState<import('../types').PoolCapacityWarning[]>([]);
@@ -573,27 +551,6 @@ export const UploadTab: React.FC<Props> = ({
     }
   };
 
-  const handleAutoProvision = async () => {
-    try {
-      const prov = await api.autoProvisionClusters(timingBufferHours);
-      if (prov.schedules) setSchedules(prov.schedules);
-      setAutoProvisionResult({
-        added: prov.added || [],
-        adjusted: prov.adjusted || [],
-        needs_agv_prs: prov.needs_agv_prs || [],
-      });
-      try { setMissingTenantRefs(await api.checkTenantClusterRefs()); } catch { /* ignore */ }
-      const added = prov.added || [];
-      const adjusted = prov.adjusted || [];
-      if (added.length > 0) {
-        const adjNote = adjusted.length > 0 ? ` — ${adjusted.length} tenant time(s) pushed forward` : '';
-        showToast(`Added ${added.length} cluster row(s)${adjNote}`, adjusted.length > 0 ? 'danger' : 'success');
-      }
-    } catch (e) {
-      showToast(`Auto-provision failed: ${e}`, 'danger');
-    }
-  };
-
   const handleUpload = async () => {
     if (!csvFile) { showToast('Please select a CSV file', 'danger'); return; }
     try {
@@ -647,18 +604,6 @@ export const UploadTab: React.FC<Props> = ({
         try {
           const refsRes = await api.checkTenantClusterRefs();
           setMissingTenantRefs(refsRes);
-
-          // Auto-provision clusters for tenants that would otherwise fail
-          // (no shared pool and no cluster row in this batch).
-          const willFail = [
-            ...(refsRes.missing_refs || []),
-            ...(refsRes.ref_no_pool || []),
-          ].filter((r) => !r.pool_exists && !r.has_cluster_row);
-          if (enableAutoProvision && willFail.length > 0) {
-            await handleAutoProvision();
-          } else {
-            setAutoProvisionResult(null);
-          }
         } catch (e) {
           console.warn('Tenant cluster reference check failed', e);
         }
@@ -1574,95 +1519,6 @@ export const UploadTab: React.FC<Props> = ({
             );
           })()}
 
-          {/* Flow auto-added fresh clusters so at-risk tenants have somewhere to land */}
-          {autoProvisionResult && autoProvisionResult.added.length > 0 && (() => {
-            const noPool = autoProvisionResult.added.filter(a => a.reason === 'no_pool');
-            const poolEmpty = autoProvisionResult.added.filter(a => a.reason === 'pool_empty');
-            const dateAdjusted = autoProvisionResult.adjusted || [];
-            const removeBtn = (
-              <Button variant="link" isInline onClick={async () => {
-                try {
-                  const res = await api.removeAutoProvisioned();
-                  if (res.schedules) setSchedules(res.schedules);
-                  setAutoProvisionResult(null);
-                  try { setMissingTenantRefs(await api.checkTenantClusterRefs()); } catch { /* ignore */ }
-                  showToast(`Removed ${res.removed_count} Flow-added cluster(s)`, 'info');
-                } catch (e) {
-                  showToast(`Could not remove clusters: ${e}`, 'danger');
-                }
-              }}>Remove all</Button>
-            );
-            return (
-              <>
-                {noPool.length > 0 && (
-                  <Alert variant="warning" isInline
-                    title={`${noPool.length} tenant workshop${noPool.length > 1 ? 's' : ''} had no cluster pool — Flow added a fresh cluster`}
-                    style={{ marginBottom: 8 }}
-                    actionClose={poolEmpty.length === 0 && dateAdjusted.length === 0 ? removeBtn : undefined}
-                  >
-                    <div style={{ marginBottom: 6 }}>
-                      These workshops have no shared <code>TenantClusterPool</code> and no cluster row in your CSV.
-                      Flow added a cluster for each, scheduled <strong>{timingBufferHours} hours earlier</strong>.
-                      This is a per-event workaround — the lasting fix is a TenantClusterPool (ping <code>#forum-rhdp</code>).
-                    </div>
-                    <ul style={{ margin: '0 0 4px 18px', fontSize: '0.875rem' }}>
-                      {noPool.slice(0, 5).map((a, i) => (
-                        <li key={i}><strong>{a.workshop_name}</strong> → <code>{a.cluster_ci}</code></li>
-                      ))}
-                      {noPool.length > 5 && <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>...and {noPool.length - 5} more</li>}
-                    </ul>
-                  </Alert>
-                )}
-
-                {poolEmpty.length > 0 && (
-                  <Alert variant="warning" isInline
-                    title={`${poolEmpty.length} tenant workshop${poolEmpty.length > 1 ? 's' : ''} have a pool but no available clusters — Flow added a fresh cluster`}
-                    style={{ marginBottom: 8 }}
-                    actionClose={dateAdjusted.length === 0 ? removeBtn : undefined}
-                  >
-                    <div style={{ marginBottom: 6 }}>
-                      A <code>TenantClusterPool</code> exists for these workshops but currently has <strong>0 available clusters</strong> —
-                      they may still be provisioning. Flow added a fresh cluster for each as a safety net.
-                      Once the pool has available clusters you can remove these rows.
-                    </div>
-                    <ul style={{ margin: '0 0 4px 18px', fontSize: '0.875rem' }}>
-                      {poolEmpty.slice(0, 5).map((a, i) => (
-                        <li key={i}><strong>{a.workshop_name}</strong> → <code>{a.cluster_ci}</code></li>
-                      ))}
-                      {poolEmpty.length > 5 && <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>...and {poolEmpty.length - 5} more</li>}
-                    </ul>
-                  </Alert>
-                )}
-
-                {dateAdjusted.length > 0 && (
-                  <Alert variant="danger" isInline
-                    title={`${dateAdjusted.length} tenant workshop${dateAdjusted.length > 1 ? 's' : ''} had their start time pushed forward`}
-                    style={{ marginBottom: 8 }}
-                    actionClose={removeBtn}
-                  >
-                    <div style={{ marginBottom: 6 }}>
-                      The auto-added cluster couldn't start <strong>{timingBufferHours} hours before</strong> the tenant
-                      (the required time was already in the past), so Flow pushed the <strong>tenant start time forward</strong>
-                      to maintain the {timingBufferHours}-hour gap. Review and adjust manually if needed before deploying.
-                    </div>
-                    <ul style={{ margin: '0 0 4px 18px', fontSize: '0.875rem' }}>
-                      {dateAdjusted.slice(0, 5).map((a, i) => (
-                        <li key={i}>
-                          <strong>{a.workshop_name}</strong>:{' '}
-                          <span style={{ textDecoration: 'line-through', color: 'var(--pf-v6-global--Color--200)' }}>{a.tenant_original_date}</span>
-                          {' → '}
-                          <strong>{a.tenant_new_date}</strong>
-                          {a.reason === 'pool_empty' && <span style={{ color: 'var(--pf-v6-global--Color--200)', fontSize: '0.8rem' }}> (pool empty)</span>}
-                        </li>
-                      ))}
-                      {dateAdjusted.length > 5 && <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>...and {dateAdjusted.length - 5} more</li>}
-                    </ul>
-                  </Alert>
-                )}
-              </>
-            );
-          })()}
-
           {/* Cluster row timing errors — only relevant when cluster rows exist in the batch
               (auto-add or manual). Workshops backed by a TenantClusterPool don't need this
               since Babylon handles provisioning timing internally. */}
@@ -2351,16 +2207,6 @@ export const UploadTab: React.FC<Props> = ({
                         hr before tenants
                       </span>
                     </span>
-                  </Tooltip>
-                </SplitItem>
-                <SplitItem>
-                  <Tooltip content="Tenants run ON TOP of a cluster. If a tenant has no shared cluster pool and no cluster row in your CSV, Flow adds a fresh cluster row automatically — scheduled before the tenant and tagged 'added by Flow'. This is a per-event stopgap; the lasting fix is a TenantClusterPool (platform team). Turn off to manage cluster rows yourself.">
-                    <Switch
-                      id="auto-provision-switch"
-                      label="Auto-Add Missing Clusters"
-                      isChecked={enableAutoProvision}
-                      onChange={(_e, checked) => setEnableAutoProvision(checked)}
-                    />
                   </Tooltip>
                 </SplitItem>
                 {pickerAllowed && deployClusters.length > 0 && (
