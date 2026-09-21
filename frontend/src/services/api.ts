@@ -269,6 +269,19 @@ export const api = {
   removeAutoProvisioned: () =>
     request<{ removed_count: number; schedules: WorkshopSchedule[] }>(
       '/schedules/remove-auto-provisioned', { method: 'POST' }),
+  checkPoolStatus: (cluster_cis: string[]) =>
+    request<{
+      results: Array<{
+        name: string;
+        exists: boolean;
+        enabled: boolean;
+        available_clusters: number;
+        action_preview: string;
+      }>;
+    }>('/schedules/check-pool-status', {
+      method: 'POST',
+      body: JSON.stringify({ cluster_cis }),
+    }),
   createTenantClusterPools: (body: {
     cluster_cis: string[];
     enabled?: boolean;

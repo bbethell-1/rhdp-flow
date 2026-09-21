@@ -2933,6 +2933,64 @@ def remove_auto_provisioned(dry_run: bool = False, _key=Depends(verify_api_key))
                 "schedules": [_schedule_to_response(s) for s in _schedules]}
 
 
+@router.post("/schedules/check-pool-status")
+def check_pool_status(
+    body: dict,
+    _key=Depends(verify_api_key),
+):
+    """Check the current cluster status of a list of TenantClusterPool names.
+
+    Returns per-pool: exists, enabled, available_clusters, action_preview.
+    Used by the frontend to show what will happen before the user clicks Apply.
+    """
+    cluster_cis: list[str] = body.get("cluster_cis", [])
+    results = []
+    for ci in cluster_cis:
+        try:
+            proc = subprocess.run(
+                ["oc", "get", "tenantclusterpool", ci, "-n", "shared-clusters", "-o", "json"],
+                capture_output=True, text=True, timeout=15,
+            )
+            if proc.returncode != 0:
+                results.append({
+                    "name": ci,
+                    "exists": False,
+                    "enabled": False,
+                    "available_clusters": 0,
+                    "action_preview": "create",
+                })
+                continue
+            pool = json.loads(proc.stdout)
+            spec = pool.get("spec", {})
+            clusters = pool.get("status", {}).get("clusters", [])
+            enabled = spec.get("enabled", False)
+            available = sum(1 for c in clusters if c.get("sandboxApiState") == "available")
+            min_avail = spec.get("minAvailableSandboxPlacements", 0)
+
+            if enabled and min_avail > 0:
+                action = "already_active"
+            else:
+                action = "enable"
+
+            results.append({
+                "name": ci,
+                "exists": True,
+                "enabled": enabled,
+                "available_clusters": available,
+                "action_preview": action,
+            })
+        except Exception as exc:
+            results.append({
+                "name": ci,
+                "exists": False,
+                "enabled": False,
+                "available_clusters": 0,
+                "action_preview": "create",
+                "error": str(exc),
+            })
+    return {"results": results}
+
+
 @router.post("/schedules/create-tenant-cluster-pools")
 def create_tenant_cluster_pools(
     body: CreateTenantClusterPoolsRequest,

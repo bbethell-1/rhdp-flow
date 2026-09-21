@@ -265,6 +265,10 @@ export const UploadTab: React.FC<Props> = ({
   const [showPoolCreateModal, setShowPoolCreateModal] = useState(false);
   const [poolCreateCIs, setPoolCreateCIs] = useState<string[]>([]);
   const [poolCreateEnabled, setPoolCreateEnabled] = useState(true);
+  const [poolCreateStatusCheck, setPoolCreateStatusCheck] = useState<Array<{
+    name: string; exists: boolean; enabled: boolean; available_clusters: number; action_preview: string;
+  }> | null>(null);
+  const [poolCreateStatusLoading, setPoolCreateStatusLoading] = useState(false);
   const [poolCreateMin, setPoolCreateMin] = useState(1);
   const [poolCreateMax, setPoolCreateMax] = useState(3);
   const [poolCreateMinAvailPlacements, setPoolCreateMinAvailPlacements] = useState(1);
@@ -2922,6 +2926,7 @@ export const UploadTab: React.FC<Props> = ({
           setPoolCreateYaml('');
           setPoolCreateResults([]);
           setPoolCreateApplied(false);
+          setPoolCreateStatusCheck(null);
         }}
         aria-labelledby="pool-create-title"
       >
@@ -2960,6 +2965,48 @@ export const UploadTab: React.FC<Props> = ({
                 </span>
               ))}
             </div>
+          </div>
+
+          {/* Per-pool status check */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>What will happen</span>
+              <Button
+                variant="link" isInline isDisabled={poolCreateStatusLoading}
+                onClick={async () => {
+                  setPoolCreateStatusLoading(true);
+                  try {
+                    const data = await api.checkPoolStatus(poolCreateCIs);
+                    setPoolCreateStatusCheck(data.results || []);
+                  } catch { /* ignore */ } finally {
+                    setPoolCreateStatusLoading(false);
+                  }
+                }}
+              >
+                {poolCreateStatusLoading ? 'Checking…' : 'Check cluster'}
+              </Button>
+            </div>
+            {poolCreateStatusCheck ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {poolCreateStatusCheck.map((s, i) => {
+                  const badge = s.action_preview === 'already_active'
+                    ? { label: 'Already active', color: 'var(--pf-v6-global--success-color--100)' }
+                    : s.action_preview === 'enable'
+                    ? { label: `Exists – disabled → will enable${s.available_clusters > 0 ? ` (${s.available_clusters} clusters available)` : ''}`, color: 'var(--pf-v6-global--warning-color--100)' }
+                    : { label: 'Does not exist → will create fresh', color: 'var(--pf-v6-global--info-color--100)' };
+                  return (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem' }}>
+                      <code style={{ flex: '0 0 auto', maxWidth: 340, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</code>
+                      <span style={{ color: badge.color, fontWeight: 600 }}>{badge.label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)' }}>
+                Click "Check cluster" to see whether each pool already exists before applying.
+              </div>
+            )}
           </div>
 
           {/* Config form */}
