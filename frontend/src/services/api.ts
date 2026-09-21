@@ -259,6 +259,7 @@ export const api = {
     enabled?: boolean;
     min_clusters?: number;
     max_clusters?: number;
+    min_available_sandbox_placements?: number;
     max_placements?: number;
     environment_level?: string;
     cloud?: string;

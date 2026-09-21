@@ -2972,7 +2972,7 @@ def create_tenant_cluster_pools(
                 },
                 "enabled": body.enabled,
                 "maxClusters": body.max_clusters,
-                "minAvailableSandboxPlacements": 0,
+                "minAvailableSandboxPlacements": body.min_available_sandbox_placements,
                 "minClusters": body.min_clusters,
                 "sandboxHost": {
                     "annotations": {

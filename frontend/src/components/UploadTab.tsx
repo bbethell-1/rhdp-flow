@@ -249,9 +249,10 @@ export const UploadTab: React.FC<Props> = ({
   // ── TenantClusterPool creation modal ──
   const [showPoolCreateModal, setShowPoolCreateModal] = useState(false);
   const [poolCreateCIs, setPoolCreateCIs] = useState<string[]>([]);
-  const [poolCreateEnabled, setPoolCreateEnabled] = useState(false);
+  const [poolCreateEnabled, setPoolCreateEnabled] = useState(true);
   const [poolCreateMin, setPoolCreateMin] = useState(1);
   const [poolCreateMax, setPoolCreateMax] = useState(3);
+  const [poolCreateMinAvailPlacements, setPoolCreateMinAvailPlacements] = useState(1);
   const [poolCreateMaxPlacements, setPoolCreateMaxPlacements] = useState(15);
   const [poolCreateEnvLevel, setPoolCreateEnvLevel] = useState('integration');
   const [poolCreateCloud, setPoolCreateCloud] = useState('osp');
@@ -2938,6 +2939,13 @@ export const UploadTab: React.FC<Props> = ({
                 style={{ width: '100%', padding: '6px 8px', borderRadius: 4, border: '1px solid var(--pf-v6-global--BorderColor--100)', background: 'var(--pf-v6-global--BackgroundColor--100)', color: 'var(--pf-v6-global--Color--100)' }} />
             </div>
             <div>
+              <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, fontSize: '0.875rem' }}>Min Available Placements</label>
+              <input type="number" min={0} max={20} value={poolCreateMinAvailPlacements}
+                onChange={e => setPoolCreateMinAvailPlacements(Number(e.target.value))}
+                style={{ width: '100%', padding: '6px 8px', borderRadius: 4, border: '1px solid var(--pf-v6-global--BorderColor--100)', background: 'var(--pf-v6-global--BackgroundColor--100)', color: 'var(--pf-v6-global--Color--100)' }} />
+              <div style={{ fontSize: '0.75rem', color: 'var(--pf-v6-global--Color--200)', marginTop: 3 }}>Operator keeps this many tenant slots ready at all times</div>
+            </div>
+            <div>
               <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, fontSize: '0.875rem' }}>Max Placements (tenants per cluster)</label>
               <input type="number" min={1} max={50} value={poolCreateMaxPlacements}
                 onChange={e => setPoolCreateMaxPlacements(Number(e.target.value))}
@@ -2967,6 +2975,7 @@ export const UploadTab: React.FC<Props> = ({
                     enabled: poolCreateEnabled,
                     min_clusters: poolCreateMin,
                     max_clusters: poolCreateMax,
+                    min_available_sandbox_placements: poolCreateMinAvailPlacements,
                     max_placements: poolCreateMaxPlacements,
                     environment_level: poolCreateEnvLevel,
                     cloud: poolCreateCloud,
@@ -2996,6 +3005,7 @@ export const UploadTab: React.FC<Props> = ({
                     enabled: poolCreateEnabled,
                     min_clusters: poolCreateMin,
                     max_clusters: poolCreateMax,
+                    min_available_sandbox_placements: poolCreateMinAvailPlacements,
                     max_placements: poolCreateMaxPlacements,
                     environment_level: poolCreateEnvLevel,
                     cloud: poolCreateCloud,
@@ -3005,7 +3015,10 @@ export const UploadTab: React.FC<Props> = ({
                   setPoolCreateResults(res.results);
                   const allOk = res.results.every(r => r.success);
                   if (allOk) {
-                    showToast(`TenantClusterPool CRD(s) created — enable and wait for clusters before deploying`, 'success');
+                    const enabledMsg = poolCreateEnabled
+                      ? 'Pool(s) created and enabled — Babylon will provision clusters automatically'
+                      : 'TenantClusterPool CRD(s) created — enable the pool to start cluster provisioning';
+                    showToast(enabledMsg, 'success');
                     // Do NOT re-validate here: pool CRD exists but has no ready clusters yet.
                     // The danger alert should stay until the pool is actually provisioned.
                   } else {
