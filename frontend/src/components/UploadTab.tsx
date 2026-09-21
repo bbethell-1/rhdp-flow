@@ -211,7 +211,22 @@ export const UploadTab: React.FC<Props> = ({
   // cluster row), Flow injects a fresh cluster provisioner so it can deploy.
   const [enableAutoProvision, setEnableAutoProvision] = useState(false);
   const [autoProvisionResult, setAutoProvisionResult] = useState<{
-    added: Array<{ tenant_ci: string; cluster_ci: string; workshop_name: string }>;
+    added: Array<{
+      tenant_ci: string;
+      cluster_ci: string;
+      workshop_name: string;
+      reason: string;
+      tenant_adjusted: boolean;
+      tenant_original_date: string | null;
+      tenant_new_date: string | null;
+    }>;
+    adjusted: Array<{
+      tenant_ci: string;
+      workshop_name: string;
+      tenant_original_date: string | null;
+      tenant_new_date: string | null;
+      reason: string;
+    }>;
     needs_agv_prs: Array<{ tenant_ci: string; cluster_ci: string; workshop_name: string }>;
   } | null>(null);
 
@@ -558,10 +573,17 @@ export const UploadTab: React.FC<Props> = ({
     try {
       const prov = await api.autoProvisionClusters(timingBufferHours);
       if (prov.schedules) setSchedules(prov.schedules);
-      setAutoProvisionResult({ added: prov.added || [], needs_agv_prs: prov.needs_agv_prs || [] });
+      setAutoProvisionResult({
+        added: prov.added || [],
+        adjusted: prov.adjusted || [],
+        needs_agv_prs: prov.needs_agv_prs || [],
+      });
       try { setMissingTenantRefs(await api.checkTenantClusterRefs()); } catch { /* ignore */ }
-      if ((prov.added || []).length > 0) {
-        showToast(`Added ${prov.added.length} cluster provisioner row(s)`, 'success');
+      const added = prov.added || [];
+      const adjusted = prov.adjusted || [];
+      if (added.length > 0) {
+        const adjNote = adjusted.length > 0 ? ` — ${adjusted.length} tenant time(s) pushed forward` : '';
+        showToast(`Added ${added.length} cluster row(s)${adjNote}`, adjusted.length > 0 ? 'danger' : 'success');
       }
     } catch (e) {
       showToast(`Auto-provision failed: ${e}`, 'danger');
@@ -1549,52 +1571,93 @@ export const UploadTab: React.FC<Props> = ({
           })()}
 
           {/* Flow auto-added fresh clusters so at-risk tenants have somewhere to land */}
-          {autoProvisionResult && autoProvisionResult.added.length > 0 && (
-            <Alert
-              variant="success"
-              isInline
-              title={`Flow added ${autoProvisionResult.added.length} cluster(s) so these workshops can deploy`}
-              style={{ marginBottom: 12 }}
-              actionClose={
-                <Button
-                  variant="link"
-                  isInline
-                  onClick={async () => {
-                    try {
-                      const res = await api.removeAutoProvisioned();
-                      if (res.schedules) setSchedules(res.schedules);
-                      setAutoProvisionResult(null);
-                      try { setMissingTenantRefs(await api.checkTenantClusterRefs()); } catch { /* ignore */ }
-                      showToast(`Removed ${res.removed_count} Flow-added cluster(s)`, 'info');
-                    } catch (e) {
-                      showToast(`Could not remove clusters: ${e}`, 'danger');
-                    }
-                  }}
-                >
-                  Remove
-                </Button>
-              }
-            >
-              <div style={{ marginBottom: 8 }}>
-                These tenant workshops had no cluster to run on (no shared pool, no cluster in your CSV),
-                so Flow added a fresh cluster for each — scheduled <strong>{timingBufferHours} hours earlier</strong> and tagged
-                <strong> "added by Flow"</strong> in the table below. Remove them any time with the link above.
-              </div>
-              <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
-                {autoProvisionResult.added.slice(0, 5).map((a, i) => (
-                  <li key={i}><strong>{a.workshop_name}</strong> → <code>{a.cluster_ci}</code></li>
-                ))}
-                {autoProvisionResult.added.length > 5 && (
-                  <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>
-                    ...and {autoProvisionResult.added.length - 5} more
-                  </li>
+          {autoProvisionResult && autoProvisionResult.added.length > 0 && (() => {
+            const noPool = autoProvisionResult.added.filter(a => a.reason === 'no_pool');
+            const poolEmpty = autoProvisionResult.added.filter(a => a.reason === 'pool_empty');
+            const dateAdjusted = autoProvisionResult.adjusted || [];
+            const removeBtn = (
+              <Button variant="link" isInline onClick={async () => {
+                try {
+                  const res = await api.removeAutoProvisioned();
+                  if (res.schedules) setSchedules(res.schedules);
+                  setAutoProvisionResult(null);
+                  try { setMissingTenantRefs(await api.checkTenantClusterRefs()); } catch { /* ignore */ }
+                  showToast(`Removed ${res.removed_count} Flow-added cluster(s)`, 'info');
+                } catch (e) {
+                  showToast(`Could not remove clusters: ${e}`, 'danger');
+                }
+              }}>Remove all</Button>
+            );
+            return (
+              <>
+                {noPool.length > 0 && (
+                  <Alert variant="warning" isInline
+                    title={`${noPool.length} tenant workshop${noPool.length > 1 ? 's' : ''} had no cluster pool — Flow added a fresh cluster`}
+                    style={{ marginBottom: 8 }}
+                    actionClose={poolEmpty.length === 0 && dateAdjusted.length === 0 ? removeBtn : undefined}
+                  >
+                    <div style={{ marginBottom: 6 }}>
+                      These workshops have no shared <code>TenantClusterPool</code> and no cluster row in your CSV.
+                      Flow added a cluster for each, scheduled <strong>{timingBufferHours} hours earlier</strong>.
+                      This is a per-event workaround — the lasting fix is a TenantClusterPool (ping <code>#forum-rhdp</code>).
+                    </div>
+                    <ul style={{ margin: '0 0 4px 18px', fontSize: '0.875rem' }}>
+                      {noPool.slice(0, 5).map((a, i) => (
+                        <li key={i}><strong>{a.workshop_name}</strong> → <code>{a.cluster_ci}</code></li>
+                      ))}
+                      {noPool.length > 5 && <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>...and {noPool.length - 5} more</li>}
+                    </ul>
+                  </Alert>
                 )}
-              </ul>
-              <div style={{ padding: '10px 14px', background: 'var(--pf-v6-global--BackgroundColor--200)', border: '1px solid var(--pf-v6-global--BorderColor--100)', borderRadius: 4, fontSize: '0.85rem' }}>
-                <strong>💡 Permanent fix:</strong> Add a <code>tenant_cluster</code> reference in AgnosticV and create a shared cluster pool. Then no per-event cluster is needed. Ping <code>#forum-rhdp</code>.
-              </div>
-            </Alert>
-          )}
+
+                {poolEmpty.length > 0 && (
+                  <Alert variant="warning" isInline
+                    title={`${poolEmpty.length} tenant workshop${poolEmpty.length > 1 ? 's' : ''} have a pool but no available clusters — Flow added a fresh cluster`}
+                    style={{ marginBottom: 8 }}
+                    actionClose={dateAdjusted.length === 0 ? removeBtn : undefined}
+                  >
+                    <div style={{ marginBottom: 6 }}>
+                      A <code>TenantClusterPool</code> exists for these workshops but currently has <strong>0 available clusters</strong> —
+                      they may still be provisioning. Flow added a fresh cluster for each as a safety net.
+                      Once the pool has available clusters you can remove these rows.
+                    </div>
+                    <ul style={{ margin: '0 0 4px 18px', fontSize: '0.875rem' }}>
+                      {poolEmpty.slice(0, 5).map((a, i) => (
+                        <li key={i}><strong>{a.workshop_name}</strong> → <code>{a.cluster_ci}</code></li>
+                      ))}
+                      {poolEmpty.length > 5 && <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>...and {poolEmpty.length - 5} more</li>}
+                    </ul>
+                  </Alert>
+                )}
+
+                {dateAdjusted.length > 0 && (
+                  <Alert variant="danger" isInline
+                    title={`${dateAdjusted.length} tenant workshop${dateAdjusted.length > 1 ? 's' : ''} had their start time pushed forward`}
+                    style={{ marginBottom: 8 }}
+                    actionClose={removeBtn}
+                  >
+                    <div style={{ marginBottom: 6 }}>
+                      The auto-added cluster couldn't start <strong>{timingBufferHours} hours before</strong> the tenant
+                      (the required time was already in the past), so Flow pushed the <strong>tenant start time forward</strong>
+                      to maintain the {timingBufferHours}-hour gap. Review and adjust manually if needed before deploying.
+                    </div>
+                    <ul style={{ margin: '0 0 4px 18px', fontSize: '0.875rem' }}>
+                      {dateAdjusted.slice(0, 5).map((a, i) => (
+                        <li key={i}>
+                          <strong>{a.workshop_name}</strong>:{' '}
+                          <span style={{ textDecoration: 'line-through', color: 'var(--pf-v6-global--Color--200)' }}>{a.tenant_original_date}</span>
+                          {' → '}
+                          <strong>{a.tenant_new_date}</strong>
+                          {a.reason === 'pool_empty' && <span style={{ color: 'var(--pf-v6-global--Color--200)', fontSize: '0.8rem' }}> (pool empty)</span>}
+                        </li>
+                      ))}
+                      {dateAdjusted.length > 5 && <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>...and {dateAdjusted.length - 5} more</li>}
+                    </ul>
+                  </Alert>
+                )}
+              </>
+            );
+          })()}
 
           {/* Cluster row timing errors — only relevant when cluster rows exist in the batch
               (auto-add or manual). Workshops backed by a TenantClusterPool don't need this

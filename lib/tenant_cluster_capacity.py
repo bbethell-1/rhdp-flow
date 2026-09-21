@@ -326,13 +326,16 @@ def calculate_cluster_needs(schedules: list[Any]) -> dict[str, Any]:
     }
 
 
-def _list_tenant_cluster_pools() -> set[str]:
+def _list_tenant_cluster_pools() -> dict[str, int]:
     """
-    Return the set of TenantClusterPool names that exist (cluster-wide).
+    Return a mapping of TenantClusterPool name → available cluster count.
 
-    Pools are named exactly after their cluster CI, e.g.
-    ``ai-quickstarts.ai-qs-rag-cluster.event``. Fails safe to an empty set so
-    a missing pool CRD / permission issue never blocks the deploy.
+    "Available" means sandboxApiState == "available" (registered in Sandbox API
+    and accepting new tenants). A pool with 0 available clusters exists but
+    cannot accept tenants right now — clusters may still be provisioning.
+
+    Fails safe to an empty dict so a missing CRD / permission issue never
+    blocks a deploy.
     """
     import json
     import subprocess
@@ -343,15 +346,19 @@ def _list_tenant_cluster_pools() -> set[str]:
             shell=True, capture_output=True, text=True, timeout=10,
         )
         if result.returncode != 0:
-            return set()
+            return {}
         data = json.loads(result.stdout)
-        return {
-            item.get("metadata", {}).get("name", "")
-            for item in data.get("items", [])
-            if item.get("metadata", {}).get("name")
-        }
+        pools: dict[str, int] = {}
+        for item in data.get("items", []):
+            name = item.get("metadata", {}).get("name", "")
+            if not name:
+                continue
+            clusters = item.get("status", {}).get("clusters", [])
+            available = sum(1 for c in clusters if c.get("sandboxApiState") == "available")
+            pools[name] = available
+        return pools
     except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
-        return set()
+        return {}
 
 
 def check_tenant_cluster_references(schedules: list[Any]) -> dict[str, Any]:
@@ -367,9 +374,10 @@ def check_tenant_cluster_references(schedules: list[Any]) -> dict[str, Any]:
          via its ``cloudSelector``.
 
     Returns a dict with tiered results:
-      - ready:        tenant has a live tenantCluster ref AND a pool exists
-      - ref_no_pool:  tenant has a ref but no TenantClusterPool exists yet
-      - missing_refs: tenant has no tenantCluster ref in the live catalog
+      - ready:           tenant has a ref AND a pool with >= 1 available cluster
+      - pool_no_capacity: tenant has a ref AND pool exists but 0 available clusters
+      - ref_no_pool:     tenant has a ref but no TenantClusterPool exists yet
+      - missing_refs:    tenant has no tenantCluster ref in the live catalog
       - has_cluster_row: whether covered by a cluster row in this same batch
       - total_tenant_count / checked
     """
@@ -398,6 +406,7 @@ def check_tenant_cluster_references(schedules: list[Any]) -> dict[str, Any]:
 
     missing_refs: list[dict[str, Any]] = []
     ref_no_pool: list[dict[str, Any]] = []
+    pool_no_capacity: list[dict[str, Any]] = []
     ready: list[dict[str, Any]] = []
     checked_any = False
 
@@ -437,6 +446,8 @@ def check_tenant_cluster_references(schedules: list[Any]) -> dict[str, Any]:
         # is what Babylon reads. The heuristic (detected) is irrelevant for pool
         # resolution — Babylon doesn't know about it.
         pool_exists = bool(cluster_ref and cluster_ref in existing_pools)
+        pool_available = existing_pools.get(cluster_ref, 0) if cluster_ref else 0
+        pool_has_capacity = pool_available > 0
 
         # covered_by_row can use the heuristic fallback: if auto-add has injected
         # a cluster row matched by naming convention, the tenant is covered.
@@ -450,6 +461,7 @@ def check_tenant_cluster_references(schedules: list[Any]) -> dict[str, Any]:
             "cluster_ci_from_csv": detected or "none",
             "workshop_name": schedule.ci_name,
             "pool_exists": pool_exists,
+            "pool_available_clusters": pool_available,
             "has_cluster_row": covered_by_row,
         }
 
@@ -457,12 +469,15 @@ def check_tenant_cluster_references(schedules: list[Any]) -> dict[str, Any]:
             missing_refs.append(record)
         elif not pool_exists:
             ref_no_pool.append(record)
+        elif not pool_has_capacity:
+            pool_no_capacity.append(record)
         else:
             ready.append(record)
 
     return {
         "missing_refs": missing_refs,
         "ref_no_pool": ref_no_pool,
+        "pool_no_capacity": pool_no_capacity,
         "ready": ready,
         "total_tenant_count": len(tenant_schedules),
         "checked": checked_any,
