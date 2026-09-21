@@ -760,21 +760,57 @@ class TestAnalyzeClusterTenantRelationshipsAgnosticVTier:
 # ============================================================================
 
 class TestFindProvisionedClusterResourceClaim:
-    def test_returns_true_when_resourceclaim_found(self):
+    def test_returns_true_when_ready_resourceclaim_found_via_catalogitemname(self):
         from rhdp_flow import RHDPConfig as _RHDPConfigForLookup
         from rhdp_flow import find_provisioned_cluster_resourceclaim
         config = _RHDPConfigForLookup()
-        fake_result = MagicMock(returncode=0, stdout='{"items": [{"metadata": {"name": "rc-1"}}]}')
-        with patch("rhdp_flow.subprocess.run", return_value=fake_result):
+        ready_rc = '{"items": [{"metadata": {"name": "rc-1"}, "status": {"ready": true, "healthy": true}}]}'
+        empty = '{"items": []}'
+        results = [
+            MagicMock(returncode=0, stdout=ready_rc),
+            MagicMock(returncode=0, stdout=empty),
+        ]
+        with patch("rhdp_flow.subprocess.run", side_effect=results):
             found = find_provisioned_cluster_resourceclaim("ocp4-cluster.prod", config)
         assert found is True
+
+    def test_returns_true_when_ready_resourceclaim_found_via_tenant_cluster_pool_label(self):
+        from rhdp_flow import RHDPConfig as _RHDPConfigForLookup
+        from rhdp_flow import find_provisioned_cluster_resourceclaim
+        config = _RHDPConfigForLookup()
+        empty = '{"items": []}'
+        ready_rc = '{"items": [{"metadata": {"name": "rc-pool-1"}, "status": {"ready": true, "healthy": true}}]}'
+        results = [
+            MagicMock(returncode=0, stdout=empty),
+            MagicMock(returncode=0, stdout=ready_rc),
+        ]
+        with patch("rhdp_flow.subprocess.run", side_effect=results):
+            found = find_provisioned_cluster_resourceclaim("ocp4-cluster.prod", config)
+        assert found is True
+
+    def test_returns_false_when_cluster_exists_but_not_ready(self):
+        from rhdp_flow import RHDPConfig as _RHDPConfigForLookup
+        from rhdp_flow import find_provisioned_cluster_resourceclaim
+        config = _RHDPConfigForLookup()
+        pending_rc = '{"items": [{"metadata": {"name": "rc-1"}, "status": {"ready": false, "healthy": false}}]}'
+        results = [
+            MagicMock(returncode=0, stdout=pending_rc),
+            MagicMock(returncode=0, stdout='{"items": []}'),
+        ]
+        with patch("rhdp_flow.subprocess.run", side_effect=results):
+            found = find_provisioned_cluster_resourceclaim("ocp4-cluster.prod", config)
+        assert found is False
 
     def test_returns_false_when_no_resourceclaims_found(self):
         from rhdp_flow import RHDPConfig as _RHDPConfigForLookup
         from rhdp_flow import find_provisioned_cluster_resourceclaim
         config = _RHDPConfigForLookup()
-        fake_result = MagicMock(returncode=0, stdout='{"items": []}')
-        with patch("rhdp_flow.subprocess.run", return_value=fake_result):
+        empty = '{"items": []}'
+        results = [
+            MagicMock(returncode=0, stdout=empty),
+            MagicMock(returncode=0, stdout=empty),
+        ]
+        with patch("rhdp_flow.subprocess.run", side_effect=results):
             found = find_provisioned_cluster_resourceclaim("ocp4-cluster.prod", config)
         assert found is False
 
