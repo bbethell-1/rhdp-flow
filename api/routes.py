@@ -1536,6 +1536,15 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                         limit_errors.append(
                             f"{s.ci_name} ({s.ci}): {s.users} requested, max {info['maximum']}"
                         )
+            # Pre-deploy cluster-tenant validation: block if tenant clusters aren't ready
+            if any(s.is_tenant for s in schedules):
+                cluster_validation = validate_cluster_before_tenant(schedules, config=config_check)
+                if cluster_validation["errors"]:
+                    raise HTTPException(
+                        400,
+                        "Cluster-tenant scheduling errors (deploy blocked): "
+                        + "; ".join(cluster_validation["errors"])
+                    )
         finally:
             cluster_targets.cleanup_kubeconfig(config_check.kubeconfig_path if body.target_cluster else None)
         if limit_errors:
