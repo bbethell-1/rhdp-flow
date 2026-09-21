@@ -257,7 +257,7 @@ export const UploadTab: React.FC<Props> = ({
   const [poolCreateEnvLevel, setPoolCreateEnvLevel] = useState('integration');
   const [poolCreateCloud, setPoolCreateCloud] = useState('osp');
   const [poolCreateYaml, setPoolCreateYaml] = useState('');
-  const [poolCreateResults, setPoolCreateResults] = useState<Array<{ name: string; success: boolean; output: string; error: string }>>([]);
+  const [poolCreateResults, setPoolCreateResults] = useState<Array<{ name: string; success: boolean; action: string; output: string; error: string }>>([]);
   const [poolCreateLoading, setPoolCreateLoading] = useState(false);
   const [poolCreateApplied, setPoolCreateApplied] = useState(false);
 
@@ -3015,10 +3015,14 @@ export const UploadTab: React.FC<Props> = ({
                   setPoolCreateResults(res.results);
                   const allOk = res.results.every(r => r.success);
                   if (allOk) {
-                    const enabledMsg = poolCreateEnabled
-                      ? 'Pool(s) created and enabled — Babylon will provision clusters automatically'
-                      : 'TenantClusterPool CRD(s) created — enable the pool to start cluster provisioning';
-                    showToast(enabledMsg, 'success');
+                    const created = res.results.filter(r => r.action === 'created').length;
+                    const enabled = res.results.filter(r => r.action === 'enabled').length;
+                    const active = res.results.filter(r => r.action === 'already_active').length;
+                    const parts = [];
+                    if (created) parts.push(`${created} created`);
+                    if (enabled) parts.push(`${enabled} existing pool(s) enabled`);
+                    if (active) parts.push(`${active} already active`);
+                    showToast(`Done — ${parts.join(', ')}. Babylon will provision clusters (30–60 min).`, 'success');
                     // Do NOT re-validate here: pool CRD exists but has no ready clusters yet.
                     // The danger alert should stay until the pool is actually provisioned.
                   } else {
@@ -3037,35 +3041,63 @@ export const UploadTab: React.FC<Props> = ({
 
           {poolCreateResults.length > 0 && (
             <div style={{ marginBottom: 12 }}>
-              {poolCreateResults.map((r, i) => (
-                <Alert
-                  key={i}
-                  variant={r.success ? 'success' : 'danger'}
-                  isInline
-                  title={r.success ? `✓ ${r.name}` : `✗ ${r.name}`}
-                  style={{ marginBottom: 4 }}
-                >
-                  {r.success ? r.output : r.error}
+              {poolCreateResults.map((r, i) => {
+                const actionLabel = r.action === 'enabled'
+                  ? 'Existing pool enabled'
+                  : r.action === 'already_active'
+                  ? 'Already active'
+                  : 'Pool created';
+                const variant = r.success ? (r.action === 'already_active' ? 'info' : 'success') : 'danger';
+                const title = r.success ? `${actionLabel}: ${r.name}` : `Failed: ${r.name}`;
+                return (
+                  <Alert key={i} variant={variant} isInline title={title} style={{ marginBottom: 4 }}>
+                    {r.success ? r.output : r.error}
+                  </Alert>
+                );
+              })}
+
+              {poolCreateResults.some(r => r.success && r.action === 'already_active') && (
+                <Alert variant="info" isInline title="Some pools were already active" style={{ marginTop: 8 }}>
+                  These pools already exist and are enabled — no changes were made. If clusters are not yet available,
+                  the Babylon operator may still be provisioning them (this takes 30–60 min). Check the pool status
+                  in the cluster console under <code>shared-clusters</code>.
                 </Alert>
-              ))}
-              {poolCreateResults.some(r => r.success) && (
-                <Alert
-                  variant="info"
-                  isInline
-                  title="Pool CRD created — not yet ready to deploy"
-                  style={{ marginTop: 8 }}
-                >
-                  <ol style={{ margin: '6px 0 0 18px', fontSize: '0.875rem', lineHeight: 1.6 }}>
-                    <li>
-                      The CRD is created{poolCreateEnabled
-                        ? ' and enabled.'
-                        : <> but <strong>disabled</strong> — set <code>enabled: true</code> or toggle it in the cluster console to start provisioning.</>
-                      }
-                    </li>
-                    <li>Babylon will provision the clusters. This typically takes <strong>30–60 minutes</strong>.</li>
-                    <li>Once ready, close this modal and click <strong>Re-check cluster refs</strong> in the alert — it will clear when the pool is ready.</li>
+              )}
+
+              {poolCreateResults.some(r => r.success && r.action === 'enabled') && (
+                <Alert variant="warning" isInline title="Existing pools enabled — clusters not ready yet" style={{ marginTop: 8 }}>
+                  <p style={{ margin: '0 0 6px' }}>
+                    These pools already existed but were disabled. Flow has patched them to <code>enabled: true</code> — their
+                    other settings (max clusters, placements, cloud) were left unchanged to avoid overwriting manual config.
+                  </p>
+                  <ol style={{ margin: '4px 0 0 18px', fontSize: '0.875rem', lineHeight: 1.6 }}>
+                    <li>Babylon will now start provisioning clusters. This takes <strong>30–60 minutes</strong>.</li>
+                    <li>Once clusters are ready, close this modal and click <strong>Re-check cluster refs</strong>.</li>
                     <li>Then deploy your workshops normally.</li>
                   </ol>
+                </Alert>
+              )}
+
+              {poolCreateResults.some(r => r.success && r.action === 'created') && (
+                <Alert variant="warning" isInline title="New pools created — clusters not ready yet" style={{ marginTop: 8 }}>
+                  <p style={{ margin: '0 0 6px' }}>
+                    {poolCreateEnabled
+                      ? 'Pools are created and enabled. Babylon will begin provisioning clusters immediately.'
+                      : <>Pools are created but <strong>disabled</strong>. Go to the cluster console and set <code>spec.enabled: true</code> on each pool in the <code>shared-clusters</code> namespace to start provisioning.</>
+                    }
+                  </p>
+                  <ol style={{ margin: '4px 0 0 18px', fontSize: '0.875rem', lineHeight: 1.6 }}>
+                    <li>Cluster provisioning typically takes <strong>30–60 minutes</strong>.</li>
+                    <li>Once clusters are ready, close this modal and click <strong>Re-check cluster refs</strong>.</li>
+                    <li>Then deploy your workshops normally.</li>
+                  </ol>
+                </Alert>
+              )}
+
+              {poolCreateResults.some(r => !r.success) && (
+                <Alert variant="danger" isInline title="One or more pools failed" style={{ marginTop: 8 }}>
+                  Check that you are logged in to the correct cluster and have access to the <code>shared-clusters</code> namespace.
+                  The YAML is shown below — you can copy it and apply manually with <code>oc apply -f -</code>.
                 </Alert>
               )}
             </div>

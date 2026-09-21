@@ -615,5 +615,6 @@ class TenantClusterPoolResult(BaseModel):
     """Per-pool result from create-tenant-cluster-pools."""
     name: str
     success: bool
+    action: str = "created"  # "created" | "enabled" | "already_active"
     output: str = ""
     error: str = ""

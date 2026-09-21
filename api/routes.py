@@ -2992,28 +2992,81 @@ def create_tenant_cluster_pools(
 
     combined_yaml = "---\n".join(_yaml.dump(p, default_flow_style=False) for p in yamls)
 
+    def _get_existing_pool_spec(pool_name: str) -> dict | None:
+        """Return the spec of an existing TenantClusterPool, or None if not found."""
+        try:
+            proc = subprocess.run(
+                ["oc", "get", "tenantclusterpool", pool_name,
+                 "-n", "shared-clusters", "-o", "json"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if proc.returncode != 0:
+                return None
+            return json.loads(proc.stdout).get("spec", {})
+        except Exception:
+            return None
+
     results = []
     if body.apply_to_cluster:
         for pool in yamls:
-            pool_yaml = _yaml.dump(pool, default_flow_style=False)
+            pool_name = pool["metadata"]["name"]
             try:
-                proc = subprocess.run(
-                    ["oc", "apply", "-f", "-"],
-                    input=pool_yaml,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-                results.append({
-                    "name": pool["metadata"]["name"],
-                    "success": proc.returncode == 0,
-                    "output": proc.stdout.strip(),
-                    "error": proc.stderr.strip() if proc.returncode != 0 else "",
-                })
+                existing_spec = _get_existing_pool_spec(pool_name)
+
+                if existing_spec is not None:
+                    # Pool already exists — enable it and ensure minAvailableSandboxPlacements is set
+                    already_enabled = existing_spec.get("enabled", False)
+                    current_min_avail = existing_spec.get("minAvailableSandboxPlacements", 0)
+                    needs_patch = (not already_enabled) or (current_min_avail == 0 and body.min_available_sandbox_placements > 0)
+
+                    if not needs_patch:
+                        results.append({
+                            "name": pool_name,
+                            "success": True,
+                            "action": "already_active",
+                            "output": "Pool already exists and is enabled — no changes needed.",
+                            "error": "",
+                        })
+                        continue
+
+                    patch: dict = {"spec": {"enabled": True}}
+                    if current_min_avail == 0 and body.min_available_sandbox_placements > 0:
+                        patch["spec"]["minAvailableSandboxPlacements"] = body.min_available_sandbox_placements
+
+                    proc = subprocess.run(
+                        ["oc", "patch", "tenantclusterpool", pool_name,
+                         "-n", "shared-clusters",
+                         "--type", "merge",
+                         "-p", json.dumps(patch)],
+                        capture_output=True, text=True, timeout=30,
+                    )
+                    results.append({
+                        "name": pool_name,
+                        "success": proc.returncode == 0,
+                        "action": "enabled",
+                        "output": proc.stdout.strip() or "Patched existing pool to enabled=true.",
+                        "error": proc.stderr.strip() if proc.returncode != 0 else "",
+                    })
+                else:
+                    # Pool does not exist — create it
+                    pool_yaml = _yaml.dump(pool, default_flow_style=False)
+                    proc = subprocess.run(
+                        ["oc", "apply", "-f", "-"],
+                        input=pool_yaml,
+                        capture_output=True, text=True, timeout=30,
+                    )
+                    results.append({
+                        "name": pool_name,
+                        "success": proc.returncode == 0,
+                        "action": "created",
+                        "output": proc.stdout.strip(),
+                        "error": proc.stderr.strip() if proc.returncode != 0 else "",
+                    })
             except Exception as exc:
                 results.append({
-                    "name": pool["metadata"]["name"],
+                    "name": pool_name,
                     "success": False,
+                    "action": "created",
                     "output": "",
                     "error": str(exc),
                 })

@@ -268,7 +268,7 @@ export const api = {
     request<{
       yaml: string;
       applied: boolean;
-      results: Array<{ name: string; success: boolean; output: string; error: string }>;
+      results: Array<{ name: string; success: boolean; action: string; output: string; error: string }>;
       count: number;
     }>('/schedules/create-tenant-cluster-pools', {
       method: 'POST',
