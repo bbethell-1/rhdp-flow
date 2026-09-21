@@ -244,31 +244,6 @@ export const api = {
       total_tenant_count: number;
       checked: boolean;
     }>('/schedules/tenant-cluster-refs'),
-  autoProvisionClusters: (bufferHours = 4.0) =>
-    request<{
-      added: Array<{
-        tenant_ci: string;
-        cluster_ci: string;
-        workshop_name: string;
-        reason: string;
-        tenant_adjusted: boolean;
-        tenant_original_date: string | null;
-        tenant_new_date: string | null;
-      }>;
-      adjusted: Array<{
-        tenant_ci: string;
-        workshop_name: string;
-        reason: string;
-        tenant_original_date: string | null;
-        tenant_new_date: string | null;
-      }>;
-      count: number;
-      needs_agv_prs: Array<{ tenant_ci: string; cluster_ci: string; workshop_name: string }>;
-      schedules: WorkshopSchedule[];
-    }>(`/schedules/auto-provision-clusters?buffer_hours=${bufferHours}`, { method: 'POST' }),
-  removeAutoProvisioned: () =>
-    request<{ removed_count: number; schedules: WorkshopSchedule[] }>(
-      '/schedules/remove-auto-provisioned', { method: 'POST' }),
   checkPoolStatus: (cluster_cis: string[]) =>
     request<{
       results: Array<{

@@ -1536,15 +1536,32 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                         limit_errors.append(
                             f"{s.ci_name} ({s.ci}): {s.users} requested, max {info['maximum']}"
                         )
-            # Pre-deploy cluster-tenant validation: block if tenant clusters aren't ready
+            # Pre-deploy cluster-tenant validation: block if tenant clusters aren't ready.
+            # Pool-backed tenants (TenantClusterPool exists with available clusters) are
+            # always safe — Babylon manages provisioning internally, no cluster row needed.
             if any(s.is_tenant for s in schedules):
                 cluster_validation = validate_cluster_before_tenant(schedules, config=config_check)
                 if cluster_validation["errors"]:
-                    raise HTTPException(
-                        400,
-                        "Cluster-tenant scheduling errors (deploy blocked): "
-                        + "; ".join(cluster_validation["errors"])
-                    )
+                    # Check which tenants are covered by a live pool with capacity —
+                    # those are safe even without a cluster row in this batch.
+                    try:
+                        from lib.tenant_cluster_capacity import check_tenant_cluster_references
+                        pool_check = check_tenant_cluster_references(schedules)
+                        pool_ready_cis = {r["ci"] for r in pool_check.get("ready", [])}
+                    except Exception:
+                        pool_ready_cis = set()
+
+                    # Only block on errors for tenants NOT covered by an active pool
+                    blocking_errors = [
+                        e for e in cluster_validation["errors"]
+                        if not any(ci in e for ci in pool_ready_cis)
+                    ]
+                    if blocking_errors:
+                        raise HTTPException(
+                            400,
+                            "Cluster-tenant scheduling errors (deploy blocked): "
+                            + "; ".join(blocking_errors)
+                        )
         finally:
             cluster_targets.cleanup_kubeconfig(config_check.kubeconfig_path if body.target_cluster else None)
         if limit_errors:
@@ -2839,98 +2856,6 @@ def check_tenant_cluster_refs(_key=Depends(verify_api_key)):
         logger.exception("Tenant cluster reference check failed")
         return {"missing_refs": [], "total_tenant_count": 0}
 
-
-
-@router.post("/schedules/auto-provision-clusters")
-def auto_provision_clusters(buffer_hours: float = 4.0, dry_run: bool = False, _key=Depends(verify_api_key)):
-    """Inject fresh cluster provisioners for tenants that have nowhere to land.
-
-    For each tenant with no shared pool and no matching cluster row in the
-    batch, appends an auto_added cluster schedule (buffer_hours earlier) so
-    the tenant can deploy. Fully reversible via /schedules/remove-auto-provisioned.
-
-    Args:
-        buffer_hours: Hours to schedule cluster before tenant (default 4.0)
-        dry_run: If True, return what would be added without mutating schedules
-
-    Returns: {added, count, needs_agv_prs, schedules} or {would_add, count: 0} if dry_run
-    """
-    global _schedules
-    if not _schedules:
-        raise HTTPException(400, "No schedules loaded.")
-
-    try:
-        from api.audit import audit_log
-        from rhdp_flow import auto_provision_missing_clusters
-
-        if dry_run:
-            # Clone schedules to avoid mutation
-            schedules_copy = copy.deepcopy(_schedules)
-            result = auto_provision_missing_clusters(schedules_copy, buffer_hours=buffer_hours)
-            return {
-                "would_add": result["added"],
-                "count": 0,
-                "needs_agv_prs": result["needs_agv_prs"],
-            }
-
-        result = auto_provision_missing_clusters(_schedules, buffer_hours=buffer_hours)
-
-        # Audit log the operation
-        audit_log(
-            action="auto_provision_clusters",
-            user=str(_key) if _key else "unauthenticated",
-            details={
-                "buffer_hours": buffer_hours,
-                "added_count": result["count"],
-                "cluster_cis": [a["cluster_ci"] for a in result["added"]],
-            },
-        )
-
-        result["schedules"] = [_schedule_to_response(s) for s in _schedules]
-        return result
-    except Exception:
-        logger.exception("Auto-provision clusters failed")
-        return {"added": [], "count": 0, "needs_agv_prs": [],
-                "schedules": [_schedule_to_response(s) for s in _schedules]}
-
-
-@router.post("/schedules/remove-auto-provisioned")
-def remove_auto_provisioned(dry_run: bool = False, _key=Depends(verify_api_key)):
-    """Remove all Flow-injected (auto_added) cluster rows.
-
-    Args:
-        dry_run: If True, return what would be removed without mutating schedules
-
-    Returns: {removed_count, schedules} or {would_remove_count, removed_count: 0} if dry_run
-    """
-    global _schedules
-    if not _schedules:
-        raise HTTPException(400, "No schedules loaded.")
-
-    try:
-        from api.audit import audit_log
-        from rhdp_flow import remove_auto_provisioned_clusters
-
-        if dry_run:
-            # Count auto-added without mutation
-            count = sum(1 for s in _schedules if getattr(s, "auto_added", False))
-            return {"would_remove_count": count, "removed_count": 0}
-
-        result = remove_auto_provisioned_clusters(_schedules)
-
-        # Audit log the operation
-        audit_log(
-            action="remove_auto_provisioned_clusters",
-            user=str(_key) if _key else "unauthenticated",
-            details={"removed_count": result["removed_count"]},
-        )
-
-        result["schedules"] = [_schedule_to_response(s) for s in _schedules]
-        return result
-    except Exception:
-        logger.exception("Remove auto-provisioned clusters failed")
-        return {"removed_count": 0,
-                "schedules": [_schedule_to_response(s) for s in _schedules]}
 
 
 @router.post("/schedules/check-pool-status")
