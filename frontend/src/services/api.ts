@@ -246,7 +246,22 @@ export const api = {
     }>('/schedules/tenant-cluster-refs'),
   autoProvisionClusters: (bufferHours = 4.0) =>
     request<{
-      added: Array<{ tenant_ci: string; cluster_ci: string; workshop_name: string }>;
+      added: Array<{
+        tenant_ci: string;
+        cluster_ci: string;
+        workshop_name: string;
+        reason: string;
+        tenant_adjusted: boolean;
+        tenant_original_date: string | null;
+        tenant_new_date: string | null;
+      }>;
+      adjusted: Array<{
+        tenant_ci: string;
+        workshop_name: string;
+        reason: string;
+        tenant_original_date: string | null;
+        tenant_new_date: string | null;
+      }>;
       count: number;
       needs_agv_prs: Array<{ tenant_ci: string; cluster_ci: string; workshop_name: string }>;
       schedules: WorkshopSchedule[];
@@ -254,11 +269,25 @@ export const api = {
   removeAutoProvisioned: () =>
     request<{ removed_count: number; schedules: WorkshopSchedule[] }>(
       '/schedules/remove-auto-provisioned', { method: 'POST' }),
+  checkPoolStatus: (cluster_cis: string[]) =>
+    request<{
+      results: Array<{
+        name: string;
+        exists: boolean;
+        enabled: boolean;
+        available_clusters: number;
+        action_preview: string;
+      }>;
+    }>('/schedules/check-pool-status', {
+      method: 'POST',
+      body: JSON.stringify({ cluster_cis }),
+    }),
   createTenantClusterPools: (body: {
     cluster_cis: string[];
     enabled?: boolean;
     min_clusters?: number;
     max_clusters?: number;
+    min_available_sandbox_placements?: number;
     max_placements?: number;
     environment_level?: string;
     cloud?: string;
@@ -267,7 +296,7 @@ export const api = {
     request<{
       yaml: string;
       applied: boolean;
-      results: Array<{ name: string; success: boolean; output: string; error: string }>;
+      results: Array<{ name: string; success: boolean; action: string; output: string; error: string }>;
       count: number;
     }>('/schedules/create-tenant-cluster-pools', {
       method: 'POST',

@@ -430,49 +430,75 @@ def _shift_provisioning_earlier(provisioning_date: str, minutes: int = 240) -> s
         return provisioning_date
 
 
+def _shift_date_str(date_str: str, delta: timedelta) -> str:
+    """Shift a DD/MM/YYYY HH:MM string by delta, returning the same format."""
+    try:
+        dt = datetime.strptime(date_str.strip(), "%d/%m/%Y %H:%M")
+        return (dt + delta).strftime("%d/%m/%Y %H:%M")
+    except (ValueError, AttributeError):
+        return date_str
+
+
 def auto_provision_missing_clusters(schedules: list[WorkshopSchedule], buffer_hours: float = 4.0) -> dict[str, Any]:
     """
     Inject a fresh cluster provisioner for every tenant that has nowhere to land.
 
-    A tenant will fail on deploy if there is no shared TenantClusterPool for it
-    AND no matching ``-cluster`` provisioner in this batch. This function finds
-    those tenants (via the live-catalog/pool check) and appends a cluster
-    WorkshopSchedule for each, so the tenant has somewhere to run.
+    Covers two failure modes:
+      1. No TenantClusterPool exists for the tenant (no pool / ref missing).
+      2. A pool exists but has zero available clusters (e.g. still provisioning,
+         or at capacity) — the tenant would fail immediately on deploy.
 
-    Injected rows are tagged ``auto_added=True`` and named "... (Cluster — added
-    by Flow)" so they are obvious in the UI and fully reversible. They inherit
-    the tenant's namespace/dates/instances and are scheduled buffer_hours earlier so the
-    cluster is ready before the tenant provisions.
+    For each at-risk tenant an auto-added cluster row is inserted, scheduled
+    buffer_hours before the tenant. If that shift would put the cluster in the
+    past, the cluster is scheduled at now+30 min and the tenant is pushed
+    forward so the gap is always at least buffer_hours — preventing a race where
+    the tenant deploys before its cluster is ready.
 
-    This is a deploy-time convenience only. The permanent fix is a catalog
-    ``tenant_cluster`` reference (AgnosticV PR) + a shared cluster pool.
+    Injected rows are tagged auto_added=True and named "… (Cluster — added by
+    Flow)" so they are obvious in the UI and fully reversible.
 
-    Returns dict: {added: [{tenant_ci, cluster_ci, workshop_name}], count, needs_agv_prs}.
+    This is a deploy-time stopgap. The lasting fix is a catalog tenant_cluster
+    reference (AgnosticV PR) + a shared TenantClusterPool.
+
+    Returns dict:
+        added        — list of {tenant_ci, cluster_ci, workshop_name, reason,
+                        tenant_adjusted, tenant_original_date, tenant_new_date}
+        adjusted     — subset of added where tenant dates were pushed forward
+        count        — len(added)
+        needs_agv_prs — tenants that need a permanent AgnosticV fix
     """
     from lib.tenant_cluster_capacity import check_tenant_cluster_references
 
     refs = check_tenant_cluster_references(schedules)
-    # Will-fail tenants: no pool and no cluster row already in the batch.
-    will_fail = [
-        r for r in (refs.get("missing_refs", []) + refs.get("ref_no_pool", []))
-        if not r.get("pool_exists") and not r.get("has_cluster_row")
+    buffer_minutes = int(buffer_hours * 60)
+
+    # Tier 1: no pool at all + no cluster row
+    will_fail_no_pool = [
+        (r, "no_pool") for r in (refs.get("missing_refs", []) + refs.get("ref_no_pool", []))
+        if not r.get("has_cluster_row")
     ]
+    # Tier 2: pool exists but zero available clusters + no cluster row
+    will_fail_empty_pool = [
+        (r, "pool_empty") for r in refs.get("pool_no_capacity", [])
+        if not r.get("has_cluster_row")
+    ]
+    will_fail = will_fail_no_pool + will_fail_empty_pool
 
     # CIs of clusters already present (manual or previously auto-added) — never double-add.
     existing_cluster_cis = {s.ci for s in schedules if getattr(s, "is_cluster", False) or is_cluster_ci(s.ci)}
 
     by_ci = {s.ci: s for s in schedules}
-    added: list[dict[str, str]] = []
+    added: list[dict] = []
+    adjusted: list[dict] = []
     needs_agv_prs: list[dict[str, str]] = []
 
-    for r in will_fail:
+    for r, reason in will_fail:
         tenant = by_ci.get(r["ci"])
         if tenant is None:
             continue
         cluster_ci = tenant.detected_cluster_ci or get_cluster_ci_for_tenant(
             tenant.ci, tenant.cluster_ci_override
         )
-        # Record what the user should do for a permanent fix regardless.
         needs_agv_prs.append({
             "tenant_ci": tenant.ci,
             "cluster_ci": cluster_ci or "",
@@ -480,6 +506,26 @@ def auto_provision_missing_clusters(schedules: list[WorkshopSchedule], buffer_ho
         })
         if not cluster_ci or cluster_ci in existing_cluster_cis:
             continue
+
+        cluster_start_str = _shift_provisioning_earlier(tenant.provisioning_date, buffer_minutes)
+
+        # Ensure the tenant is at least buffer_hours after the cluster.
+        # If _shift_provisioning_earlier had to fall back to now+30min, the
+        # tenant's original time may be too close — push the tenant forward.
+        tenant_adjusted = False
+        original_tenant_date = tenant.provisioning_date
+        try:
+            cluster_dt = datetime.strptime(cluster_start_str, "%d/%m/%Y %H:%M")
+            tenant_dt = datetime.strptime(tenant.provisioning_date.strip(), "%d/%m/%Y %H:%M")
+            gap = tenant_dt - cluster_dt
+            if gap < timedelta(hours=buffer_hours):
+                delta = timedelta(hours=buffer_hours) - gap
+                tenant.provisioning_date = _shift_date_str(tenant.provisioning_date, delta)
+                tenant.auto_stop = _shift_date_str(tenant.auto_stop, delta)
+                tenant.auto_destroy = _shift_date_str(tenant.auto_destroy, delta)
+                tenant_adjusted = True
+        except (ValueError, AttributeError):
+            pass
 
         cluster = WorkshopSchedule(
             ci_name=f"{tenant.ci_name} (Cluster — added by Flow)",
@@ -490,7 +536,7 @@ def auto_provision_missing_clusters(schedules: list[WorkshopSchedule], buffer_ho
             activity=tenant.activity,
             purpose=tenant.purpose,
             workshop_name=tenant.workshop_name,
-            provisioning_date=_shift_provisioning_earlier(tenant.provisioning_date, int(buffer_hours * 60)),
+            provisioning_date=cluster_start_str,
             auto_stop=tenant.auto_stop,
             auto_destroy=tenant.auto_destroy,
             instances=tenant.instances,
@@ -504,17 +550,29 @@ def auto_provision_missing_clusters(schedules: list[WorkshopSchedule], buffer_ho
         )
         schedules.append(cluster)
         existing_cluster_cis.add(cluster_ci)
-        added.append({
+
+        entry: dict = {
             "tenant_ci": tenant.ci,
             "cluster_ci": cluster_ci,
             "workshop_name": tenant.ci_name,
-        })
+            "reason": reason,
+            "tenant_adjusted": tenant_adjusted,
+            "tenant_original_date": original_tenant_date if tenant_adjusted else None,
+            "tenant_new_date": tenant.provisioning_date if tenant_adjusted else None,
+        }
+        added.append(entry)
+        if tenant_adjusted:
+            adjusted.append(entry)
 
-    # Re-analyze so the new cluster rows and tenant links are consistent.
     if added:
         analyze_cluster_tenant_relationships(schedules)
 
-    return {"added": added, "count": len(added), "needs_agv_prs": needs_agv_prs}
+    return {
+        "added": added,
+        "adjusted": adjusted,
+        "count": len(added),
+        "needs_agv_prs": needs_agv_prs,
+    }
 
 
 def remove_auto_provisioned_clusters(schedules: list[WorkshopSchedule]) -> dict[str, Any]:

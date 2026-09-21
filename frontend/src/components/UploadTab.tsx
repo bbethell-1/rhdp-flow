@@ -211,7 +211,22 @@ export const UploadTab: React.FC<Props> = ({
   // cluster row), Flow injects a fresh cluster provisioner so it can deploy.
   const [enableAutoProvision, setEnableAutoProvision] = useState(false);
   const [autoProvisionResult, setAutoProvisionResult] = useState<{
-    added: Array<{ tenant_ci: string; cluster_ci: string; workshop_name: string }>;
+    added: Array<{
+      tenant_ci: string;
+      cluster_ci: string;
+      workshop_name: string;
+      reason: string;
+      tenant_adjusted: boolean;
+      tenant_original_date: string | null;
+      tenant_new_date: string | null;
+    }>;
+    adjusted: Array<{
+      tenant_ci: string;
+      workshop_name: string;
+      tenant_original_date: string | null;
+      tenant_new_date: string | null;
+      reason: string;
+    }>;
     needs_agv_prs: Array<{ tenant_ci: string; cluster_ci: string; workshop_name: string }>;
   } | null>(null);
 
@@ -249,14 +264,19 @@ export const UploadTab: React.FC<Props> = ({
   // ── TenantClusterPool creation modal ──
   const [showPoolCreateModal, setShowPoolCreateModal] = useState(false);
   const [poolCreateCIs, setPoolCreateCIs] = useState<string[]>([]);
-  const [poolCreateEnabled, setPoolCreateEnabled] = useState(false);
+  const [poolCreateEnabled, setPoolCreateEnabled] = useState(true);
+  const [poolCreateStatusCheck, setPoolCreateStatusCheck] = useState<Array<{
+    name: string; exists: boolean; enabled: boolean; available_clusters: number; action_preview: string;
+  }> | null>(null);
+  const [poolCreateStatusLoading, setPoolCreateStatusLoading] = useState(false);
   const [poolCreateMin, setPoolCreateMin] = useState(1);
   const [poolCreateMax, setPoolCreateMax] = useState(3);
+  const [poolCreateMinAvailPlacements, setPoolCreateMinAvailPlacements] = useState(1);
   const [poolCreateMaxPlacements, setPoolCreateMaxPlacements] = useState(15);
   const [poolCreateEnvLevel, setPoolCreateEnvLevel] = useState('integration');
   const [poolCreateCloud, setPoolCreateCloud] = useState('osp');
   const [poolCreateYaml, setPoolCreateYaml] = useState('');
-  const [poolCreateResults, setPoolCreateResults] = useState<Array<{ name: string; success: boolean; output: string; error: string }>>([]);
+  const [poolCreateResults, setPoolCreateResults] = useState<Array<{ name: string; success: boolean; action: string; output: string; error: string }>>([]);
   const [poolCreateLoading, setPoolCreateLoading] = useState(false);
   const [poolCreateApplied, setPoolCreateApplied] = useState(false);
 
@@ -557,10 +577,17 @@ export const UploadTab: React.FC<Props> = ({
     try {
       const prov = await api.autoProvisionClusters(timingBufferHours);
       if (prov.schedules) setSchedules(prov.schedules);
-      setAutoProvisionResult({ added: prov.added || [], needs_agv_prs: prov.needs_agv_prs || [] });
+      setAutoProvisionResult({
+        added: prov.added || [],
+        adjusted: prov.adjusted || [],
+        needs_agv_prs: prov.needs_agv_prs || [],
+      });
       try { setMissingTenantRefs(await api.checkTenantClusterRefs()); } catch { /* ignore */ }
-      if ((prov.added || []).length > 0) {
-        showToast(`Added ${prov.added.length} cluster provisioner row(s)`, 'success');
+      const added = prov.added || [];
+      const adjusted = prov.adjusted || [];
+      if (added.length > 0) {
+        const adjNote = adjusted.length > 0 ? ` — ${adjusted.length} tenant time(s) pushed forward` : '';
+        showToast(`Added ${added.length} cluster row(s)${adjNote}`, adjusted.length > 0 ? 'danger' : 'success');
       }
     } catch (e) {
       showToast(`Auto-provision failed: ${e}`, 'danger');
@@ -1548,52 +1575,93 @@ export const UploadTab: React.FC<Props> = ({
           })()}
 
           {/* Flow auto-added fresh clusters so at-risk tenants have somewhere to land */}
-          {autoProvisionResult && autoProvisionResult.added.length > 0 && (
-            <Alert
-              variant="success"
-              isInline
-              title={`Flow added ${autoProvisionResult.added.length} cluster(s) so these workshops can deploy`}
-              style={{ marginBottom: 12 }}
-              actionClose={
-                <Button
-                  variant="link"
-                  isInline
-                  onClick={async () => {
-                    try {
-                      const res = await api.removeAutoProvisioned();
-                      if (res.schedules) setSchedules(res.schedules);
-                      setAutoProvisionResult(null);
-                      try { setMissingTenantRefs(await api.checkTenantClusterRefs()); } catch { /* ignore */ }
-                      showToast(`Removed ${res.removed_count} Flow-added cluster(s)`, 'info');
-                    } catch (e) {
-                      showToast(`Could not remove clusters: ${e}`, 'danger');
-                    }
-                  }}
-                >
-                  Remove
-                </Button>
-              }
-            >
-              <div style={{ marginBottom: 8 }}>
-                These tenant workshops had no cluster to run on (no shared pool, no cluster in your CSV),
-                so Flow added a fresh cluster for each — scheduled <strong>{timingBufferHours} hours earlier</strong> and tagged
-                <strong> "added by Flow"</strong> in the table below. Remove them any time with the link above.
-              </div>
-              <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
-                {autoProvisionResult.added.slice(0, 5).map((a, i) => (
-                  <li key={i}><strong>{a.workshop_name}</strong> → <code>{a.cluster_ci}</code></li>
-                ))}
-                {autoProvisionResult.added.length > 5 && (
-                  <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>
-                    ...and {autoProvisionResult.added.length - 5} more
-                  </li>
+          {autoProvisionResult && autoProvisionResult.added.length > 0 && (() => {
+            const noPool = autoProvisionResult.added.filter(a => a.reason === 'no_pool');
+            const poolEmpty = autoProvisionResult.added.filter(a => a.reason === 'pool_empty');
+            const dateAdjusted = autoProvisionResult.adjusted || [];
+            const removeBtn = (
+              <Button variant="link" isInline onClick={async () => {
+                try {
+                  const res = await api.removeAutoProvisioned();
+                  if (res.schedules) setSchedules(res.schedules);
+                  setAutoProvisionResult(null);
+                  try { setMissingTenantRefs(await api.checkTenantClusterRefs()); } catch { /* ignore */ }
+                  showToast(`Removed ${res.removed_count} Flow-added cluster(s)`, 'info');
+                } catch (e) {
+                  showToast(`Could not remove clusters: ${e}`, 'danger');
+                }
+              }}>Remove all</Button>
+            );
+            return (
+              <>
+                {noPool.length > 0 && (
+                  <Alert variant="warning" isInline
+                    title={`${noPool.length} tenant workshop${noPool.length > 1 ? 's' : ''} had no cluster pool — Flow added a fresh cluster`}
+                    style={{ marginBottom: 8 }}
+                    actionClose={poolEmpty.length === 0 && dateAdjusted.length === 0 ? removeBtn : undefined}
+                  >
+                    <div style={{ marginBottom: 6 }}>
+                      These workshops have no shared <code>TenantClusterPool</code> and no cluster row in your CSV.
+                      Flow added a cluster for each, scheduled <strong>{timingBufferHours} hours earlier</strong>.
+                      This is a per-event workaround — the lasting fix is a TenantClusterPool (ping <code>#forum-rhdp</code>).
+                    </div>
+                    <ul style={{ margin: '0 0 4px 18px', fontSize: '0.875rem' }}>
+                      {noPool.slice(0, 5).map((a, i) => (
+                        <li key={i}><strong>{a.workshop_name}</strong> → <code>{a.cluster_ci}</code></li>
+                      ))}
+                      {noPool.length > 5 && <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>...and {noPool.length - 5} more</li>}
+                    </ul>
+                  </Alert>
                 )}
-              </ul>
-              <div style={{ padding: '10px 14px', background: 'var(--pf-v6-global--BackgroundColor--200)', border: '1px solid var(--pf-v6-global--BorderColor--100)', borderRadius: 4, fontSize: '0.85rem' }}>
-                <strong>💡 Permanent fix:</strong> Add a <code>tenant_cluster</code> reference in AgnosticV and create a shared cluster pool. Then no per-event cluster is needed. Ping <code>#forum-rhdp</code>.
-              </div>
-            </Alert>
-          )}
+
+                {poolEmpty.length > 0 && (
+                  <Alert variant="warning" isInline
+                    title={`${poolEmpty.length} tenant workshop${poolEmpty.length > 1 ? 's' : ''} have a pool but no available clusters — Flow added a fresh cluster`}
+                    style={{ marginBottom: 8 }}
+                    actionClose={dateAdjusted.length === 0 ? removeBtn : undefined}
+                  >
+                    <div style={{ marginBottom: 6 }}>
+                      A <code>TenantClusterPool</code> exists for these workshops but currently has <strong>0 available clusters</strong> —
+                      they may still be provisioning. Flow added a fresh cluster for each as a safety net.
+                      Once the pool has available clusters you can remove these rows.
+                    </div>
+                    <ul style={{ margin: '0 0 4px 18px', fontSize: '0.875rem' }}>
+                      {poolEmpty.slice(0, 5).map((a, i) => (
+                        <li key={i}><strong>{a.workshop_name}</strong> → <code>{a.cluster_ci}</code></li>
+                      ))}
+                      {poolEmpty.length > 5 && <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>...and {poolEmpty.length - 5} more</li>}
+                    </ul>
+                  </Alert>
+                )}
+
+                {dateAdjusted.length > 0 && (
+                  <Alert variant="danger" isInline
+                    title={`${dateAdjusted.length} tenant workshop${dateAdjusted.length > 1 ? 's' : ''} had their start time pushed forward`}
+                    style={{ marginBottom: 8 }}
+                    actionClose={removeBtn}
+                  >
+                    <div style={{ marginBottom: 6 }}>
+                      The auto-added cluster couldn't start <strong>{timingBufferHours} hours before</strong> the tenant
+                      (the required time was already in the past), so Flow pushed the <strong>tenant start time forward</strong>
+                      to maintain the {timingBufferHours}-hour gap. Review and adjust manually if needed before deploying.
+                    </div>
+                    <ul style={{ margin: '0 0 4px 18px', fontSize: '0.875rem' }}>
+                      {dateAdjusted.slice(0, 5).map((a, i) => (
+                        <li key={i}>
+                          <strong>{a.workshop_name}</strong>:{' '}
+                          <span style={{ textDecoration: 'line-through', color: 'var(--pf-v6-global--Color--200)' }}>{a.tenant_original_date}</span>
+                          {' → '}
+                          <strong>{a.tenant_new_date}</strong>
+                          {a.reason === 'pool_empty' && <span style={{ color: 'var(--pf-v6-global--Color--200)', fontSize: '0.8rem' }}> (pool empty)</span>}
+                        </li>
+                      ))}
+                      {dateAdjusted.length > 5 && <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>...and {dateAdjusted.length - 5} more</li>}
+                    </ul>
+                  </Alert>
+                )}
+              </>
+            );
+          })()}
 
           {/* Cluster row timing errors — only relevant when cluster rows exist in the batch
               (auto-add or manual). Workshops backed by a TenantClusterPool don't need this
@@ -2858,6 +2926,7 @@ export const UploadTab: React.FC<Props> = ({
           setPoolCreateYaml('');
           setPoolCreateResults([]);
           setPoolCreateApplied(false);
+          setPoolCreateStatusCheck(null);
         }}
         aria-labelledby="pool-create-title"
       >
@@ -2896,6 +2965,48 @@ export const UploadTab: React.FC<Props> = ({
                 </span>
               ))}
             </div>
+          </div>
+
+          {/* Per-pool status check */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>What will happen</span>
+              <Button
+                variant="link" isInline isDisabled={poolCreateStatusLoading}
+                onClick={async () => {
+                  setPoolCreateStatusLoading(true);
+                  try {
+                    const data = await api.checkPoolStatus(poolCreateCIs);
+                    setPoolCreateStatusCheck(data.results || []);
+                  } catch { /* ignore */ } finally {
+                    setPoolCreateStatusLoading(false);
+                  }
+                }}
+              >
+                {poolCreateStatusLoading ? 'Checking…' : 'Check cluster'}
+              </Button>
+            </div>
+            {poolCreateStatusCheck ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {poolCreateStatusCheck.map((s, i) => {
+                  const badge = s.action_preview === 'already_active'
+                    ? { label: 'Already active', color: 'var(--pf-v6-global--success-color--100)' }
+                    : s.action_preview === 'enable'
+                    ? { label: `Exists – disabled → will enable${s.available_clusters > 0 ? ` (${s.available_clusters} clusters available)` : ''}`, color: 'var(--pf-v6-global--warning-color--100)' }
+                    : { label: 'Does not exist → will create fresh', color: 'var(--pf-v6-global--info-color--100)' };
+                  return (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem' }}>
+                      <code style={{ flex: '0 0 auto', maxWidth: 340, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</code>
+                      <span style={{ color: badge.color, fontWeight: 600 }}>{badge.label}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)' }}>
+                Click "Check cluster" to see whether each pool already exists before applying.
+              </div>
+            )}
           </div>
 
           {/* Config form */}
@@ -2938,6 +3049,13 @@ export const UploadTab: React.FC<Props> = ({
                 style={{ width: '100%', padding: '6px 8px', borderRadius: 4, border: '1px solid var(--pf-v6-global--BorderColor--100)', background: 'var(--pf-v6-global--BackgroundColor--100)', color: 'var(--pf-v6-global--Color--100)' }} />
             </div>
             <div>
+              <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, fontSize: '0.875rem' }}>Min Available Placements</label>
+              <input type="number" min={0} max={20} value={poolCreateMinAvailPlacements}
+                onChange={e => setPoolCreateMinAvailPlacements(Number(e.target.value))}
+                style={{ width: '100%', padding: '6px 8px', borderRadius: 4, border: '1px solid var(--pf-v6-global--BorderColor--100)', background: 'var(--pf-v6-global--BackgroundColor--100)', color: 'var(--pf-v6-global--Color--100)' }} />
+              <div style={{ fontSize: '0.75rem', color: 'var(--pf-v6-global--Color--200)', marginTop: 3 }}>Operator keeps this many tenant slots ready at all times</div>
+            </div>
+            <div>
               <label style={{ display: 'block', fontWeight: 600, marginBottom: 4, fontSize: '0.875rem' }}>Max Placements (tenants per cluster)</label>
               <input type="number" min={1} max={50} value={poolCreateMaxPlacements}
                 onChange={e => setPoolCreateMaxPlacements(Number(e.target.value))}
@@ -2967,6 +3085,7 @@ export const UploadTab: React.FC<Props> = ({
                     enabled: poolCreateEnabled,
                     min_clusters: poolCreateMin,
                     max_clusters: poolCreateMax,
+                    min_available_sandbox_placements: poolCreateMinAvailPlacements,
                     max_placements: poolCreateMaxPlacements,
                     environment_level: poolCreateEnvLevel,
                     cloud: poolCreateCloud,
@@ -2996,6 +3115,7 @@ export const UploadTab: React.FC<Props> = ({
                     enabled: poolCreateEnabled,
                     min_clusters: poolCreateMin,
                     max_clusters: poolCreateMax,
+                    min_available_sandbox_placements: poolCreateMinAvailPlacements,
                     max_placements: poolCreateMaxPlacements,
                     environment_level: poolCreateEnvLevel,
                     cloud: poolCreateCloud,
@@ -3005,7 +3125,14 @@ export const UploadTab: React.FC<Props> = ({
                   setPoolCreateResults(res.results);
                   const allOk = res.results.every(r => r.success);
                   if (allOk) {
-                    showToast(`TenantClusterPool CRD(s) created — enable and wait for clusters before deploying`, 'success');
+                    const created = res.results.filter(r => r.action === 'created').length;
+                    const enabled = res.results.filter(r => r.action === 'enabled').length;
+                    const active = res.results.filter(r => r.action === 'already_active').length;
+                    const parts = [];
+                    if (created) parts.push(`${created} created`);
+                    if (enabled) parts.push(`${enabled} existing pool(s) enabled`);
+                    if (active) parts.push(`${active} already active`);
+                    showToast(`Done — ${parts.join(', ')}. Babylon will provision clusters (30–60 min).`, 'success');
                     // Do NOT re-validate here: pool CRD exists but has no ready clusters yet.
                     // The danger alert should stay until the pool is actually provisioned.
                   } else {
@@ -3024,35 +3151,63 @@ export const UploadTab: React.FC<Props> = ({
 
           {poolCreateResults.length > 0 && (
             <div style={{ marginBottom: 12 }}>
-              {poolCreateResults.map((r, i) => (
-                <Alert
-                  key={i}
-                  variant={r.success ? 'success' : 'danger'}
-                  isInline
-                  title={r.success ? `✓ ${r.name}` : `✗ ${r.name}`}
-                  style={{ marginBottom: 4 }}
-                >
-                  {r.success ? r.output : r.error}
+              {poolCreateResults.map((r, i) => {
+                const actionLabel = r.action === 'enabled'
+                  ? 'Existing pool enabled'
+                  : r.action === 'already_active'
+                  ? 'Already active'
+                  : 'Pool created';
+                const variant = r.success ? (r.action === 'already_active' ? 'info' : 'success') : 'danger';
+                const title = r.success ? `${actionLabel}: ${r.name}` : `Failed: ${r.name}`;
+                return (
+                  <Alert key={i} variant={variant} isInline title={title} style={{ marginBottom: 4 }}>
+                    {r.success ? r.output : r.error}
+                  </Alert>
+                );
+              })}
+
+              {poolCreateResults.some(r => r.success && r.action === 'already_active') && (
+                <Alert variant="info" isInline title="Some pools were already active" style={{ marginTop: 8 }}>
+                  These pools already exist and are enabled — no changes were made. If clusters are not yet available,
+                  the Babylon operator may still be provisioning them (this takes 30–60 min). Check the pool status
+                  in the cluster console under <code>shared-clusters</code>.
                 </Alert>
-              ))}
-              {poolCreateResults.some(r => r.success) && (
-                <Alert
-                  variant="info"
-                  isInline
-                  title="Pool CRD created — not yet ready to deploy"
-                  style={{ marginTop: 8 }}
-                >
-                  <ol style={{ margin: '6px 0 0 18px', fontSize: '0.875rem', lineHeight: 1.6 }}>
-                    <li>
-                      The CRD is created{poolCreateEnabled
-                        ? ' and enabled.'
-                        : <> but <strong>disabled</strong> — set <code>enabled: true</code> or toggle it in the cluster console to start provisioning.</>
-                      }
-                    </li>
-                    <li>Babylon will provision the clusters. This typically takes <strong>30–60 minutes</strong>.</li>
-                    <li>Once ready, close this modal and click <strong>Re-check cluster refs</strong> in the alert — it will clear when the pool is ready.</li>
+              )}
+
+              {poolCreateResults.some(r => r.success && r.action === 'enabled') && (
+                <Alert variant="warning" isInline title="Existing pools enabled — clusters not ready yet" style={{ marginTop: 8 }}>
+                  <p style={{ margin: '0 0 6px' }}>
+                    These pools already existed but were disabled. Flow has patched them to <code>enabled: true</code> — their
+                    other settings (max clusters, placements, cloud) were left unchanged to avoid overwriting manual config.
+                  </p>
+                  <ol style={{ margin: '4px 0 0 18px', fontSize: '0.875rem', lineHeight: 1.6 }}>
+                    <li>Babylon will now start provisioning clusters. This takes <strong>30–60 minutes</strong>.</li>
+                    <li>Once clusters are ready, close this modal and click <strong>Re-check cluster refs</strong>.</li>
                     <li>Then deploy your workshops normally.</li>
                   </ol>
+                </Alert>
+              )}
+
+              {poolCreateResults.some(r => r.success && r.action === 'created') && (
+                <Alert variant="warning" isInline title="New pools created — clusters not ready yet" style={{ marginTop: 8 }}>
+                  <p style={{ margin: '0 0 6px' }}>
+                    {poolCreateEnabled
+                      ? 'Pools are created and enabled. Babylon will begin provisioning clusters immediately.'
+                      : <>Pools are created but <strong>disabled</strong>. Go to the cluster console and set <code>spec.enabled: true</code> on each pool in the <code>shared-clusters</code> namespace to start provisioning.</>
+                    }
+                  </p>
+                  <ol style={{ margin: '4px 0 0 18px', fontSize: '0.875rem', lineHeight: 1.6 }}>
+                    <li>Cluster provisioning typically takes <strong>30–60 minutes</strong>.</li>
+                    <li>Once clusters are ready, close this modal and click <strong>Re-check cluster refs</strong>.</li>
+                    <li>Then deploy your workshops normally.</li>
+                  </ol>
+                </Alert>
+              )}
+
+              {poolCreateResults.some(r => !r.success) && (
+                <Alert variant="danger" isInline title="One or more pools failed" style={{ marginTop: 8 }}>
+                  Check that you are logged in to the correct cluster and have access to the <code>shared-clusters</code> namespace.
+                  The YAML is shown below — you can copy it and apply manually with <code>oc apply -f -</code>.
                 </Alert>
               )}
             </div>

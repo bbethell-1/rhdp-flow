@@ -166,7 +166,11 @@ def mock_pool_list_empty():
 
 @pytest.fixture
 def mock_pool_list_with_ready_pool():
-    """Mock TenantClusterPool list with one Ready pool."""
+    """Mock TenantClusterPool list with one pool that has 3 available clusters.
+
+    Uses the real Babylon status schema: status.clusters is a list of objects
+    each with a sandboxApiState field (available | pending | disabled | removed).
+    """
     return {
         "returncode": 0,
         "stdout": json.dumps({
@@ -174,10 +178,11 @@ def mock_pool_list_with_ready_pool():
                 {
                     "metadata": {"name": "ocp4-cluster"},
                     "status": {
-                        "clusters": {
-                            "ready": 3,
-                            "provisioning": 0,
-                        }
+                        "clusters": [
+                            {"sandboxApiState": "available"},
+                            {"sandboxApiState": "available"},
+                            {"sandboxApiState": "available"},
+                        ]
                     },
                 }
             ]
