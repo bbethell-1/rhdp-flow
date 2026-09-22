@@ -405,7 +405,19 @@ export const UploadTab: React.FC<Props> = ({
     if (nuRes.violations.length) setNumUsersViolations(nuRes.violations);
     if (nuRes.users_not_in_catalog?.length) setUsersNotInCatalog(nuRes.users_not_in_catalog);
     if (Object.keys(nuRes.limits).length) setNumUsersLimits(nuRes.limits);
-    if (cnRes.mismatches.length) setCatalogNamespaceMismatches(cnRes.mismatches);
+    if (cnRes.mismatches.length) {
+      setCatalogNamespaceMismatches(cnRes.mismatches);
+      // Reflect the corrected namespace in the schedule table so users see where deploy will go
+      try {
+        const current = await api.getSchedules();
+        const correctedNs = new Map<string, string>(
+          cnRes.mismatches.map((m: import('../types').CatalogNamespaceMismatch) => [m.ci, m.found_catalog_namespace])
+        );
+        setSchedules(current.map(s => correctedNs.has(s.ci) ? { ...s, catalog_namespace: correctedNs.get(s.ci)! } : s));
+      } catch {
+        // Non-fatal — table may still show original namespace but deploy will redirect correctly
+      }
+    }
     if (cnRes.not_found.length) setCatalogNotFound(cnRes.not_found);
     if (pcRes.warnings?.length) setPoolCapacityWarnings(pcRes.warnings);
     if (pcRes.not_found?.length) setPoolsNotFound(pcRes.not_found);
@@ -1303,48 +1315,47 @@ export const UploadTab: React.FC<Props> = ({
             </Alert>
           )}
 
-          {/* Catalog namespace mismatches */}
+          {/* Catalog namespace mismatches — auto-corrected at deploy time */}
           {catalogNamespaceMismatches.length > 0 && (
             <Alert
               variant="info"
               isInline
-              title={`${catalogNamespaceMismatches.length} items are in ${catalogNamespaceMismatches[0]?.found_catalog_namespace} (your CSV says ${catalogNamespaceMismatches[0]?.expected_catalog_namespace})`}
+              title={`Catalog namespace auto-corrected for ${catalogNamespaceMismatches.length} item(s)`}
               style={{ marginBottom: 12 }}
             >
               <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
                 {catalogNamespaceMismatches.slice(0, 5).map((m, i) => (
-                  <li key={i}>{m.ci_name}</li>
+                  <li key={i}>
+                    <strong>{m.ci_name}</strong>: not in <code>{m.expected_catalog_namespace}</code>, found in <code>{m.found_catalog_namespace}</code> — deploy will use {m.found_catalog_namespace}
+                  </li>
                 ))}
                 {catalogNamespaceMismatches.length > 5 && (
                   <li style={{ fontStyle: 'italic' }}>...and {catalogNamespaceMismatches.length - 5} more</li>
                 )}
               </ul>
-              <div style={{ padding: '10px 14px', background: '#e7f5e7', border: '1px solid #4caf50', borderRadius: 4, marginBottom: 8 }}>
-                <strong style={{ color: '#2e7d32' }}>✓ This is fine — Flow will deploy from {catalogNamespaceMismatches[0]?.found_catalog_namespace} (these items don't exist in {catalogNamespaceMismatches[0]?.expected_catalog_namespace})</strong>
-              </div>
               <div style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)' }}>
-                Note: Catalog item config may differ between event and prod catalogs.
-                To override catalog for <strong>all</strong> workshops: use Deploy Settings below.
+                The catalog namespace column has been updated in the table above. Flow will deploy from the corrected namespace — no action needed.
               </div>
             </Alert>
           )}
 
-          {/* Catalog items not found */}
+          {/* Catalog items not found — blocks deploy */}
           {catalogNotFound.length > 0 && (
             <Alert
               variant="danger"
               isInline
-              title={`${catalogNotFound.length} catalog item(s) not found`}
+              title={`Deploy blocked — ${catalogNotFound.length} catalog item(s) not found in any namespace`}
               style={{ marginBottom: 12 }}
             >
-              <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+              <ul style={{ margin: '4px 0 8px', paddingLeft: 20, fontSize: '0.85rem' }}>
                 {catalogNotFound.map((nf, i) => (
                   <li key={i}>
-                    <strong>{nf.ci_name}</strong> ({nf.ci}): {nf.message}
+                    <strong>{nf.ci_name}</strong> (<code>{nf.ci}</code>)<br />
+                    <span style={{ color: 'var(--pf-v6-global--danger-color--100)' }}>{nf.message}</span>
                   </li>
                 ))}
               </ul>
-              Verify the CI names are correct. Deployment will fail for these items.
+              <strong>These catalog items do not exist on this cluster. Remove them from your CSV or wait until they are published before deploying.</strong>
             </Alert>
           )}
 
