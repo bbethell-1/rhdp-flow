@@ -405,7 +405,19 @@ export const UploadTab: React.FC<Props> = ({
     if (nuRes.violations.length) setNumUsersViolations(nuRes.violations);
     if (nuRes.users_not_in_catalog?.length) setUsersNotInCatalog(nuRes.users_not_in_catalog);
     if (Object.keys(nuRes.limits).length) setNumUsersLimits(nuRes.limits);
-    if (cnRes.mismatches.length) setCatalogNamespaceMismatches(cnRes.mismatches);
+    if (cnRes.mismatches.length) {
+      setCatalogNamespaceMismatches(cnRes.mismatches);
+      // Reflect the corrected namespace in the schedule table so users see where deploy will go
+      try {
+        const current = await api.getSchedules();
+        const correctedNs = new Map<string, string>(
+          cnRes.mismatches.map((m: import('../types').CatalogNamespaceMismatch) => [m.ci, m.found_catalog_namespace])
+        );
+        setSchedules(current.map(s => correctedNs.has(s.ci) ? { ...s, catalog_namespace: correctedNs.get(s.ci)! } : s));
+      } catch {
+        // Non-fatal — table may still show original namespace but deploy will redirect correctly
+      }
+    }
     if (cnRes.not_found.length) setCatalogNotFound(cnRes.not_found);
     if (pcRes.warnings?.length) setPoolCapacityWarnings(pcRes.warnings);
     if (pcRes.not_found?.length) setPoolsNotFound(pcRes.not_found);
@@ -1322,7 +1334,7 @@ export const UploadTab: React.FC<Props> = ({
                 )}
               </ul>
               <div style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)' }}>
-                Flow automatically deploys from the namespace where items actually live. No action needed.
+                The catalog namespace column has been updated in the table above. Flow will deploy from the corrected namespace — no action needed.
               </div>
             </Alert>
           )}
