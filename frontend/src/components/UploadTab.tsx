@@ -1426,32 +1426,73 @@ export const UploadTab: React.FC<Props> = ({
                     title={`${willFailDirect.length} workshop(s) blocked — no clusters registered in sandbox-api`}
                     style={{ marginBottom: 12 }}
                     actionLinks={
-                      <Button
-                        variant="link"
-                        size="sm"
-                        onClick={async () => {
-                          try { setMissingTenantRefs(await api.checkTenantClusterRefs(targetCluster)); } catch { /* ignore */ }
-                        }}
-                      >
-                        Re-check
-                      </Button>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={() => {
+                            const cis = [...new Set(willFailDirect.map((r: any) => {
+                              if (r.cluster_ref) return r.cluster_ref;
+                              const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
+                              return derived !== r.ci ? derived : null;
+                            }).filter(Boolean))] as string[];
+                            setPoolCreateCIs(cis);
+                            setPoolCreateYaml('');
+                            setPoolCreateResults([]);
+                            setPoolCreateApplied(false);
+                            setShowPoolCreateModal(true);
+                          }}
+                        >
+                          {(() => {
+                            const cis = [...new Set(willFailDirect.map((r: any) => {
+                              if (r.cluster_ref) return r.cluster_ref;
+                              const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
+                              return derived !== r.ci ? derived : null;
+                            }).filter(Boolean))];
+                            return `Option 2: Create ${cis.length} TenantClusterPool${cis.length === 1 ? '' : 's'}`;
+                          })()}
+                        </Button>
+                        <Button
+                          variant="link"
+                          size="sm"
+                          onClick={async () => {
+                            try { setMissingTenantRefs(await api.checkTenantClusterRefs(targetCluster)); } catch { /* ignore */ }
+                          }}
+                        >
+                          Re-check
+                        </Button>
+                      </div>
                     }
                   >
                     <div style={{ marginBottom: 8 }}>
-                      These CIs use direct sandbox-api cluster assignment. The infra team must provision and register
-                      OCP clusters with sandbox-api before these can deploy. Creating a TenantClusterPool will not help
-                      until actual cluster infrastructure exists.
+                      These workshops use direct sandbox-api cluster assignment but have no TenantClusterPool with available clusters.
+                      Two ways to fix this:
                     </div>
-                    <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
-                      {willFailDirect.slice(0, 5).map((ref: any, i: number) => (
-                        <li key={i}><strong>{ref.workshop_name}</strong></li>
-                      ))}
-                      {willFailDirect.length > 5 && (
-                        <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>...and {willFailDirect.length - 5} more</li>
-                      )}
+                    <div style={{ fontSize: '0.9rem', marginBottom: 4 }}>
+                      <strong>Option 1 — Permanent fix (recommended):</strong> Add <code>tenant_cluster.item</code> to each
+                      CI&apos;s <code>event.yaml</code> in agnosticv. Babylon will manage the cluster pool automatically going forward.
+                    </div>
+                    <ul style={{ margin: '0 0 10px 20px', fontSize: '0.85rem' }}>
+                      {willFailDirect.map((ref: any, i: number) => {
+                        const parts = (ref.ci as string).split('.');
+                        const agvPath = parts.slice(0, -1).join('/') + '/' + parts[parts.length - 1] + '.yaml';
+                        const agvUrl = `https://github.com/rhpds/agnosticv/edit/master/${agvPath}`;
+                        return (
+                          <li key={i}>
+                            <strong>{ref.workshop_name}</strong>{' '}
+                            <a href={agvUrl} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>
+                              edit event.yaml in agnosticv ↗
+                            </a>
+                          </li>
+                        );
+                      })}
                     </ul>
+                    <div style={{ fontSize: '0.9rem', marginBottom: 4 }}>
+                      <strong>Option 2 — Quick fix for this event:</strong> Create TenantClusterPool(s) now and enable them.
+                      Babylon will provision clusters automatically once the pool is enabled.
+                    </div>
                     <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)' }}>
-                      Remove these from your CSV or contact the infra team. You can also enable <strong>Ignore Capacity Warnings</strong> to force deploy if you know clusters are coming online.
+                      Make sure to set <strong>Enable pool</strong> in the creation dialog so Babylon starts provisioning immediately.
                     </div>
                   </Alert>
                 )}
