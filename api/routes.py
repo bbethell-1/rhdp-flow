@@ -499,7 +499,10 @@ def _tenant_validation(schedules, config, fail_closed=False):
     legacy = [s for s in schedules if (s.ci, s.namespace) not in managed]
     validation = validate_cluster_before_tenant(legacy, config=config)
     for record in blocked:
-        message = f"{record['workshop_name']}: reference pool {record['cluster_ref']} is missing or lacks direct-claim capacity"
+        if record.get("direct_sandbox"):
+            message = f"{record['workshop_name']}: uses direct sandbox-api cluster assignment but no clusters are registered — deploy will fail"
+        else:
+            message = f"{record['workshop_name']}: reference pool {record['cluster_ref']} is missing or lacks direct-claim capacity"
         validation["errors"].append(message)
         validation["error_details"].append({
             "ci_name": record["workshop_name"], "tenant_ci": record["ci"],

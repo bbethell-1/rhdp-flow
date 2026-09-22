@@ -399,18 +399,19 @@ def check_tenant_cluster_references(schedules: list[Any], *, env=None) -> dict[s
             )
         refs = tenant_cluster_components(catalogs[key])
         detected = getattr(schedule, "detected_cluster_ci", None)
-        # Catalog items that use direct OcpSandbox cloud-selector assignment have no
-        # tenantCluster.componentName — sandbox-api handles cluster allocation automatically.
-        # Don't warn about missing pools for these; they're always ready.
+        # CIs using direct OcpSandbox cloud-selector assignment have no componentName.
+        # sandbox-api must have clusters registered — we can't verify without deploying.
+        # Block with a clear message rather than letting it silently fail at Tower.
         if not refs and uses_direct_sandbox_assignment(catalogs[key]):
-            result["ready"].append({
+            result["ref_no_pool"].append({
                 "ci": schedule.ci, "namespace": catalog_ns,
                 "target_namespace": schedule.namespace,
                 "cluster_ref": "", "cluster_ci_from_csv": detected or "none",
-                "workshop_name": schedule.ci_name, "pool_exists": True,
-                "pool_available_clusters": -1,
-                "managed_by_workshop": True,
+                "workshop_name": schedule.ci_name, "pool_exists": False,
+                "pool_available_clusters": 0,
+                "managed_by_workshop": False,
                 "has_cluster_row": False,
+                "direct_sandbox": True,
             })
             continue
         for ref in refs or [""]:
