@@ -232,7 +232,7 @@ export const api = {
   validateClusterTenant: () =>
     request<any>('/schedules/validate-cluster-tenant', { method: 'POST', body: '{}' }),
 
-  getClusterNeeds: () =>
+  getClusterNeeds: (targetCluster?: string | null) =>
     request<{
       needs: Array<{
         cluster_ci: string;
@@ -246,15 +246,15 @@ export const api = {
       }>;
       total_tenant_count: number;
       total_deficit: number;
-    }>('/schedules/cluster-needs'),
-  checkTenantClusterRefs: () =>
+    }>(targetCluster ? `/schedules/cluster-needs?target_cluster=${encodeURIComponent(targetCluster)}` : '/schedules/cluster-needs'),
+  checkTenantClusterRefs: (targetCluster?: string | null) =>
     request<{
       missing_refs: TenantClusterRef[];
       ref_no_pool: TenantClusterRef[];
       ready: TenantClusterRef[];
       total_tenant_count: number;
       checked: boolean;
-    }>('/schedules/tenant-cluster-refs'),
+    }>(targetCluster ? `/schedules/tenant-cluster-refs?target_cluster=${encodeURIComponent(targetCluster)}` : '/schedules/tenant-cluster-refs'),
   checkPoolStatus: (cluster_cis: string[]) =>
     request<{
       results: Array<{
