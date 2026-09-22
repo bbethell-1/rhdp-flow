@@ -378,6 +378,13 @@ export const UploadTab: React.FC<Props> = ({
     fetchPoolData();
   }, [usePoolLookup, schedules, targetCluster]);
 
+  // Re-run tenant cluster checks when the deploy target changes — pools differ per cluster
+  useEffect(() => {
+    if (schedules.length === 0) return;
+    api.checkTenantClusterRefs(targetCluster).then(setMissingTenantRefs).catch(() => {});
+    api.getClusterNeeds(targetCluster).then(setClusterNeeds).catch(() => {});
+  }, [targetCluster]); // eslint-disable-line react-hooks/exhaustive-deps
+
   /** Re-fetch namespace + catalog num_users + catalog namespace + pool capacity checks from the server (uses loaded schedules). */
   const refreshClusterValidation = useCallback(async () => {
     setMissingNamespaces([]);
@@ -413,7 +420,7 @@ export const UploadTab: React.FC<Props> = ({
     setValidating(true);
     try {
       const { nsRes, nuRes, cnRes, pcRes } = await refreshClusterValidation();
-      const refs = await api.checkTenantClusterRefs();
+      const refs = await api.checkTenantClusterRefs(targetCluster);
       setMissingTenantRefs(refs);
       if (cnRes.mismatches.length || cnRes.not_found.length || pcRes.not_found.length || pcRes.warnings.length) {
         showToast('Prerequisite checks found issues on the selected target. Review the alerts below.', 'danger');
@@ -570,7 +577,7 @@ export const UploadTab: React.FC<Props> = ({
 
         // Check cluster capacity needs
         try {
-          const needsRes = await api.getClusterNeeds();
+          const needsRes = await api.getClusterNeeds(targetCluster);
           setClusterNeeds(needsRes);
         } catch (e) {
           console.warn('Cluster needs check failed', e);
@@ -1429,7 +1436,7 @@ export const UploadTab: React.FC<Props> = ({
                           variant="link"
                           size="sm"
                           onClick={async () => {
-                            try { setMissingTenantRefs(await api.checkTenantClusterRefs()); } catch { /* ignore */ }
+                            try { setMissingTenantRefs(await api.checkTenantClusterRefs(targetCluster)); } catch { /* ignore */ }
                           }}
                         >
                           Re-check cluster refs
