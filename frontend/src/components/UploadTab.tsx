@@ -64,6 +64,14 @@ function parseScheduleDate(dateStr: string): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
+function shiftScheduleDate(dateStr: string, hours: number): string {
+  const d = parseScheduleDate(dateStr);
+  if (!d) return dateStr;
+  d.setUTCHours(d.getUTCHours() + hours);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getUTCDate())}/${pad(d.getUTCMonth() + 1)}/${d.getUTCFullYear()} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+}
+
 interface Props {
   dryRun: boolean;
   schedules: WorkshopSchedule[];
@@ -248,6 +256,7 @@ export const UploadTab: React.FC<Props> = ({
   const [poolCreateResults, setPoolCreateResults] = useState<Array<{ name: string; success: boolean; action: string; output: string; error: string }>>([]);
   const [poolCreateLoading, setPoolCreateLoading] = useState(false);
   const [poolCreateApplied, setPoolCreateApplied] = useState(false);
+  const [poolCreateTimeShifted, setPoolCreateTimeShifted] = useState<number>(0);
 
   // ── Schedule validation warnings ──
   const warnings = useMemo(() => {
@@ -1426,32 +1435,74 @@ export const UploadTab: React.FC<Props> = ({
                     title={`${willFailDirect.length} workshop(s) blocked — no clusters registered in sandbox-api`}
                     style={{ marginBottom: 12 }}
                     actionLinks={
-                      <Button
-                        variant="link"
-                        size="sm"
-                        onClick={async () => {
-                          try { setMissingTenantRefs(await api.checkTenantClusterRefs(targetCluster)); } catch { /* ignore */ }
-                        }}
-                      >
-                        Re-check
-                      </Button>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={() => {
+                            const cis = [...new Set(willFailDirect.map((r: any) => {
+                              if (r.cluster_ref) return r.cluster_ref;
+                              const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
+                              return derived !== r.ci ? derived : null;
+                            }).filter(Boolean))] as string[];
+                            setPoolCreateCIs(cis);
+                            setPoolCreateYaml('');
+                            setPoolCreateResults([]);
+                            setPoolCreateApplied(false);
+                            setPoolCreateTimeShifted(0);
+                            setShowPoolCreateModal(true);
+                          }}
+                        >
+                          {(() => {
+                            const cis = [...new Set(willFailDirect.map((r: any) => {
+                              if (r.cluster_ref) return r.cluster_ref;
+                              const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
+                              return derived !== r.ci ? derived : null;
+                            }).filter(Boolean))];
+                            return `Option 2: Create ${cis.length} TenantClusterPool${cis.length === 1 ? '' : 's'}`;
+                          })()}
+                        </Button>
+                        <Button
+                          variant="link"
+                          size="sm"
+                          onClick={async () => {
+                            try { setMissingTenantRefs(await api.checkTenantClusterRefs(targetCluster)); } catch { /* ignore */ }
+                          }}
+                        >
+                          Re-check
+                        </Button>
+                      </div>
                     }
                   >
                     <div style={{ marginBottom: 8 }}>
-                      These CIs use direct sandbox-api cluster assignment. The infra team must provision and register
-                      OCP clusters with sandbox-api before these can deploy. Creating a TenantClusterPool will not help
-                      until actual cluster infrastructure exists.
+                      These workshops use direct sandbox-api cluster assignment but have no TenantClusterPool with available clusters.
+                      Two ways to fix this:
                     </div>
-                    <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
-                      {willFailDirect.slice(0, 5).map((ref: any, i: number) => (
-                        <li key={i}><strong>{ref.workshop_name}</strong></li>
-                      ))}
-                      {willFailDirect.length > 5 && (
-                        <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>...and {willFailDirect.length - 5} more</li>
-                      )}
+                    <div style={{ fontSize: '0.9rem', marginBottom: 4 }}>
+                      <strong>Option 1 — Permanent fix (recommended):</strong> Add <code>tenant_cluster.item</code> to each
+                      CI&apos;s <code>event.yaml</code> in agnosticv. Babylon will manage the cluster pool automatically going forward.
+                    </div>
+                    <ul style={{ margin: '0 0 10px 20px', fontSize: '0.85rem' }}>
+                      {willFailDirect.map((ref: any, i: number) => {
+                        const parts = (ref.ci as string).split('.');
+                        const agvPath = parts.slice(0, -1).join('/') + '/' + parts[parts.length - 1] + '.yaml';
+                        const agvUrl = `https://github.com/rhpds/agnosticv/edit/master/${agvPath}`;
+                        return (
+                          <li key={i}>
+                            <strong>{ref.workshop_name}</strong>{' '}
+                            <a href={agvUrl} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>
+                              edit event.yaml in agnosticv ↗
+                            </a>
+                          </li>
+                        );
+                      })}
                     </ul>
+                    <div style={{ fontSize: '0.9rem', marginBottom: 4 }}>
+                      <strong>Option 2 — Quick fix for this event:</strong> Create TenantClusterPool(s) now and enable them.
+                      Babylon will provision clusters automatically once the pool is enabled.
+                    </div>
                     <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)' }}>
-                      Remove these from your CSV or contact the infra team. You can also enable <strong>Ignore Capacity Warnings</strong> to force deploy if you know clusters are coming online.
+                      Make sure to set <strong>Enable pool</strong> in the creation dialog so Babylon starts provisioning immediately.
                     </div>
                   </Alert>
                 )}
@@ -2945,6 +2996,30 @@ export const UploadTab: React.FC<Props> = ({
                     showToast(`Done — ${parts.join(', ')}. Babylon will provision clusters (30–60 min).`, 'success');
                     // Do NOT re-validate here: pool CRD exists but has no ready clusters yet.
                     // The danger alert should stay until the pool is actually provisioned.
+
+                    // Shift start times +4h for affected workshops when pools were newly created or enabled.
+                    // Clusters take 30-60 min to provision — an immediate deploy would still fail.
+                    if (created + enabled > 0) {
+                      const tenantCIs = new Set(
+                        poolCreateCIs.map(pci => pci.replace(/-cluster\./, '-tenant.'))
+                      );
+                      const shifted = schedules.map(s =>
+                        tenantCIs.has(s.ci)
+                          ? {
+                              ...s,
+                              provisioning_date: shiftScheduleDate(s.provisioning_date, 4),
+                              auto_stop: shiftScheduleDate(s.auto_stop, 4),
+                              auto_destroy: shiftScheduleDate(s.auto_destroy, 4),
+                            }
+                          : s
+                      );
+                      const shiftedCount = shifted.filter((s, i) => s.provisioning_date !== schedules[i].provisioning_date).length;
+                      if (shiftedCount > 0) {
+                        setSchedules(shifted);
+                        setPoolCreateTimeShifted(shiftedCount);
+                        try { await api.updateSchedules(shifted); } catch { /* non-fatal */ }
+                      }
+                    }
                   } else {
                     showToast('Some pools failed to apply — see results below', 'danger');
                   }
@@ -3011,6 +3086,14 @@ export const UploadTab: React.FC<Props> = ({
                     <li>Once clusters are ready, close this modal and click <strong>Re-check cluster refs</strong>.</li>
                     <li>Then deploy your workshops normally.</li>
                   </ol>
+                </Alert>
+              )}
+
+              {poolCreateTimeShifted > 0 && (
+                <Alert variant="info" isInline title={`Start times pushed back 4 hours for ${poolCreateTimeShifted} workshop${poolCreateTimeShifted === 1 ? '' : 's'}`} style={{ marginTop: 8 }}>
+                  Clusters take 30–60 minutes to provision after pool creation — deploying immediately would fail.
+                  Provisioning and stop/destroy times have been shifted forward by 4 hours in the schedule table
+                  so your workshops deploy into a ready cluster pool.
                 </Alert>
               )}
 
