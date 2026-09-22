@@ -891,6 +891,17 @@ export const UploadTab: React.FC<Props> = ({
 
   const columnCount = 14; // Updated for Item Type + Cluster Link columns
 
+  // Compute blocking issues — used to disable Deploy button and confirm modal
+  const _tenantWillFail = missingTenantRefs
+    ? [...(missingTenantRefs.missing_refs || []), ...(missingTenantRefs.ref_no_pool || [])]
+        .filter((r: any) => !r.pool_exists && !r.has_cluster_row)
+    : [];
+  const hasBlockingIssues =
+    catalogNotFound.length > 0 ||
+    numUsersViolations.length > 0 ||
+    _tenantWillFail.length > 0;
+  const deployBlocked = hasBlockingIssues && !ignoreCapacityWarnings;
+
   return (
     <PageSection>
       {/* Import format toggle */}
@@ -1400,17 +1411,55 @@ export const UploadTab: React.FC<Props> = ({
               ...(missingTenantRefs.ref_no_pool || []),
             ];
             const willFail = all.filter((r: any) => !r.pool_exists && !r.has_cluster_row);
+            const willFailDirect = willFail.filter((r: any) => r.direct_sandbox);
+            const willFailNoPool = willFail.filter((r: any) => !r.direct_sandbox);
             const viaFreshCluster = all.filter((r: any) => !r.pool_exists && r.has_cluster_row);
 
             if (willFail.length === 0 && viaFreshCluster.length === 0) return null;
 
             return (
               <>
-                {willFail.length > 0 && (
+                {willFailDirect.length > 0 && (
                   <Alert
                     variant="danger"
                     isInline
-                    title={`${willFail.length} workshop(s) will fail — no cluster to run on`}
+                    title={`${willFailDirect.length} workshop(s) blocked — no clusters registered in sandbox-api`}
+                    style={{ marginBottom: 12 }}
+                    actionLinks={
+                      <Button
+                        variant="link"
+                        size="sm"
+                        onClick={async () => {
+                          try { setMissingTenantRefs(await api.checkTenantClusterRefs(targetCluster)); } catch { /* ignore */ }
+                        }}
+                      >
+                        Re-check
+                      </Button>
+                    }
+                  >
+                    <div style={{ marginBottom: 8 }}>
+                      These CIs use direct sandbox-api cluster assignment. The infra team must provision and register
+                      OCP clusters with sandbox-api before these can deploy. Creating a TenantClusterPool will not help
+                      until actual cluster infrastructure exists.
+                    </div>
+                    <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
+                      {willFailDirect.slice(0, 5).map((ref: any, i: number) => (
+                        <li key={i}><strong>{ref.workshop_name}</strong></li>
+                      ))}
+                      {willFailDirect.length > 5 && (
+                        <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>...and {willFailDirect.length - 5} more</li>
+                      )}
+                    </ul>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)' }}>
+                      Remove these from your CSV or contact the infra team. You can also enable <strong>Ignore Capacity Warnings</strong> to force deploy if you know clusters are coming online.
+                    </div>
+                  </Alert>
+                )}
+                {willFailNoPool.length > 0 && (
+                  <Alert
+                    variant="danger"
+                    isInline
+                    title={`${willFailNoPool.length} workshop(s) will fail — no TenantClusterPool and no cluster CI in CSV`}
                     style={{ marginBottom: 12 }}
                     actionLinks={
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -1418,11 +1467,7 @@ export const UploadTab: React.FC<Props> = ({
                           variant="danger"
                           size="sm"
                           onClick={() => {
-                            // Use cluster_ref from CatalogItem if available; otherwise
-                            // derive from tenant CI by swapping -tenant. → -cluster.
-                            // Never fall back to the tenant CI itself — that would create
-                            // a pool named after the tenant, which Babylon can't provision.
-                            const cis = [...new Set(willFail.map((r: any) => {
+                            const cis = [...new Set(willFailNoPool.map((r: any) => {
                               if (r.cluster_ref) return r.cluster_ref;
                               const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
                               return derived !== r.ci ? derived : null;
@@ -1435,7 +1480,7 @@ export const UploadTab: React.FC<Props> = ({
                           }}
                         >
                           {(() => {
-                            const cis = [...new Set(willFail.map((r: any) => {
+                            const cis = [...new Set(willFailNoPool.map((r: any) => {
                               if (r.cluster_ref) return r.cluster_ref;
                               const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
                               return derived !== r.ci ? derived : null;
@@ -1460,17 +1505,17 @@ export const UploadTab: React.FC<Props> = ({
                       in <code>shared-clusters</code> and no matching cluster CI is in this CSV:
                     </div>
                     <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
-                      {willFail.slice(0, 5).map((ref: any, i: number) => (
+                      {willFailNoPool.slice(0, 5).map((ref: any, i: number) => (
                         <li key={i}><strong>{ref.workshop_name}</strong></li>
                       ))}
-                      {willFail.length > 5 && (
+                      {willFailNoPool.length > 5 && (
                         <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>
-                          ...and {willFail.length - 5} more
+                          ...and {willFailNoPool.length - 5} more
                         </li>
                       )}
                     </ul>
                     <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)' }}>
-                      Fix: click <strong>Create TenantClusterPools</strong> above to create the shared pool (Babylon will provision clusters automatically),
+                      Fix: click <strong>Create TenantClusterPools</strong> to create the shared pool,
                       or add the matching <code>-cluster.*</code> CI row to your CSV to deploy a dedicated cluster alongside.
                     </div>
                   </Alert>
@@ -2273,9 +2318,14 @@ export const UploadTab: React.FC<Props> = ({
               </Tooltip>
             </SplitItem>
             <SplitItem>
-              <Button variant="primary" onClick={handleDeploy} isDisabled={deploying || validating || yamlDownloading} isDanger={!dryRun}>
-                {dryRun ? 'Run dry-run' : 'Deploy'}
-              </Button>
+              <Tooltip
+                content={deployBlocked ? 'Fix blocking issues above or enable "Ignore Capacity Warnings" to override' : ''}
+                trigger={deployBlocked ? 'mouseenter focus' : 'manual'}
+              >
+                <Button variant="primary" onClick={handleDeploy} isDisabled={deploying || validating || yamlDownloading || deployBlocked} isDanger={!dryRun}>
+                  {dryRun ? 'Run dry-run' : deployBlocked ? 'Deploy (blocked)' : 'Deploy'}
+                </Button>
+              </Tooltip>
             </SplitItem>
           </Split>
           <HelperText>
@@ -2443,9 +2493,9 @@ export const UploadTab: React.FC<Props> = ({
           <Button
             variant="danger"
             onClick={handleDeploy}
-            isDisabled={numUsersViolations.length > 0 || catalogNotFound.length > 0}
+            isDisabled={deployBlocked}
           >
-            {numUsersViolations.length > 0 || catalogNotFound.length > 0 ? 'Cannot Deploy (blocked)' : 'Deploy Now'}
+            {deployBlocked ? 'Cannot Deploy (blocked)' : 'Deploy Now'}
           </Button>
           <Button variant="link" onClick={() => setShowDeployConfirm(false)}>Cancel</Button>
         </ModalFooter>
