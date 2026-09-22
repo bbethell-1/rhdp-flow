@@ -42,7 +42,7 @@ _NS = (
 
 
 def _oc(args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["oc", *args], capture_output=True, text=True)
+    return subprocess.run(["oc", *args], capture_output=True, text=True, timeout=30)
 
 
 def _b64(value: str | None) -> str | None:

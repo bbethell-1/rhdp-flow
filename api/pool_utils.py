@@ -9,7 +9,7 @@ import subprocess
 logger = logging.getLogger("rhdp_flow.api.pools")
 
 
-def get_pool_for_catalog_item(catalog_item: str, namespace: str = "poolboy") -> dict | None:
+def get_pool_for_catalog_item(catalog_item: str, namespace: str = "poolboy", *, env=None) -> dict | None:
     """
     Lookup ResourcePool for a given catalog item.
 
@@ -37,6 +37,7 @@ def get_pool_for_catalog_item(catalog_item: str, namespace: str = "poolboy") -> 
             text=True,
             timeout=10,
             check=False,
+            env=env,
         )
 
         if result.returncode != 0:
@@ -69,7 +70,7 @@ def get_pool_for_catalog_item(catalog_item: str, namespace: str = "poolboy") -> 
         return None
 
 
-def list_all_pools(namespace: str = "poolboy") -> list[dict]:
+def list_all_pools(namespace: str = "poolboy", *, env=None) -> list[dict]:
     """
     List all ResourcePools in the given namespace.
 
@@ -82,6 +83,7 @@ def list_all_pools(namespace: str = "poolboy") -> list[dict]:
             text=True,
             timeout=30,
             check=False,
+            env=env,
         )
 
         if result.returncode != 0:

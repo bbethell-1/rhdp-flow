@@ -33,7 +33,6 @@ from api.models import (
     CatalogItemParameter,
     CatalogNamespaceMismatch,
     CatalogNamespaceValidationResponse,
-    ClusterNeed,
     ClusterNeedsResponse,
     ClusterTenantValidationError,
     ClusterTenantValidationResponse,
@@ -440,7 +439,13 @@ def _get_config(
     config.enable_resource_pools = enable_resource_pools
     config.white_glove = white_glove
     config.redirect = redirect
-    config.base_domain = _detect_and_cache_base_domain()
+    if target_cluster:
+        # Never use the hosting cluster's cached domain for another target.
+        with open(config.kubeconfig_path) as stream:
+            server = json.load(stream)["clusters"][0]["cluster"]["server"]
+        config.base_domain = derive_base_domain(server)
+    else:
+        config.base_domain = _detect_and_cache_base_domain()
     config.agnosticv_repo_url = os.environ.get("AGNOSTICV_REPO_URL", config.agnosticv_repo_url)
     config.agnosticv_cache_dir = os.environ.get("AGNOSTICV_CACHE_DIR", config.agnosticv_cache_dir)
     config.agnosticv_ssh_key_path = os.environ.get("AGNOSTICV_SSH_KEY_PATH")
@@ -448,6 +453,62 @@ def _get_config(
     if ttl:
         config.agnosticv_refresh_ttl_seconds = int(ttl)
     return config
+
+
+def _request_config(request: Request):
+    """Resolve a request's target without changing process-wide credentials."""
+    target = request.headers.get("X-RHDP-Target-Cluster") or request.query_params.get("target_cluster")
+    if target:
+        identity.require_picker_access(request)
+    try:
+        config = _get_config(target_cluster=target) if target else _get_config()
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(503, "Target credential lookup timed out") from exc
+    try:
+        yield config
+    finally:
+        if target:
+            cluster_targets.cleanup_kubeconfig(config.kubeconfig_path)
+
+
+def _config_env(config: RHDPConfig) -> dict[str, str]:
+    env = os.environ.copy()
+    if config.kubeconfig_path:
+        env["KUBECONFIG"] = config.kubeconfig_path
+    return env
+
+
+def _tenant_refs(schedules, config):
+    from lib.tenant_cluster_capacity import check_tenant_cluster_references
+
+    try:
+        return check_tenant_cluster_references(schedules, env=_config_env(config))
+    except Exception as exc:
+        raise HTTPException(502, f"Cannot verify tenant prerequisites on the selected target: {exc}") from exc
+
+
+def _tenant_validation(schedules, config, fail_closed=False):
+    refs = _tenant_refs(schedules, config)
+    def key(record):
+        return record["ci"], record["target_namespace"]
+    blocked = refs["ref_no_pool"] + refs["pool_no_capacity"]
+    blocked_keys = {key(r) for r in blocked}
+    managed = {key(r) for r in refs["ready"] if r["managed_by_workshop"]} - blocked_keys
+    legacy = [s for s in schedules if (s.ci, s.namespace) not in managed]
+    validation = validate_cluster_before_tenant(legacy, config=config)
+    for record in blocked:
+        message = f"{record['workshop_name']}: reference pool {record['cluster_ref']} is missing or lacks direct-claim capacity"
+        validation["errors"].append(message)
+        validation["error_details"].append({
+            "ci_name": record["workshop_name"], "tenant_ci": record["ci"],
+            "cluster_ci": record["cluster_ref"], "namespace": record["target_namespace"],
+            "tenant_date": "", "cluster_date": "", "message": message,
+        })
+    if fail_closed and validation["errors"]:
+        raise HTTPException(400, "Tenant prerequisites failed: " + "; ".join(validation["errors"]))
+    return validation
 
 
 def _schedule_to_response(s: WorkshopSchedule) -> WorkshopScheduleResponse:
@@ -705,8 +766,7 @@ async def healthz():
 
 
 @router.get("/health", response_model=HealthResponse)
-async def health():
-    config = await asyncio.to_thread(_get_config)
+async def health(config=Depends(_request_config)):
     env = os.environ.copy()
     if config.kubeconfig_path:
         env["KUBECONFIG"] = config.kubeconfig_path
@@ -737,16 +797,13 @@ async def health():
         )
         if r_user.returncode == 0 and r_server.returncode == 0:
             cluster_url = r_server.stdout.strip()
-            global _cached_base_domain
-            with _state_lock:
-                _cached_base_domain = derive_base_domain(cluster_url)
             # RHDP API probe — also non-blocking
             rhdp_ok = False
             try:
                 r_cat = await loop.run_in_executor(
                     None, _run_oc,
-                    "get", "catalogitem", "-n", "babylon-catalog-prod",
-                    "--no-headers", "-o", "name",
+                    "get", "--raw",
+                    "/apis/babylon.gpte.redhat.com/v1/namespaces/babylon-catalog-prod/catalogitems?limit=1",
                 )
                 rhdp_ok = r_cat.returncode == 0
             except Exception as exc:
@@ -757,7 +814,7 @@ async def health():
                 oc_connected=True,
                 cluster_url=cluster_url,
                 user=r_user.stdout.strip(),
-                base_domain=_cached_base_domain,
+                base_domain=derive_base_domain(cluster_url),
                 rhdp_api_reachable=rhdp_ok,
             )
         else:
@@ -788,9 +845,8 @@ async def health():
 
 @router.get("/catalog/items", response_model=list[CatalogItemEntry])
 @_rate_limit("30/minute")
-def get_catalog_items_list(request: Request):
+def get_catalog_items_list(request: Request, config=Depends(_request_config)):
     """List CatalogItem resources from babylon-catalog-prod and babylon-catalog-event."""
-    config = _get_config()
     if not config.validate():
         raise HTTPException(503, "OpenShift client (oc) is not available on the API host")
     raw = list_catalog_items(config)
@@ -810,7 +866,7 @@ def get_catalog_items_list(request: Request):
 
 @router.get("/catalog/suggestions")
 @_rate_limit("30/minute")
-def get_catalog_item_suggestions(request: Request, ci: str, namespace: str = "babylon-catalog-event", limit: int = 5):
+def get_catalog_item_suggestions(request: Request, ci: str, namespace: str = "babylon-catalog-event", limit: int = 5, config=Depends(_request_config)):
     """Find similar catalog item names (fuzzy match) for a given CI name.
 
     Args:
@@ -821,7 +877,6 @@ def get_catalog_item_suggestions(request: Request, ci: str, namespace: str = "ba
     Returns:
         List of suggested catalog item names
     """
-    config = _get_config()
     if not config.validate():
         raise HTTPException(503, "OpenShift client (oc) is not available on the API host")
 
@@ -835,7 +890,7 @@ def get_catalog_item_suggestions(request: Request, ci: str, namespace: str = "ba
 
 @router.get("/pools/lookup")
 @_rate_limit("30/minute")
-def lookup_pool_for_catalog_item(request: Request, catalog_item: str):
+def lookup_pool_for_catalog_item(request: Request, catalog_item: str, config=Depends(_request_config)):
     """
     Lookup ResourcePool for a given catalog item.
 
@@ -847,11 +902,10 @@ def lookup_pool_for_catalog_item(request: Request, catalog_item: str):
     """
     from api.pool_utils import get_pool_for_catalog_item
 
-    config = _get_config()
     if not config.validate():
         raise HTTPException(503, "OpenShift client (oc) is not available on the API host")
 
-    pool_data = get_pool_for_catalog_item(catalog_item)
+    pool_data = get_pool_for_catalog_item(catalog_item, env=_config_env(config))
 
     if pool_data:
         return PoolLookupResponse(
@@ -869,7 +923,7 @@ def lookup_pool_for_catalog_item(request: Request, catalog_item: str):
 
 @router.get("/pools/all")
 @_rate_limit("10/minute")
-def list_all_pools(request: Request):
+def list_all_pools(request: Request, config=Depends(_request_config)):
     """
     List all ResourcePools available in the cluster.
 
@@ -878,11 +932,10 @@ def list_all_pools(request: Request):
     """
     from api.pool_utils import list_all_pools as get_all_pools
 
-    config = _get_config()
     if not config.validate():
         raise HTTPException(503, "OpenShift client (oc) is not available on the API host")
 
-    pools = get_all_pools()
+    pools = get_all_pools(env=_config_env(config))
     return {"pools": [PoolInfo(**p) for p in pools]}
 
 
@@ -959,7 +1012,7 @@ async def upload_csv(request: Request, file: UploadFile = File(...), _key=Depend
         text = content.decode("utf-8")
     except UnicodeDecodeError:
         raise HTTPException(400, "File must be UTF-8 encoded CSV")
-    return _ingest_schedule_csv_text(text, file.filename or "unknown.csv")
+    return await asyncio.to_thread(_ingest_schedule_csv_text, text, file.filename or "unknown.csv")
 
 
 @router.post("/schedules/import-from-labagator", response_model=UploadResponse)
@@ -1019,7 +1072,7 @@ async def import_labagator_sessions(
         raise HTTPException(400, f"Import failed: {e}")
 
     # Parse as Flow schedules (reuse existing upload logic)
-    return _ingest_schedule_csv_text(flow_csv, file.filename or "labagator-import.csv")
+    return await asyncio.to_thread(_ingest_schedule_csv_text, flow_csv, file.filename or "labagator-import.csv")
 
 
 @router.get("/schedules/examples")
@@ -1073,11 +1126,10 @@ def get_schedules():
 
 
 @router.post("/schedules/validate-namespaces")
-def validate_namespaces(_key=Depends(verify_api_key)):
+def validate_namespaces(_key=Depends(verify_api_key), config=Depends(_request_config)):
     """Check whether the namespaces referenced by loaded schedules exist on the cluster."""
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
-    config = _get_config()
     env = os.environ.copy()
     if config.kubeconfig_path:
         env["KUBECONFIG"] = config.kubeconfig_path
@@ -1101,11 +1153,10 @@ def validate_namespaces(_key=Depends(verify_api_key)):
 
 
 @router.post("/schedules/validate-num-users", response_model=NumUsersValidationResponse)
-def validate_num_users(_key=Depends(verify_api_key)):
+def validate_num_users(_key=Depends(verify_api_key), config=Depends(_request_config)):
     """Check whether any loaded schedules exceed the catalog item's num_users maximum."""
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
-    config = _get_config()
     violations: list[NumUsersViolation] = []
     users_not_in_catalog: list[UsersNotInCatalogAdvisory] = []
     limits: dict[str, int] = {}
@@ -1163,11 +1214,10 @@ def validate_num_users(_key=Depends(verify_api_key)):
 
 
 @router.post("/schedules/validate-catalog-namespaces", response_model=CatalogNamespaceValidationResponse)
-def validate_catalog_namespaces(_key=Depends(verify_api_key)):
+def validate_catalog_namespaces(_key=Depends(verify_api_key), config=Depends(_request_config)):
     """Check whether catalog items exist in their expected catalog namespaces."""
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
-    config = _get_config()
     mismatches: list[CatalogNamespaceMismatch] = []
     not_found: list[dict] = []
     checked = 0
@@ -1221,14 +1271,13 @@ def validate_catalog_namespaces(_key=Depends(verify_api_key)):
 
 
 @router.post("/schedules/validate-cluster-tenant", response_model=ClusterTenantValidationResponse)
-def validate_cluster_tenant_scheduling(_key=Depends(verify_api_key)):
+def validate_cluster_tenant_scheduling(_key=Depends(verify_api_key), config=Depends(_request_config)):
     """Check that cluster catalog items are scheduled before tenant catalog items."""
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
 
-    config = _get_config()
     analyze_cluster_tenant_relationships(_schedules, config=config)
-    validation = validate_cluster_before_tenant(_schedules, config=config)
+    validation = _tenant_validation(_schedules, config)
 
     tenants_checked = sum(1 for s in _schedules if s.is_tenant)
     clusters_found = sum(1 for r in validation["relationships"] if r.get("status") in ("valid", "timing_violation", "found_on_cluster"))
@@ -1272,88 +1321,24 @@ def auto_fix_cluster_tenant_timing(buffer_hours: float = 4.0, _key=Depends(verif
 
 
 @router.post("/schedules/validate-pool-capacity", response_model=PoolCapacityValidationResponse)
-def validate_pool_capacity(_key=Depends(verify_api_key)):
-    """Check TenantClusterPool capacity for tenant catalog items.
-
-    For each -tenant catalog item in loaded schedules:
-    - Find matching TenantClusterPool
-    - Check pool saturation and placement capacity
-    - Warn if capacity is high (>70%) or critical (>90%)
-    - Report if no matching pool found
-
-    Returns:
-        PoolCapacityValidationResponse with warnings and not_found lists
-    """
+def validate_pool_capacity(_key=Depends(verify_api_key), config=Depends(_request_config)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
-
-    warnings: list[PoolCapacityWarning] = []
-    not_found: list[PoolNotFoundWarning] = []
-    tenant_items_checked = 0
-    pools_queried = 0
-
-    try:
-        from lib.tenant_cluster_capacity import check_schedules_capacity
-        from lib.tenant_cluster_pool_linkage import get_catalog_item_base, is_tenant_catalog_item
-
-        # Check capacity for all schedules
-        capacity_result = check_schedules_capacity(_schedules, ignore_warnings=False)
-
-        tenant_items_checked = capacity_result["checked_count"]
-        pools_queried = len(capacity_result.get("capacity_info", {}))
-
-        # Convert capacity warnings to API model
-        for warning in capacity_result.get("warnings", []):
-            warnings.append(PoolCapacityWarning(
-                ci_name=warning["ci_name"],
-                ci=warning["ci"],
-                namespace="",  # Not available in warning dict
-                pool_name=capacity_result["capacity_info"][warning["ci_name"]].cluster_name,
-                pool_saturation_percent=warning["pool_saturation"],
-                placement_capacity_percent=warning["placement_capacity"],
-                message=warning["message"],
-                severity="warning"
-            ))
-
-        # Convert capacity errors (critical) to API model
-        for error in capacity_result.get("errors", []):
-            warnings.append(PoolCapacityWarning(
-                ci_name=error["ci_name"],
-                ci=error["ci"],
-                namespace="",
-                pool_name=capacity_result["capacity_info"][error["ci_name"]].cluster_name,
-                pool_saturation_percent=error["pool_saturation"],
-                placement_capacity_percent=error["placement_capacity"],
-                message=error["message"],
-                severity="critical"
-            ))
-
-        # Check for tenant items without matching pools
-        for schedule in _schedules:
-            if is_tenant_catalog_item(schedule.ci):
-                base_ci = get_catalog_item_base(schedule.ci)
-                # If not in capacity_info, no pool was found
-                if schedule.ci_name not in capacity_result.get("capacity_info", {}):
-                    not_found.append(PoolNotFoundWarning(
-                        ci_name=schedule.ci_name,
-                        ci=schedule.ci,
-                        namespace=schedule.namespace,
-                        base_ci=base_ci,
-                        message=f"No TenantClusterPool found for {schedule.ci} (base: {base_ci})"
-                    ))
-
-    except ImportError as e:
-        logger.warning(f"Pool capacity validation unavailable: {e}")
-        # Return empty result if dependencies not available
-    except Exception as e:
-        logger.exception("Pool capacity validation failed")
-        # Non-blocking: return partial results
-
+    refs = _tenant_refs(_schedules, config)
     return PoolCapacityValidationResponse(
-        warnings=warnings,
-        not_found=not_found,
-        tenant_items_checked=tenant_items_checked,
-        pools_queried=pools_queried,
+        tenant_items_checked=refs["total_tenant_count"],
+        pools_queried=len({r["cluster_ref"] for tier in ("ready", "pool_no_capacity") for r in refs[tier]}),
+        not_found=[PoolNotFoundWarning(
+            ci_name=r["workshop_name"], ci=r["ci"], namespace=r["target_namespace"],
+            base_ci=r["cluster_ref"],
+            message=f"Missing shared reference pool {r['cluster_ref']}. Check the catalog contract on this target.",
+        ) for r in refs["ref_no_pool"]],
+        warnings=[PoolCapacityWarning(
+            ci_name=r["workshop_name"], ci=r["ci"], namespace=r["target_namespace"],
+            pool_name=r["cluster_ref"], pool_saturation_percent=100,
+            placement_capacity_percent=100, severity="critical",
+            message="Direct tenant claim requires available shared cluster capacity.",
+        ) for r in refs["pool_no_capacity"]],
     )
 
 
@@ -1377,7 +1362,7 @@ async def diff_schedules(file: UploadFile = File(...), _key=Depends(verify_api_k
     tmp.close()
 
     try:
-        new_schedules = read_csv_input(tmp.name)
+        new_schedules = await asyncio.to_thread(read_csv_input, tmp.name)
     except ValueError as e:
         os.unlink(tmp.name)
         raise HTTPException(400, str(e))
@@ -1516,12 +1501,11 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
         identity.require_picker_access(request)
     # Validate the deploy-target cluster early so a bad target fails fast.
     try:
-        cluster_targets.resolve_and_cleanup_check(body.target_cluster)
+        await asyncio.to_thread(cluster_targets.resolve_and_cleanup_check, body.target_cluster)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
-    # Pre-deploy num_users limit check (live deploys only)
-    if not body.dry_run:
+    def preflight():
         config_check = _get_config(target_cluster=body.target_cluster)
         try:
             ci_cache: dict[str, dict | None] = {}
@@ -1535,32 +1519,8 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                         limit_errors.append(
                             f"{s.ci_name} ({s.ci}): {s.users} requested, max {info['maximum']}"
                         )
-            # Pre-deploy cluster-tenant validation: block if tenant clusters aren't ready.
-            # Pool-backed tenants (TenantClusterPool exists with available clusters) are
-            # always safe — Babylon manages provisioning internally, no cluster row needed.
             if any(s.is_tenant for s in schedules):
-                cluster_validation = validate_cluster_before_tenant(schedules, config=config_check)
-                if cluster_validation["errors"]:
-                    # Check which tenants are covered by a live pool with capacity —
-                    # those are safe even without a cluster row in this batch.
-                    try:
-                        from lib.tenant_cluster_capacity import check_tenant_cluster_references
-                        pool_check = check_tenant_cluster_references(schedules)
-                        pool_ready_cis = {r["ci"] for r in pool_check.get("ready", [])}
-                    except Exception:
-                        pool_ready_cis = set()
-
-                    # Only block on errors for tenants NOT covered by an active pool
-                    blocking_errors = [
-                        e for e in cluster_validation["errors"]
-                        if not any(ci in e for ci in pool_ready_cis)
-                    ]
-                    if blocking_errors:
-                        raise HTTPException(
-                            400,
-                            "Cluster-tenant scheduling errors (deploy blocked): "
-                            + "; ".join(blocking_errors)
-                        )
+                _tenant_validation(schedules, config_check, fail_closed=True)
         finally:
             cluster_targets.cleanup_kubeconfig(config_check.kubeconfig_path if body.target_cluster else None)
         if limit_errors:
@@ -1569,6 +1529,9 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                 f"num_users limit exceeded: {'; '.join(limit_errors)}"
             )
 
+    if not body.dry_run:
+        await asyncio.to_thread(preflight)
+
     job = jobs.create_job()
 
     async def _run():
@@ -1576,7 +1539,7 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
         handler, log_path = start_log_capture("deploy", job.job_id)
         config = None
         try:
-            config = _get_config(
+            config = await asyncio.to_thread(_get_config,
                 dry_run=body.dry_run,
                 resource_lock=body.resource_lock,
                 enable_resource_pools=body.enable_resource_pools,
@@ -1693,7 +1656,7 @@ async def deploy_session(
     tmp.write(text)
     tmp.close()
     try:
-        schedules = read_csv_input(tmp.name)  # LOCAL list — deploy runs off this
+        schedules = await asyncio.to_thread(read_csv_input, tmp.name)  # LOCAL list — deploy runs off this
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     finally:
@@ -1709,7 +1672,7 @@ async def deploy_session(
         _schedules = schedules
 
     try:
-        config = _get_config(
+        config = await asyncio.to_thread(_get_config,
             dry_run=dry_run,
             resource_lock=resource_lock,
             enable_resource_pools=enable_resource_pools,
@@ -2146,38 +2109,52 @@ async def deploy_retry(request: Request, body: RetryRequest, _key=Depends(verify
     if not matching:
         raise HTTPException(404, f"No schedules match the provided CI names: {body.ci_names}")
 
+    target = request.headers.get("X-RHDP-Target-Cluster")
+    if target:
+        identity.require_picker_access(request)
+
     # Pre-deploy num_users limit check (live deploys only) - same as main deploy
+    def preflight():
+        config_check = _get_config(target_cluster=target)
+        try:
+            ci_cache: dict[str, dict | None] = {}
+            limit_errors = []
+            for s in matching:
+                if s.users is not None and s.users > 0:
+                    if s.ci not in ci_cache:
+                        ci_cache[s.ci] = get_catalog_item_num_users_limit(s.ci, config_check)
+                    info = ci_cache[s.ci]
+                    if info and info.get("maximum") is not None and s.users > info["maximum"]:
+                        limit_errors.append(
+                            f"{s.ci_name} ({s.ci}): {s.users} users exceeds catalog maximum of {info['maximum']}"
+                        )
+            if limit_errors:
+                raise HTTPException(
+                    400,
+                    f"num_users limit exceeded: {'; '.join(limit_errors)}"
+                )
+
+        finally:
+            if target:
+                cluster_targets.cleanup_kubeconfig(config_check.kubeconfig_path)
+
     if not body.dry_run:
-        config_check = _get_config()
-        ci_cache: dict[str, dict | None] = {}
-        limit_errors = []
-        for s in matching:
-            if s.users is not None and s.users > 0:
-                if s.ci not in ci_cache:
-                    ci_cache[s.ci] = get_catalog_item_num_users_limit(s.ci, config_check)
-                info = ci_cache[s.ci]
-                if info and info.get("maximum") is not None and s.users > info["maximum"]:
-                    limit_errors.append(
-                        f"{s.ci_name} ({s.ci}): {s.users} users exceeds catalog maximum of {info['maximum']}"
-                    )
-        if limit_errors:
-            raise HTTPException(
-                400,
-                f"num_users limit exceeded: {'; '.join(limit_errors)}"
-            )
+        await asyncio.to_thread(preflight)
 
     job = jobs.create_job()
 
     async def _run():
         global _deploy_log_path
         handler, log_path = start_log_capture("deploy-retry", job.job_id)
+        config = None
         try:
-            config = _get_config(
+            config = await asyncio.to_thread(_get_config,
                 dry_run=body.dry_run,
                 resource_lock=body.resource_lock,
                 enable_resource_pools=body.enable_resource_pools,
                 white_glove=body.white_glove,
                 redirect=body.redirect,
+                target_cluster=target,
             )
             jobs.update_job(job.job_id, status=jobs.Status.running, message=f"Retrying {len(matching)} deployment(s)")
 
@@ -2223,6 +2200,8 @@ async def deploy_retry(request: Request, body: RetryRequest, _key=Depends(verify
                 log_path=log_path,
             )
         finally:
+            if target and config:
+                cluster_targets.cleanup_kubeconfig(config.kubeconfig_path)
             stop_log_capture(handler)
 
     asyncio.create_task(_run())
@@ -2235,35 +2214,32 @@ async def deploy_retry(request: Request, body: RetryRequest, _key=Depends(verify
 
 @router.post("/operations/lock", response_model=OperationResponse)
 @_rate_limit("10/minute")
-def op_lock(request: Request, body: LockRequest = LockRequest(), _key=Depends(verify_api_key)):
+def op_lock(request: Request, body: LockRequest = LockRequest(), _key=Depends(verify_api_key), config=Depends(_request_config)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     schedules = _filter_schedules(body.ci_filter)
-    config = _get_config()
     lock_workshops(schedules, config)
     return OperationResponse(success=True, message=f"Locked {len(schedules)} schedule(s)")
 
 
 @router.post("/operations/unlock", response_model=OperationResponse)
 @_rate_limit("10/minute")
-def op_unlock(request: Request, body: LockRequest = LockRequest(), _key=Depends(verify_api_key)):
+def op_unlock(request: Request, body: LockRequest = LockRequest(), _key=Depends(verify_api_key), config=Depends(_request_config)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     schedules = _filter_schedules(body.ci_filter)
-    config = _get_config()
     unlock_workshops(schedules, config)
     return OperationResponse(success=True, message=f"Unlocked {len(schedules)} schedule(s)")
 
 
 @router.post("/operations/extend-stop", response_model=OperationResponse)
 @_rate_limit("10/minute")
-def op_extend_stop(request: Request, body: ExtendRequest, _key=Depends(verify_api_key)):
+def op_extend_stop(request: Request, body: ExtendRequest, _key=Depends(verify_api_key), config=Depends(_request_config)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     if body.days == 0 and body.hours == 0:
         raise HTTPException(400, "Must specify days and/or hours > 0")
     schedules = _filter_schedules(body.ci_filter)
-    config = _get_config()
     extend_stop_time(schedules, config, body.days, body.hours)
     return OperationResponse(
         success=True,
@@ -2273,13 +2249,12 @@ def op_extend_stop(request: Request, body: ExtendRequest, _key=Depends(verify_ap
 
 @router.post("/operations/extend-destroy", response_model=OperationResponse)
 @_rate_limit("10/minute")
-def op_extend_destroy(request: Request, body: ExtendRequest, _key=Depends(verify_api_key)):
+def op_extend_destroy(request: Request, body: ExtendRequest, _key=Depends(verify_api_key), config=Depends(_request_config)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     if body.days == 0 and body.hours == 0:
         raise HTTPException(400, "Must specify days and/or hours > 0")
     schedules = _filter_schedules(body.ci_filter)
-    config = _get_config()
     extend_destroy_time(schedules, config, body.days, body.hours)
     return OperationResponse(
         success=True,
@@ -2289,11 +2264,10 @@ def op_extend_destroy(request: Request, body: ExtendRequest, _key=Depends(verify
 
 @router.post("/operations/disable-autostop", response_model=OperationResponse)
 @_rate_limit("10/minute")
-def op_disable_autostop(request: Request, body: DisableAutostopRequest = DisableAutostopRequest(), _key=Depends(verify_api_key)):
+def op_disable_autostop(request: Request, body: DisableAutostopRequest = DisableAutostopRequest(), _key=Depends(verify_api_key), config=Depends(_request_config)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     schedules = _filter_schedules(body.ci_filter)
-    config = _get_config()
     patched = disable_autostop(schedules, config)
     return OperationResponse(
         success=patched > 0 or config.dry_run,
@@ -2303,11 +2277,10 @@ def op_disable_autostop(request: Request, body: DisableAutostopRequest = Disable
 
 @router.post("/operations/scale", response_model=OperationResponse)
 @_rate_limit("10/minute")
-def op_scale(request: Request, body: ScaleRequest, _key=Depends(verify_api_key)):
+def op_scale(request: Request, body: ScaleRequest, _key=Depends(verify_api_key), config=Depends(_request_config)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     schedules = _filter_schedules(body.ci_filter)
-    config = _get_config()
     scale_workshops(schedules, config, body.target_count)
     return OperationResponse(
         success=True,
@@ -2317,11 +2290,10 @@ def op_scale(request: Request, body: ScaleRequest, _key=Depends(verify_api_key))
 
 @router.post("/operations/showroom-cleanup", response_model=OperationResponse)
 @_rate_limit("10/minute")
-def op_showroom_cleanup(request: Request, body: ShowroomCleanupRequest = ShowroomCleanupRequest(), _key=Depends(verify_api_key)):
+def op_showroom_cleanup(request: Request, body: ShowroomCleanupRequest = ShowroomCleanupRequest(), _key=Depends(verify_api_key), config=Depends(_request_config)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     schedules = _filter_schedules(body.ci_filter)
-    config = _get_config()
     cleaned, failed, failed_details = teardown_showroom(schedules, config)
     success = failed == 0 or config.dry_run
     details = failed_details if failed_details else []
@@ -2334,11 +2306,10 @@ def op_showroom_cleanup(request: Request, body: ShowroomCleanupRequest = Showroo
 
 @router.post("/operations/showroom-health", response_model=OperationResponse)
 @_rate_limit("10/minute")
-def op_showroom_health(request: Request, body: ShowroomHealthRequest = ShowroomHealthRequest(), _key=Depends(verify_api_key)):
+def op_showroom_health(request: Request, body: ShowroomHealthRequest = ShowroomHealthRequest(), _key=Depends(verify_api_key), config=Depends(_request_config)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     schedules = _filter_schedules(body.ci_filter)
-    config = _get_config()
     results = []
     for s in schedules:
         health = check_showroom_health(s, config)
@@ -2392,11 +2363,10 @@ def op_showroom_preflight(request: Request, body: ShowroomPreflightRequest = Sho
 
 @router.post("/operations/showroom-applicationset")
 @_rate_limit("10/minute")
-def op_showroom_applicationset(request: Request, body: ShowroomAppSetRequest = ShowroomAppSetRequest(), _key=Depends(verify_api_key)):  # type: ignore
+def op_showroom_applicationset(request: Request, body: ShowroomAppSetRequest = ShowroomAppSetRequest(), _key=Depends(verify_api_key), config=Depends(_request_config)):  # type: ignore
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     schedules = _filter_schedules(body.ci_filter)
-    config = _get_config()
     yamls = []
     for s in schedules:
         if s.showroom_repo:
@@ -2415,11 +2385,10 @@ def op_showroom_applicationset(request: Request, body: ShowroomAppSetRequest = S
 
 @router.post("/operations/update-passwords", response_model=OperationResponse)
 @_rate_limit("10/minute")
-def op_update_passwords(request: Request, body: LockRequest = LockRequest(), _key=Depends(verify_api_key)):
+def op_update_passwords(request: Request, body: LockRequest = LockRequest(), _key=Depends(verify_api_key), config=Depends(_request_config)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
     schedules = _filter_schedules(body.ci_filter)
-    config = _get_config()
     updated = update_passwords(schedules, config)
     return OperationResponse(
         success=True,
@@ -2429,9 +2398,8 @@ def op_update_passwords(request: Request, body: LockRequest = LockRequest(), _ke
 
 @router.post("/operations/import-namespace")
 @_rate_limit("10/minute")
-def op_import_namespace(request: Request, namespace: str, _key=Depends(verify_api_key)):
+def op_import_namespace(request: Request, namespace: str, _key=Depends(verify_api_key), config=Depends(_request_config)):
     _validate_namespace(namespace)
-    config = _get_config()
     import tempfile
     tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, encoding="utf-8")
     tmp.close()
@@ -2471,12 +2439,11 @@ def qa_namespaces():
 
 @router.post("/qa/run")
 @_rate_limit("10/minute")
-def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_api_key)):  # type: ignore
+def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_api_key), config=Depends(_request_config)):  # type: ignore
     global _qa_results, _qa_log_path
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
 
-    config = _get_config()
 
     # Support multiple namespaces for faster targeted QA
     if body.namespaces:
@@ -2544,13 +2511,12 @@ def qa_get_results():
 
 @router.post("/qa/destroy-check", response_model=DestroyCheckResponse)
 @_rate_limit("10/minute")
-def qa_destroy_check_endpoint(request: Request, body: DestroyCheckRequest = DestroyCheckRequest(), _key=Depends(verify_api_key)):  # type: ignore
+def qa_destroy_check_endpoint(request: Request, body: DestroyCheckRequest = DestroyCheckRequest(), _key=Depends(verify_api_key), config=Depends(_request_config)):  # type: ignore
     """Read-only check whether deployments have been properly destroyed/stopped."""
     global _destroy_check_results
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
 
-    config = _get_config()
     all_results: list[dict] = []
     temp_csv_paths: list[str] = []
 
@@ -2798,40 +2764,17 @@ async def export_for_labagator(_key=Depends(verify_api_key)):
 
 
 @router.get("/schedules/cluster-needs", response_model=ClusterNeedsResponse)
-def get_cluster_needs(_key=Depends(verify_api_key)):
-    """Calculate cluster capacity needs for tenant workshops.
-
-    Analyzes loaded schedules to determine:
-    - How many tenant workshops are being deployed
-    - How many cluster CIs are needed based on pool capacity
-    - Deficit (if any) between needed clusters and clusters in CSV
-
-    Returns:
-        ClusterNeedsResponse with capacity calculations per tenant type
-    """
+def get_cluster_needs(_key=Depends(verify_api_key), config=Depends(_request_config)):
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
-
-    try:
-        from lib.tenant_cluster_capacity import calculate_cluster_needs
-
-        result = calculate_cluster_needs(_schedules)
-
-        return ClusterNeedsResponse(
-            needs=[ClusterNeed(**n) for n in result["needs"]],
-            total_tenant_count=result["total_tenant_count"],
-            total_deficit=result["total_deficit"]
-        )
-    except ImportError as e:
-        logger.warning(f"Cluster needs calculation unavailable: {e}")
-        return ClusterNeedsResponse()
-    except Exception as e:
-        logger.exception("Cluster needs calculation failed")
-        return ClusterNeedsResponse()
+    refs = _tenant_refs(_schedules, config)
+    # Workshop Manager sizes each dedicated pool from spec.count and
+    # sandboxHost.max_placements. CSV row counts are not placement demand.
+    return ClusterNeedsResponse(total_tenant_count=refs["total_tenant_count"])
 
 
 @router.get("/schedules/tenant-cluster-refs")
-def check_tenant_cluster_refs(_key=Depends(verify_api_key)):
+def check_tenant_cluster_refs(_key=Depends(verify_api_key), config=Depends(_request_config)):
     """Check if tenant workshops have proper catalog cluster references.
 
     Queries CatalogItems to verify tenant_cluster configuration exists.
@@ -2846,14 +2789,14 @@ def check_tenant_cluster_refs(_key=Depends(verify_api_key)):
     try:
         from lib.tenant_cluster_capacity import check_tenant_cluster_references
 
-        result = check_tenant_cluster_references(_schedules)
+        result = check_tenant_cluster_references(_schedules, env=_config_env(config))
         return result
     except ImportError as e:
         logger.warning(f"Tenant cluster reference check unavailable: {e}")
-        return {"missing_refs": [], "total_tenant_count": 0}
+        raise HTTPException(503, "Tenant reference checking is unavailable") from e
     except Exception as e:
         logger.exception("Tenant cluster reference check failed")
-        return {"missing_refs": [], "total_tenant_count": 0}
+        raise HTTPException(502, f"Tenant reference check failed: {e}") from e
 
 
 
@@ -2861,6 +2804,7 @@ def check_tenant_cluster_refs(_key=Depends(verify_api_key)):
 def check_pool_status(
     body: dict,
     _key=Depends(verify_api_key),
+    config=Depends(_request_config),
 ):
     """Check the current cluster status of a list of TenantClusterPool names.
 
@@ -2873,9 +2817,11 @@ def check_pool_status(
         try:
             proc = subprocess.run(
                 ["oc", "get", "tenantclusterpool", ci, "-n", "shared-clusters", "-o", "json"],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True, text=True, timeout=30, env=_config_env(config),
             )
             if proc.returncode != 0:
+                if "(NotFound)" not in proc.stderr:
+                    raise RuntimeError(proc.stderr.strip() or "Pool lookup failed")
                 results.append({
                     "name": ci,
                     "exists": False,
@@ -2891,10 +2837,7 @@ def check_pool_status(
             available = sum(1 for c in clusters if c.get("sandboxApiState") == "available")
             min_avail = spec.get("minAvailableSandboxPlacements", 0)
 
-            if enabled and min_avail > 0:
-                action = "already_active"
-            else:
-                action = "enable"
+            action = "already_exists"
 
             results.append({
                 "name": ci,
@@ -2909,7 +2852,7 @@ def check_pool_status(
                 "exists": False,
                 "enabled": False,
                 "available_clusters": 0,
-                "action_preview": "create",
+                "action_preview": "error",
                 "error": str(exc),
             })
     return {"results": results}
@@ -2919,6 +2862,7 @@ def check_pool_status(
 def create_tenant_cluster_pools(
     body: CreateTenantClusterPoolsRequest,
     _key=Depends(verify_api_key),
+    config=Depends(_request_config),
 ):
     """Generate (and optionally apply) TenantClusterPool CRDs for missing pools.
 
@@ -2976,17 +2920,16 @@ def create_tenant_cluster_pools(
 
     def _get_existing_pool_spec(pool_name: str) -> dict | None:
         """Return the spec of an existing TenantClusterPool, or None if not found."""
-        try:
-            proc = subprocess.run(
-                ["oc", "get", "tenantclusterpool", pool_name,
-                 "-n", "shared-clusters", "-o", "json"],
-                capture_output=True, text=True, timeout=30,
-            )
-            if proc.returncode != 0:
+        proc = subprocess.run(
+            ["oc", "get", "tenantclusterpool", pool_name,
+             "-n", "shared-clusters", "-o", "json"],
+            capture_output=True, text=True, timeout=30, env=_config_env(config),
+        )
+        if proc.returncode != 0:
+            if "(NotFound)" in proc.stderr:
                 return None
-            return json.loads(proc.stdout).get("spec", {})
-        except Exception:
-            return None
+            raise RuntimeError(proc.stderr.strip() or "Pool lookup failed")
+        return json.loads(proc.stdout).get("spec", {})
 
     results = []
     if body.apply_to_cluster:
@@ -2996,38 +2939,11 @@ def create_tenant_cluster_pools(
                 existing_spec = _get_existing_pool_spec(pool_name)
 
                 if existing_spec is not None:
-                    # Pool already exists — enable it and ensure minAvailableSandboxPlacements is set
-                    already_enabled = existing_spec.get("enabled", False)
-                    current_min_avail = existing_spec.get("minAvailableSandboxPlacements", 0)
-                    needs_patch = (not already_enabled) or (current_min_avail == 0 and body.min_available_sandbox_placements > 0)
-
-                    if not needs_patch:
-                        results.append({
-                            "name": pool_name,
-                            "success": True,
-                            "action": "already_active",
-                            "output": "Pool already exists and is enabled — no changes needed.",
-                            "error": "",
-                        })
-                        continue
-
-                    patch: dict = {"spec": {"enabled": True}}
-                    if current_min_avail == 0 and body.min_available_sandbox_placements > 0:
-                        patch["spec"]["minAvailableSandboxPlacements"] = body.min_available_sandbox_placements
-
-                    proc = subprocess.run(
-                        ["oc", "patch", "tenantclusterpool", pool_name,
-                         "-n", "shared-clusters",
-                         "--type", "merge",
-                         "-p", json.dumps(patch)],
-                        capture_output=True, text=True, timeout=30,
-                    )
+                    # Reference templates need not be enabled or hold capacity.
+                    # Do not activate/resize an existing shared pool as a side effect.
                     results.append({
-                        "name": pool_name,
-                        "success": proc.returncode == 0,
-                        "action": "enabled",
-                        "output": proc.stdout.strip() or "Patched existing pool to enabled=true.",
-                        "error": proc.stderr.strip() if proc.returncode != 0 else "",
+                        "name": pool_name, "success": True, "action": "already_exists",
+                        "output": "Reference pool already exists; left unchanged.", "error": "",
                     })
                 else:
                     # Pool does not exist — create it
@@ -3035,7 +2951,7 @@ def create_tenant_cluster_pools(
                     proc = subprocess.run(
                         ["oc", "apply", "-f", "-"],
                         input=pool_yaml,
-                        capture_output=True, text=True, timeout=30,
+                        capture_output=True, text=True, timeout=30, env=_config_env(config),
                     )
                     results.append({
                         "name": pool_name,

@@ -1252,12 +1252,8 @@ def read_csv_input(filepath: str) -> list[WorkshopSchedule]:
         # Analyze cluster/tenant relationships after CSV parsing
         analyze_cluster_tenant_relationships(schedules)
 
-        # Filter out cluster rows that will be provided by TenantClusterPools
-        original_count = len(schedules)
-        schedules = filter_pool_provided_clusters(schedules)
-        skipped_count = original_count - len(schedules)
-        if skipped_count > 0:
-            logger.info(f"Skipped {skipped_count} cluster row(s) - will be provided by TenantClusterPools")
+        # Parsing is offline. Explicit cluster rows must not disappear based on
+        # the hosting cluster's pool state before a deploy target is selected.
 
         logger.info(f"Successfully read {len(schedules)} schedules from {filepath}")
         return schedules
@@ -1611,12 +1607,11 @@ def build_resource_claim_payload(
     if schedule.white_glove:
         payload["_white_glove"] = True
 
-    # Add TenantClusterPool linkage for tenant catalog items
-    try:
+    # Explicit overrides are preserved; automatic placement belongs to Babylon.
+    # Never guess pool ownership by querying the hosting cluster during rendering.
+    if schedule.pool_name:
         from lib.tenant_cluster_pool_linkage import add_pool_linkage_to_payload
         payload = add_pool_linkage_to_payload(payload, schedule.ci, schedule.namespace, schedule.pool_name)
-    except Exception as e:
-        logger.debug(f"Pool linkage failed (non-blocking): {e}")
 
     return payload
 
@@ -5191,19 +5186,9 @@ def process_schedule(
     """
     logger.info(f"Processing schedule: {schedule.ci_name} ({schedule.ci})")
 
-    # Check tenant cluster capacity for this deployment
+    # Capacity belongs to the selected target's controller-managed pool.
     cluster_name = ""
     cluster_capacity_str = ""
-    try:
-        from lib.tenant_cluster_capacity import check_cluster_capacity, is_tenant_catalog_item
-        if is_tenant_catalog_item(schedule.ci):
-            capacity = check_cluster_capacity(schedule.ci, schedule.namespace)
-            if capacity:
-                cluster_name = capacity.cluster_name
-                cluster_capacity_str = f"{capacity.pool_saturation_percent}% utilized"
-                logger.debug(f"Tenant cluster {cluster_name}: {cluster_capacity_str}")
-    except Exception as e:
-        logger.debug(f"Capacity check failed (non-blocking): {e}")
 
     # num_users limit guard — refuse to deploy more than the catalog cap
     if not config.dry_run and _should_include_users(schedule) and schedule.users is not None:

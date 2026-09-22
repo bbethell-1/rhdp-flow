@@ -1,0 +1,26 @@
+# Apply separately on each configured deployment target, not the hosting cluster.
+# Workshop Manager owns workshop-scoped pools. Flow reads shared references and
+# may create them only through its explicit reference-pool action.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rhdp-flow-tenant-pools
+  namespace: shared-clusters
+rules:
+  - apiGroups: [babylon.gpte.redhat.com]
+    resources: [tenantclusterpools]
+    verbs: [get, list, create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rhdp-flow-tenant-pools
+  namespace: shared-clusters
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: rhdp-flow-tenant-pools
+subjects:
+  - kind: ServiceAccount
+    name: rhdp-flow-deployer
+    namespace: rhdp-flow

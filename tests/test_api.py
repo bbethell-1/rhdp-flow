@@ -109,8 +109,10 @@ def test_health_setup_does_not_block_event_loop(blocking_step):
             return config
 
         with patch.object(routes, "_get_config", side_effect=get_config):
-            response = await routes.health()
-        assert response.oc_installed is False
+            from httpx import ASGITransport, AsyncClient
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
+                response = await http.get("/api/health")
+        assert response.json()["oc_installed"] is False
         assert called_threads
         assert all(thread != loop_thread for thread in called_threads)
 
@@ -1706,6 +1708,7 @@ def test_validate_cluster_tenant_no_schedules(client):
     assert resp.status_code == 400
 
 
+@pytest.mark.usefixtures("legacy_tenant_catalog")
 def test_validate_cluster_tenant_success(client):
     """Upload CSV with valid cluster+tenant order (cluster before tenant), validation should pass."""
     # Upload CSV with cluster row BEFORE tenant row
@@ -1737,6 +1740,7 @@ def test_validate_cluster_tenant_success(client):
     assert isinstance(data["warnings"], list)
 
 
+@pytest.mark.usefixtures("legacy_tenant_catalog")
 def test_validate_cluster_tenant_error_wrong_order(client):
     """Upload CSV with tenant BEFORE cluster, should return error with time details."""
     # Upload CSV with tenant row BEFORE cluster row (wrong order)
@@ -1779,6 +1783,7 @@ def test_validate_cluster_tenant_error_wrong_order(client):
 
 
 @patch("rhdp_flow.find_provisioned_cluster_resourceclaim", return_value=None)
+@pytest.mark.usefixtures("legacy_tenant_catalog")
 def test_validate_cluster_tenant_missing_cluster(mock_find, client):
     """Upload CSV with tenant but no cluster row, should return warning about missing cluster."""
     # Upload CSV with only tenant row, no cluster row
@@ -1813,6 +1818,7 @@ def test_validate_cluster_tenant_missing_cluster(mock_find, client):
     assert warning["namespace"] == "user-bbethell-redhat-com"
 
 
+@pytest.mark.usefixtures("legacy_tenant_catalog")
 def test_validate_cluster_tenant_override(client):
     """Upload CSV with Cluster_CI override pointing to non-existent cluster, should get warning."""
     # Upload CSV with Cluster_CI override to custom-cluster.prod

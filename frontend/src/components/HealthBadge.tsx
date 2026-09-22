@@ -31,12 +31,16 @@ export const HealthBadge: React.FC = () => {
         console.warn('Health check failed', e);
         setLabel('API unreachable');
         setColor('red');
-        setTooltip('Cannot connect to RHDP-Flow backend');
+        setTooltip(e instanceof Error ? e.message : 'Cannot connect to RHDP-Flow backend');
       }
     };
     check();
     const id = setInterval(check, HEALTH_CHECK_INTERVAL_MS);
-    return () => clearInterval(id);
+    window.addEventListener('rhdp-target-change', check);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('rhdp-target-change', check);
+    };
   }, []);
 
   return (

@@ -31,6 +31,8 @@ jobs:
         run: mypy --install-types --non-interactive api/ rhdp_flow.py
         continue-on-error: true
       - run: pytest tests/ -v --tb=short
+      - name: Check reviewed Babylon contract
+        run: python scripts/check_babylon_contract.py
 
   frontend-build:
     name: Frontend Build & Test

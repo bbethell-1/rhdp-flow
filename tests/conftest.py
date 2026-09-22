@@ -471,3 +471,12 @@ def basic_csv_file(tmp_path):
     p = tmp_path / "basic.csv"
     p.write_text(BASIC_WORKSHOP_CSV)
     return str(p)
+
+
+@pytest.fixture
+def legacy_tenant_catalog(monkeypatch):
+    """Legacy timing tests use catalogs without controller-managed pools."""
+    monkeypatch.setattr(
+        "lib.tenant_cluster_capacity._cluster_json",
+        lambda args, env=None: {"items": [], "spec": {"sandboxes": []}},
+    )

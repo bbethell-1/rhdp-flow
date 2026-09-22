@@ -601,11 +601,11 @@ class ClusterNeedsResponse(BaseModel):
 class CreateTenantClusterPoolsRequest(BaseModel):
     """Request to generate (and optionally apply) TenantClusterPool CRDs."""
     cluster_cis: list[str]
-    enabled: bool = True
-    min_clusters: int = 1
+    enabled: bool = False
+    min_clusters: int = Field(0, ge=0)
     max_clusters: int = 3
-    min_available_sandbox_placements: int = 1
-    max_placements: int = 15
+    min_available_sandbox_placements: int = Field(0, ge=0)
+    max_placements: int = Field(15, ge=1)
     environment_level: str = "integration"
     cloud: str = "osp"
     apply_to_cluster: bool = False

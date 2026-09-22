@@ -37,7 +37,7 @@ import UploadIcon from '@patternfly/react-icons/dist/esm/icons/upload-icon';
 import TrashIcon from '@patternfly/react-icons/dist/esm/icons/trash-icon';
 import InfoCircleIcon from '@patternfly/react-icons/dist/esm/icons/info-circle-icon';
 
-import { api } from '../services/api';
+import { api, getSelectedTarget, selectTargetCluster } from '../services/api';
 import { DiffView } from './DiffView';
 import { CatalogItemSelect } from './CatalogItemSelect';
 import type { WorkshopSchedule, DeploymentResult, NumUsersViolation, UsersNotInCatalogAdvisory, ScheduleExampleMeta, LabagatorEventSummary, LabagatorPreviewResponse } from '../types';
@@ -166,7 +166,7 @@ export const UploadTab: React.FC<Props> = ({
   // Multi-cluster deploy target picker (Feature 2 — identity-gated to approved operators)
   const [pickerAllowed, setPickerAllowed] = useState(false);
   const [deployClusters, setDeployClusters] = useState<import('../types').ClusterTarget[]>([]);
-  const [targetCluster, setTargetCluster] = useState<string>('');
+  const [targetCluster, setTargetCluster] = useState<string>(getSelectedTarget);
 
   useEffect(() => {
     let cancelled = false;
@@ -198,7 +198,7 @@ export const UploadTab: React.FC<Props> = ({
 
   // Cluster-tenant validation
   const [clusterTenantValidation, setClusterTenantValidation] = useState<any>(null);
-  const [clusterNeeds, setClusterNeeds] = useState<any>(null);
+  const [, setClusterNeeds] = useState<any>(null);
   const [missingTenantRefs, setMissingTenantRefs] = useState<any>(null);
 
   // Auto-timing settings
@@ -242,14 +242,14 @@ export const UploadTab: React.FC<Props> = ({
   // ── TenantClusterPool creation modal ──
   const [showPoolCreateModal, setShowPoolCreateModal] = useState(false);
   const [poolCreateCIs, setPoolCreateCIs] = useState<string[]>([]);
-  const [poolCreateEnabled, setPoolCreateEnabled] = useState(true);
+  const [poolCreateEnabled, setPoolCreateEnabled] = useState(false);
   const [poolCreateStatusCheck, setPoolCreateStatusCheck] = useState<Array<{
     name: string; exists: boolean; enabled: boolean; available_clusters: number; action_preview: string;
   }> | null>(null);
   const [poolCreateStatusLoading, setPoolCreateStatusLoading] = useState(false);
-  const [poolCreateMin, setPoolCreateMin] = useState(1);
+  const [poolCreateMin, setPoolCreateMin] = useState(0);
   const [poolCreateMax, setPoolCreateMax] = useState(3);
-  const [poolCreateMinAvailPlacements, setPoolCreateMinAvailPlacements] = useState(1);
+  const [poolCreateMinAvailPlacements, setPoolCreateMinAvailPlacements] = useState(0);
   const [poolCreateMaxPlacements, setPoolCreateMaxPlacements] = useState(15);
   const [poolCreateEnvLevel, setPoolCreateEnvLevel] = useState('integration');
   const [poolCreateCloud, setPoolCreateCloud] = useState('osp');
@@ -385,7 +385,7 @@ export const UploadTab: React.FC<Props> = ({
     };
 
     fetchPoolData();
-  }, [usePoolLookup, schedules]);
+  }, [usePoolLookup, schedules, targetCluster]);
 
   /** Re-fetch namespace + catalog num_users + catalog namespace + pool capacity checks from the server (uses loaded schedules). */
   const refreshClusterValidation = useCallback(async () => {
@@ -401,7 +401,7 @@ export const UploadTab: React.FC<Props> = ({
       api.validateNamespaces(),
       api.validateNumUsers(),
       api.validateCatalogNamespaces(),
-      api.validatePoolCapacity().catch(() => ({ warnings: [], not_found: [], tenant_items_checked: 0, pools_queried: 0 })),
+      api.validatePoolCapacity(),
     ]);
     if (nsRes.missing.length) setMissingNamespaces(nsRes.missing);
     if (nuRes.violations.length) setNumUsersViolations(nuRes.violations);
@@ -421,7 +421,15 @@ export const UploadTab: React.FC<Props> = ({
     }
     setValidating(true);
     try {
-      const { nsRes, nuRes } = await refreshClusterValidation();
+      const { nsRes, nuRes, cnRes, pcRes } = await refreshClusterValidation();
+      const ctRes = await api.validateClusterTenant();
+      setClusterTenantValidation(ctRes);
+      const refs = await api.checkTenantClusterRefs();
+      setMissingTenantRefs(refs);
+      if (cnRes.mismatches.length || cnRes.not_found.length || ctRes.errors.length || pcRes.not_found.length || pcRes.warnings.length) {
+        showToast('Prerequisite checks found issues on the selected target. Review the alerts below.', 'danger');
+        return;
+      }
       const nNs = nsRes.missing.length;
       const nNu = nuRes.violations.length;
       const nAdv = nuRes.users_not_in_catalog?.length ?? 0;
@@ -459,6 +467,7 @@ export const UploadTab: React.FC<Props> = ({
         redirect,
         showroom_novnc: showroomNovnc,
         showroom_zerotouch: showroomZerotouch,
+        target_cluster: targetCluster || null,
       });
       showToast('Downloaded dry-run manifest YAML', 'success');
     } catch (e) {
@@ -1371,153 +1380,22 @@ export const UploadTab: React.FC<Props> = ({
             </Alert>
           )}
 
-          {/* Cluster capacity needs */}
-          {clusterNeeds && clusterNeeds.total_deficit > 0 && !missingTenantRefs && (
-            <Alert
-              variant="warning"
-              isInline
-              title={`Need ${clusterNeeds.total_deficit} more cluster(s) for ${clusterNeeds.total_tenant_count} tenant workshops`}
-              style={{ marginBottom: 12 }}
-            >
-              <div style={{ marginBottom: 8 }}>
-                You're deploying tenant workshops but don't have enough cluster CIs in your CSV:
-              </div>
-              <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
-                {clusterNeeds.needs.filter((n: any) => n.deficit > 0).map((need: any, i: number) => (
-                  <li key={i}>
-                    <strong>{need.tenant_count} tenant workshops</strong> need <strong>{need.clusters_needed} clusters</strong> ({need.capacity_per_cluster} tenants/cluster)
-                    <br />
-                    <span style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)' }}>
-                      CSV has {need.clusters_in_csv} cluster rows → need {need.deficit} more: <code>{need.cluster_ci}</code>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              <div style={{ padding: '10px 14px', background: 'var(--pf-v6-global--BackgroundColor--200)', border: '1px solid var(--pf-v6-global--BorderColor--100)', borderRadius: 4 }}>
-                <strong>⚠️ Action needed:</strong> Add {clusterNeeds.total_deficit} cluster CI row(s) to your CSV, or ensure clusters already exist in the pool.
-                <br />
-                <span style={{ fontSize: '0.85rem', marginTop: 4, display: 'block' }}>
-                  Clusters take ~{timingBufferHours} hours to provision. Use <strong>Auto-Adjust Cluster Timing</strong> below to schedule them before tenants.
-                </span>
-              </div>
+          {missingTenantRefs && (missingTenantRefs.missing_refs?.length > 0 || missingTenantRefs.ref_no_pool?.length > 0) && (
+            <Alert variant="warning" isInline title="Tenant prerequisites need attention" style={{ marginBottom: 12 }}>
+              {missingTenantRefs.missing_refs?.length > 0 && <p>
+                {missingTenantRefs.missing_refs.length} tenant item(s) have no tenantCluster reference in the selected target's catalog.
+                Verify the catalog definition or the explicit cluster dependency; a pool guessed from the item name cannot repair this.
+              </p>}
+              {missingTenantRefs.ref_no_pool?.length > 0 && <>
+                <p>Missing shared reference pools: {missingTenantRefs.ref_no_pool.map((r: any) => r.cluster_ref).join(', ')}.
+                  Workshop Manager needs these definitions to create its dedicated pools.</p>
+                <Button variant="secondary" onClick={() => {
+                  setPoolCreateCIs([...new Set(missingTenantRefs.ref_no_pool.map((r: any) => r.cluster_ref))] as string[]);
+                  setPoolCreateYaml(''); setPoolCreateResults([]); setPoolCreateApplied(false); setShowPoolCreateModal(true);
+                }}>Review reference pool definitions</Button>
+              </>}
             </Alert>
           )}
-
-          {/* Tenant cluster readiness — a tenant needs somewhere to run:
-              either a shared cluster pool exists, OR its cluster provisioner
-              deploys in this same batch. If neither, it will fail. */}
-          {missingTenantRefs && (() => {
-            const all = [
-              ...(missingTenantRefs.missing_refs || []),
-              ...(missingTenantRefs.ref_no_pool || []),
-            ];
-            const willFail = all.filter((r: any) => !r.pool_exists && !r.has_cluster_row);
-            const viaFreshCluster = all.filter((r: any) => !r.pool_exists && r.has_cluster_row);
-
-            if (willFail.length === 0 && viaFreshCluster.length === 0) return null;
-
-            return (
-              <>
-                {willFail.length > 0 && (
-                  <Alert
-                    variant="danger"
-                    isInline
-                    title={`${willFail.length} workshop(s) will fail — no cluster to run on`}
-                    style={{ marginBottom: 12 }}
-                    actionLinks={
-                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          onClick={() => {
-                            // Use cluster_ref from CatalogItem if available; otherwise
-                            // derive from tenant CI by swapping -tenant. → -cluster.
-                            // Never fall back to the tenant CI itself — that would create
-                            // a pool named after the tenant, which Babylon can't provision.
-                            const cis = [...new Set(willFail.map((r: any) => {
-                              if (r.cluster_ref) return r.cluster_ref;
-                              const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
-                              return derived !== r.ci ? derived : null;
-                            }).filter(Boolean))] as string[];
-                            setPoolCreateCIs(cis);
-                            setPoolCreateYaml('');
-                            setPoolCreateResults([]);
-                            setPoolCreateApplied(false);
-                            setShowPoolCreateModal(true);
-                          }}
-                        >
-                          {(() => {
-                            const cis = [...new Set(willFail.map((r: any) => {
-                              if (r.cluster_ref) return r.cluster_ref;
-                              const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
-                              return derived !== r.ci ? derived : null;
-                            }).filter(Boolean))];
-                            return `Create ${cis.length} TenantClusterPool${cis.length === 1 ? '' : 's'}`;
-                          })()}
-                        </Button>
-                        <Button
-                          variant="link"
-                          size="sm"
-                          onClick={async () => {
-                            try { setMissingTenantRefs(await api.checkTenantClusterRefs()); } catch { /* ignore */ }
-                          }}
-                        >
-                          Re-check cluster refs
-                        </Button>
-                      </div>
-                    }
-                  >
-                    <div style={{ marginBottom: 8 }}>
-                      These tenant workshops need a cluster to run on, but no <code>TenantClusterPool</code> exists
-                      in <code>shared-clusters</code> and no matching cluster CI is in this CSV:
-                    </div>
-                    <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
-                      {willFail.slice(0, 5).map((ref: any, i: number) => (
-                        <li key={i}><strong>{ref.workshop_name}</strong></li>
-                      ))}
-                      {willFail.length > 5 && (
-                        <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>
-                          ...and {willFail.length - 5} more
-                        </li>
-                      )}
-                    </ul>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)' }}>
-                      Fix: click <strong>Create TenantClusterPools</strong> above to create the shared pool (Babylon will provision clusters automatically),
-                      or add the matching <code>-cluster.*</code> CI row to your CSV to deploy a dedicated cluster alongside.
-                    </div>
-                  </Alert>
-                )}
-                {viaFreshCluster.length > 0 && (
-                  <Alert
-                    variant="info"
-                    isInline
-                    title={`${viaFreshCluster.length} workshop(s) covered by cluster CI in this CSV — OK`}
-                    style={{ marginBottom: 12 }}
-                  >
-                    <div style={{ marginBottom: 6 }}>
-                      No shared pool exists yet, but each of these tenant workshops has a matching
-                      <code> -cluster.*</code> CI row in this CSV and the same namespace.
-                      Babylon will route the tenant onto that dedicated cluster:
-                    </div>
-                    <ul style={{ margin: '0 0 6px 20px', fontSize: '0.9rem' }}>
-                      {viaFreshCluster.slice(0, 5).map((ref: any, i: number) => (
-                        <li key={i}><strong>{ref.workshop_name}</strong></li>
-                      ))}
-                      {viaFreshCluster.length > 5 && (
-                        <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>
-                          ...and {viaFreshCluster.length - 5} more
-                        </li>
-                      )}
-                    </ul>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)' }}>
-                      Dedicated clusters provision from scratch (~2–4 h). A <code>TenantClusterPool</code> is faster
-                      for future events since Babylon keeps clusters warm in advance.
-                    </div>
-                  </Alert>
-                )}
-              </>
-            );
-          })()}
 
           {/* Cluster row timing errors — only relevant when cluster rows exist in the batch
               (auto-add or manual). Workshops backed by a TenantClusterPool don't need this
@@ -2218,7 +2096,25 @@ export const UploadTab: React.FC<Props> = ({
                           id="target-cluster-select"
                           aria-label="Deploy target cluster"
                           value={targetCluster}
-                          onChange={(_e, value) => setTargetCluster(value)}
+                          onChange={(_e, value) => {
+                            selectTargetCluster(value);
+                            setTargetCluster(value);
+                            setMissingNamespaces([]);
+                            setNumUsersViolations([]);
+                            setUsersNotInCatalog([]);
+                            setNumUsersLimits({});
+                            setCatalogNamespaceMismatches([]);
+                            setCatalogNotFound([]);
+                            setPoolCapacityWarnings([]);
+                            setPoolsNotFound([]);
+                            setClusterTenantValidation(null);
+                            setMissingTenantRefs(null);
+                            setClusterNeeds(null);
+                            setPoolLookupData({});
+                            setAllPools([]);
+                            setShowPoolCreateModal(false);
+                            showToast('Target changed. Check prerequisites before deploying.', 'info');
+                          }}
                           style={{ width: 'auto', minWidth: 180 }}
                         >
                           <FormSelectOption value="" label="This cluster (default)" />
@@ -2835,8 +2731,10 @@ export const UploadTab: React.FC<Props> = ({
             {poolCreateStatusCheck ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {poolCreateStatusCheck.map((s, i) => {
-                  const badge = s.action_preview === 'already_active'
-                    ? { label: 'Already active', color: 'var(--pf-v6-global--success-color--100)' }
+                  const badge = s.action_preview === 'error'
+                    ? { label: 'Lookup failed. Pool state is unknown.', color: 'var(--pf-v6-global--danger-color--100)' }
+                    : s.action_preview === 'already_exists'
+                    ? { label: 'Reference exists; no changes', color: 'var(--pf-v6-global--success-color--100)' }
                     : s.action_preview === 'enable'
                     ? { label: `Exists – disabled → will enable${s.available_clusters > 0 ? ` (${s.available_clusters} clusters available)` : ''}`, color: 'var(--pf-v6-global--warning-color--100)' }
                     : { label: 'Does not exist → will create fresh', color: 'var(--pf-v6-global--info-color--100)' };

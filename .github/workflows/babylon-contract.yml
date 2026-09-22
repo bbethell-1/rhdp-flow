@@ -1,0 +1,49 @@
+name: Babylon compatibility
+
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: babylon-contract
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: redhat-cop/babylon
+          path: .upstream/babylon
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Detect changes to consumed contracts
+        id: contract
+        continue-on-error: true
+        run: python scripts/check_babylon_contract.py --update .upstream/babylon
+      - name: Prepare compatibility update
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: automation/babylon-contract
+          add-paths: contracts/babylon.json
+          commit-message: Record Babylon contract changes for compatibility review
+          title: Review Babylon changes affecting Flow provisioning
+          draft: true
+          body: |
+            Babylon changed a contract consumed by Flow. The manifest records the exact upstream commit and affected file hashes.
+
+            Compare the changed sources, adapt Flow and add regression coverage before accepting the baseline with `python scripts/check_babylon_contract.py --accept`.
+            Run backend tests and frontend checks, then push the reviewed changes to trigger CI. This bot-created draft does not automatically trigger other workflows or deploy changes.
+            After review and merge, the existing CI, semantic release and OpenShift rollout apply.
+      - name: Require contract review
+        if: steps.contract.outcome == 'failure'
+        run: python scripts/check_babylon_contract.py

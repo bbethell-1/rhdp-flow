@@ -41,6 +41,14 @@ export interface TenantClusterRef {
 }
 
 const API = '/api';
+let selectedTarget = '';
+export const getSelectedTarget = () => selectedTarget;
+export function selectTargetCluster(target: string) {
+  selectedTarget = target;
+  clearApiCache();
+  window.dispatchEvent(new Event('rhdp-target-change'));
+}
+
 
 export function getApiKey(): string | null {
   // Use sessionStorage — cleared on tab close, not vulnerable to persistent XSS
@@ -49,7 +57,7 @@ export function getApiKey(): string | null {
 
 function getApiKeyHeader(): Record<string, string> {
   const apiKey = getApiKey();
-  return apiKey ? { 'X-API-Key': apiKey } : {};
+  return { ...(apiKey ? { 'X-API-Key': apiKey } : {}), ...(selectedTarget ? { 'X-RHDP-Target-Cluster': selectedTarget } : {}) };
 }
 
 export function setApiKey(key: string): void {
@@ -85,7 +93,9 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
     ...opts.headers as Record<string, string>,
   };
   Object.assign(headers, getApiKeyHeader());
+  const target = selectedTarget;
   const res = await fetch(`${API}${path}`, { ...opts, headers });
+  if (selectedTarget !== target) throw new Error('Target changed. Re-run this check for the selected cluster.');
   if (!res.ok || res.headers?.get('content-type')?.includes('text/html')) {
     throw await responseError(res);
   }
@@ -96,10 +106,11 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
 const _cache = new Map<string, { data: unknown; expiry: number }>();
 
 async function cachedRequest<T>(path: string, ttlMs = 5000): Promise<T> {
-  const entry = _cache.get(path);
+  const key = `${selectedTarget}:${path}`;
+  const entry = _cache.get(key);
   if (entry && Date.now() < entry.expiry) return entry.data as T;
   const data = await request<T>(path);
-  _cache.set(path, { data, expiry: Date.now() + ttlMs });
+  _cache.set(key, { data, expiry: Date.now() + ttlMs });
   return data;
 }
 

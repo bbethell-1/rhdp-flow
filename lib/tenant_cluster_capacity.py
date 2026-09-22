@@ -326,159 +326,87 @@ def calculate_cluster_needs(schedules: list[Any]) -> dict[str, Any]:
     }
 
 
-def _list_tenant_cluster_pools() -> dict[str, int]:
-    """
-    Return a mapping of TenantClusterPool name → available cluster count.
-
-    "Available" means sandboxApiState == "available" (registered in Sandbox API
-    and accepting new tenants). A pool with 0 available clusters exists but
-    cannot accept tenants right now — clusters may still be provisioning.
-
-    Fails safe to an empty dict so a missing CRD / permission issue never
-    blocks a deploy.
-    """
+def _cluster_json(args: list[str], env=None) -> dict:
+    """Read a target resource. Permission and transport errors are not absence."""
     import json
     import subprocess
 
-    try:
-        result = subprocess.run(
-            "oc get tenantclusterpools -A -o json",
-            shell=True, capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode != 0:
-            return {}
-        data = json.loads(result.stdout)
-        pools: dict[str, int] = {}
-        for item in data.get("items", []):
-            name = item.get("metadata", {}).get("name", "")
-            if not name:
-                continue
-            clusters = item.get("status", {}).get("clusters", [])
-            available = sum(1 for c in clusters if c.get("sandboxApiState") == "available")
-            pools[name] = available
-        return pools
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
-        return {}
+    result = subprocess.run(
+        ["oc", *args], capture_output=True, text=True, timeout=30, env=env,
+    )
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or "Cluster query failed")
+    return json.loads(result.stdout)
 
 
-def check_tenant_cluster_references(schedules: list[Any]) -> dict[str, Any]:
-    """
-    Check that each tenant workshop can actually land on a cluster.
+def tenant_cluster_components(catalog_item: dict) -> list[str]:
+    """Babylon CatalogItem.spec.sandboxes[].tenantCluster.componentName contract."""
+    return list(dict.fromkeys(
+        sandbox["tenantCluster"]["componentName"]
+        for sandbox in catalog_item.get("spec", {}).get("sandboxes", [])
+        if sandbox.get("tenantCluster") and sandbox["tenantCluster"].get("componentName")
+    ))
 
-    A tenant workshop needs somewhere to run. There are two valid ways:
-      1. Modern path: the live CatalogItem links the tenant to a cluster via
-         ``spec.sandboxes[].tenantCluster.componentName`` AND a matching
-         TenantClusterPool exists (with ready clusters).
-      2. Classic path: a ``-cluster`` provisioner is deployed in the same
-         batch (CSV cluster row) so the tenant lands on that fresh cluster
-         via its ``cloudSelector``.
 
-    Returns a dict with tiered results:
-      - ready:           tenant has a ref AND a pool with >= 1 available cluster
-      - pool_no_capacity: tenant has a ref AND pool exists but 0 available clusters
-      - ref_no_pool:     tenant has a ref but no TenantClusterPool exists yet
-      - missing_refs:    tenant has no tenantCluster ref in the live catalog
-      - has_cluster_row: whether covered by a cluster row in this same batch
-      - total_tenant_count / checked
-    """
-    import json
-    import subprocess
-
-    tenant_schedules = [s for s in schedules if s.is_tenant]
-    if not tenant_schedules:
-        return {
-            "missing_refs": [], "ref_no_pool": [], "ready": [],
-            "total_tenant_count": 0, "checked": True,
-        }
-
-    try:
-        from rhdp_flow import get_catalog_namespace, is_cluster_ci
-    except Exception:
-        get_catalog_namespace = None
-        is_cluster_ci = None
-
-    existing_pools = _list_tenant_cluster_pools()
-
-    batch_cluster_cis = set()
-    for s in schedules:
-        if getattr(s, "is_cluster", False) or (is_cluster_ci and is_cluster_ci(s.ci)):
-            batch_cluster_cis.add(s.ci)
-
-    missing_refs: list[dict[str, Any]] = []
-    ref_no_pool: list[dict[str, Any]] = []
-    pool_no_capacity: list[dict[str, Any]] = []
-    ready: list[dict[str, Any]] = []
-    checked_any = False
-
-    for schedule in tenant_schedules:
-        if get_catalog_namespace:
-            catalog_ns = get_catalog_namespace(schedule.ci, getattr(schedule, "catalog_namespace", ""))
-        else:
-            catalog_ns = getattr(schedule, "catalog_namespace", "") or "babylon-catalog-prod"
-
-        try:
-            result = subprocess.run(
-                f"oc get catalogitem {schedule.ci} -n {catalog_ns} -o json",
-                shell=True, capture_output=True, text=True, timeout=10,
-            )
-            if result.returncode != 0:
-                continue
-            checked_any = True
-            catalog_item = json.loads(result.stdout)
-        except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
-            continue
-
-        spec = catalog_item.get("spec", {})
-        sandboxes = spec.get("sandboxes") or spec.get("__meta__", {}).get("sandboxes", [])
-
-        cluster_ref = None
-        for sandbox in sandboxes:
-            if sandbox.get("kind") != "OcpSandbox":
-                continue
-            tc = sandbox.get("tenantCluster") or sandbox.get("tenant_cluster")
-            if tc:
-                cluster_ref = tc.get("componentName") or tc.get("item")
-                break
-
-        detected = getattr(schedule, "detected_cluster_ci", None)
-
-        # pool_exists is authoritative: only the live CatalogItem's componentName
-        # is what Babylon reads. The heuristic (detected) is irrelevant for pool
-        # resolution — Babylon doesn't know about it.
-        pool_exists = bool(cluster_ref and cluster_ref in existing_pools)
-        pool_available = existing_pools.get(cluster_ref, 0) if cluster_ref else 0
-        pool_has_capacity = pool_available > 0
-
-        # covered_by_row can use the heuristic fallback: if auto-add has injected
-        # a cluster row matched by naming convention, the tenant is covered.
-        cluster_target_for_row = cluster_ref or detected
-        covered_by_row = bool(cluster_target_for_row and cluster_target_for_row in batch_cluster_cis)
-
-        record = {
-            "ci": schedule.ci,
-            "namespace": catalog_ns,
-            "cluster_ref": cluster_ref or "",
-            "cluster_ci_from_csv": detected or "none",
-            "workshop_name": schedule.ci_name,
-            "pool_exists": pool_exists,
-            "pool_available_clusters": pool_available,
-            "has_cluster_row": covered_by_row,
-        }
-
-        if not cluster_ref:
-            missing_refs.append(record)
-        elif not pool_exists:
-            ref_no_pool.append(record)
-        elif not pool_has_capacity:
-            pool_no_capacity.append(record)
-        else:
-            ready.append(record)
-
+def _list_tenant_cluster_pools(env=None) -> dict[str, int]:
+    data = _cluster_json(
+        ["get", "tenantclusterpools", "-n", "shared-clusters", "-o", "json"], env,
+    )
     return {
-        "missing_refs": missing_refs,
-        "ref_no_pool": ref_no_pool,
-        "pool_no_capacity": pool_no_capacity,
-        "ready": ready,
-        "total_tenant_count": len(tenant_schedules),
-        "checked": checked_any,
+        pool["metadata"]["name"]: sum(
+            c.get("sandboxApiState") == "available"
+            for c in pool.get("status", {}).get("clusters", [])
+        )
+        for pool in data.get("items", [])
     }
+
+
+def check_tenant_cluster_references(schedules: list[Any], *, env=None) -> dict[str, Any]:
+    """Check all reference pools on the selected target, without guessing names.
+
+    Workshop Manager clones shared reference definitions into the workshop
+    namespace and provisions capacity there. Empty/disabled shared templates
+    are valid for this path; they need not contain already available clusters.
+    Direct ResourceClaims still need existing shared capacity.
+    """
+    from rhdp_flow import get_catalog_namespace, is_cluster_ci
+
+    result = {
+        "missing_refs": [], "ref_no_pool": [], "pool_no_capacity": [], "ready": [],
+        "total_tenant_count": 0, "checked": True,
+    }
+    tenants = [s for s in schedules if s.is_tenant]
+    result["total_tenant_count"] = len(tenants)
+    if not tenants:
+        return result
+    pools = _list_tenant_cluster_pools(env)
+    batch = {(s.ci, s.namespace) for s in schedules if s.is_cluster or is_cluster_ci(s.ci)}
+    catalogs = {}
+    for schedule in tenants:
+        catalog_ns = get_catalog_namespace(schedule.ci, getattr(schedule, "catalog_namespace", "") or None)
+        key = (schedule.ci, catalog_ns)
+        if key not in catalogs:
+            catalogs[key] = _cluster_json(
+                ["get", "catalogitem", schedule.ci, "-n", catalog_ns, "-o", "json"], env,
+            )
+        refs = tenant_cluster_components(catalogs[key])
+        detected = getattr(schedule, "detected_cluster_ci", None)
+        for ref in refs or [""]:
+            exists = ref in pools
+            managed = bool(schedule.enable_workshop_interface and ref)
+            record = {
+                "ci": schedule.ci, "namespace": catalog_ns,
+                "target_namespace": schedule.namespace,
+                "cluster_ref": ref, "cluster_ci_from_csv": detected or "none",
+                "workshop_name": schedule.ci_name, "pool_exists": exists,
+                "pool_available_clusters": pools.get(ref, 0),
+                "managed_by_workshop": managed,
+                "has_cluster_row": (ref or detected, schedule.namespace) in batch,
+            }
+            tier = (
+                "missing_refs" if not ref else
+                "ref_no_pool" if not exists else
+                "ready" if managed or pools[ref] > 0 else "pool_no_capacity"
+            )
+            result[tier].append(record)
+    return result

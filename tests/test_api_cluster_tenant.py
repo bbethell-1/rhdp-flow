@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 import api.routes as routes_module
@@ -15,6 +17,7 @@ def _auth_headers():
     return {"X-API-Key": os.environ.get("RHDP_API_KEY", "")}
 
 
+@pytest.mark.usefixtures("legacy_tenant_catalog")
 class TestValidateClusterTenantEndpoint:
     """Tests for the cluster-tenant validation endpoint using rhdp_flow's validator."""
 
