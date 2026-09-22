@@ -196,17 +196,8 @@ export const UploadTab: React.FC<Props> = ({
   const [catalogNamespaceMismatches, setCatalogNamespaceMismatches] = useState<import('../types').CatalogNamespaceMismatch[]>([]);
   const [catalogNotFound, setCatalogNotFound] = useState<Array<{ ci_name: string; ci: string; namespace: string; expected_catalog_namespace: string; message: string }>>([]);
 
-  // Cluster-tenant validation
-  const [clusterTenantValidation, setClusterTenantValidation] = useState<any>(null);
-  const [, setClusterNeeds] = useState<any>(null);
+  const [clusterNeeds, setClusterNeeds] = useState<any>(null);
   const [missingTenantRefs, setMissingTenantRefs] = useState<any>(null);
-
-  // Auto-timing settings
-  const [enableAutoTiming, setEnableAutoTiming] = useState(false);
-  const [timingBufferHours, setTimingBufferHours] = useState(4);
-  const [timingWarnings, setTimingWarnings] = useState<string[]>([]);
-  const [showTimingWarnings, setShowTimingWarnings] = useState(false);
-
 
   // Pool capacity validation
   const [poolCapacityWarnings, setPoolCapacityWarnings] = useState<import('../types').PoolCapacityWarning[]>([]);
@@ -422,11 +413,9 @@ export const UploadTab: React.FC<Props> = ({
     setValidating(true);
     try {
       const { nsRes, nuRes, cnRes, pcRes } = await refreshClusterValidation();
-      const ctRes = await api.validateClusterTenant();
-      setClusterTenantValidation(ctRes);
       const refs = await api.checkTenantClusterRefs();
       setMissingTenantRefs(refs);
-      if (cnRes.mismatches.length || cnRes.not_found.length || ctRes.errors.length || pcRes.not_found.length || pcRes.warnings.length) {
+      if (cnRes.mismatches.length || cnRes.not_found.length || pcRes.not_found.length || pcRes.warnings.length) {
         showToast('Prerequisite checks found issues on the selected target. Review the alerts below.', 'danger');
         return;
       }
@@ -540,26 +529,6 @@ export const UploadTab: React.FC<Props> = ({
     }
   };
 
-  const handleAutoTiming = async () => {
-    try {
-      const result = await api.autoFixClusterTenantTiming(timingBufferHours);
-      if (result.fixed_count > 0 || result.skipped_count > 0) {
-        setTimingWarnings(result.warnings || []);
-        setShowTimingWarnings(true);
-        const updated = await api.getSchedules();
-        setSchedules(updated);
-        showToast(result.message, 'success');
-      }
-      // Re-validate so timing errors clear from the danger alert
-      try {
-        const ctRes = await api.validateClusterTenant();
-        setClusterTenantValidation(ctRes);
-      } catch { /* ignore */ }
-    } catch (err) {
-      console.warn('Auto-timing adjustment failed:', err);
-    }
-  };
-
   const handleUpload = async () => {
     if (!csvFile) { showToast('Please select a CSV file', 'danger'); return; }
     try {
@@ -598,8 +567,6 @@ export const UploadTab: React.FC<Props> = ({
       showToast(msg, data.skipped_rows ? 'danger' : 'success');
       try {
         await refreshClusterValidation();
-        const ctRes = await api.validateClusterTenant();
-        setClusterTenantValidation(ctRes);
 
         // Check cluster capacity needs
         try {
@@ -617,10 +584,6 @@ export const UploadTab: React.FC<Props> = ({
           console.warn('Tenant cluster reference check failed', e);
         }
 
-        // Auto-adjust cluster timing if enabled
-        if (enableAutoTiming) {
-          await handleAutoTiming();
-        }
       } catch (e) {
         console.warn('Post-upload cluster validation failed', e);
       }
@@ -679,8 +642,6 @@ export const UploadTab: React.FC<Props> = ({
       showToast(`Imported ${data.count} session(s) from ${labagatorPreview.event_name}`, 'success');
       try {
         await refreshClusterValidation();
-        const ctRes = await api.validateClusterTenant();
-        setClusterTenantValidation(ctRes);
       } catch (e) {
         console.warn('Post-import cluster validation failed', e);
       }
@@ -1380,87 +1341,153 @@ export const UploadTab: React.FC<Props> = ({
             </Alert>
           )}
 
-          {missingTenantRefs && (missingTenantRefs.missing_refs?.length > 0 || missingTenantRefs.ref_no_pool?.length > 0) && (
-            <Alert variant="warning" isInline title="Tenant prerequisites need attention" style={{ marginBottom: 12 }}>
-              {missingTenantRefs.missing_refs?.length > 0 && <p>
-                {missingTenantRefs.missing_refs.length} tenant item(s) have no tenantCluster reference in the selected target's catalog.
-                Verify the catalog definition or the explicit cluster dependency; a pool guessed from the item name cannot repair this.
-              </p>}
-              {missingTenantRefs.ref_no_pool?.length > 0 && <>
-                <p>Missing shared reference pools: {missingTenantRefs.ref_no_pool.map((r: any) => r.cluster_ref).join(', ')}.
-                  Workshop Manager needs these definitions to create its dedicated pools.</p>
-                <Button variant="secondary" onClick={() => {
-                  setPoolCreateCIs([...new Set(missingTenantRefs.ref_no_pool.map((r: any) => r.cluster_ref))] as string[]);
-                  setPoolCreateYaml(''); setPoolCreateResults([]); setPoolCreateApplied(false); setShowPoolCreateModal(true);
-                }}>Review reference pool definitions</Button>
-              </>}
-            </Alert>
-          )}
-
-          {/* Cluster row timing errors — only relevant when cluster rows exist in the batch
-              (auto-add or manual). Workshops backed by a TenantClusterPool don't need this
-              since Babylon handles provisioning timing internally. */}
-          {(() => {
-            const hasClusterRows = schedules.some(s => (s as any).is_cluster || (s as any).auto_added);
-            if (!hasClusterRows) return null;
-
-            const allErrors: any[] = clusterTenantValidation?.errors || [];
-            const timingErrors = allErrors.filter((e: any) => {
-              const m = (e.message || '').toLowerCase();
-              return !m.includes('neither in this batch') && !m.includes('not in batch') && !m.includes('not provisioned');
-            });
-            if (timingErrors.length === 0) return null;
-            return (
-              <Alert
-                variant="danger"
-                isInline
-                title={`${timingErrors.length} cluster row timing issue(s) — cluster must deploy before its tenant`}
-                style={{ marginBottom: 12 }}
-                actionClose={
-                  <Button
-                    variant="link"
-                    onClick={async () => {
-                      setEnableAutoTiming(true);
-                      await handleAutoTiming();
-                    }}
-                  >
-                    Fix timing ({timingBufferHours}h before tenants)
-                  </Button>
-                }
-              >
-                <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
-                  {timingErrors.map((e: any, i: number) => (
-                    <li key={i}>
-                      <strong>{e.ci_name || e.tenant_ci}</strong>: {e.message}
-                    </li>
-                  ))}
-                </ul>
-              </Alert>
-            );
-          })()}
-
-          {/* Timing adjustment warnings */}
-          {showTimingWarnings && timingWarnings.length > 0 && (
+          {/* Cluster capacity needs */}
+          {clusterNeeds && clusterNeeds.total_deficit > 0 && !missingTenantRefs && (
             <Alert
-              variant="success"
+              variant="warning"
               isInline
-              title="⚙️ Auto-Adjusted Cluster Timing"
+              title={`Need ${clusterNeeds.total_deficit} more cluster(s) for ${clusterNeeds.total_tenant_count} tenant workshops`}
               style={{ marginBottom: 12 }}
-              actionClose={<Button variant="plain" onClick={() => setShowTimingWarnings(false)}><i className="fas fa-times" /></Button>}
             >
-              <div style={{ fontSize: '0.875rem', marginBottom: 8 }}>
-                Clusters adjusted to deploy <strong>{timingBufferHours} hours before</strong> their tenants:
+              <div style={{ marginBottom: 8 }}>
+                You're deploying tenant workshops but don't have enough cluster CIs in your CSV:
               </div>
-              <ul style={{ margin: '0 0 4px', paddingLeft: 20, fontSize: '0.85rem', maxHeight: '200px', overflowY: 'auto' }}>
-                {timingWarnings.map((w, i) => (
-                  <li key={i} style={{ marginBottom: 4 }}>{w}</li>
+              <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
+                {clusterNeeds.needs.filter((n: any) => n.deficit > 0).map((need: any, i: number) => (
+                  <li key={i}>
+                    <strong>{need.tenant_count} tenant workshops</strong> need <strong>{need.clusters_needed} clusters</strong> ({need.capacity_per_cluster} tenants/cluster)
+                    <br />
+                    <span style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)' }}>
+                      CSV has {need.clusters_in_csv} cluster rows → need {need.deficit} more: <code>{need.cluster_ci}</code>
+                    </span>
+                  </li>
                 ))}
               </ul>
-              <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)', marginTop: 8 }}>
-                💡 Toggle "Auto-Adjust Cluster Timing" in Deploy Settings to disable this feature.
+              <div style={{ padding: '10px 14px', background: 'var(--pf-v6-global--BackgroundColor--200)', border: '1px solid var(--pf-v6-global--BorderColor--100)', borderRadius: 4 }}>
+                <strong>⚠️ Action needed:</strong> Add {clusterNeeds.total_deficit} cluster CI row(s) to your CSV, or ensure clusters already exist in the pool.
+                <br />
+                <span style={{ fontSize: '0.85rem', marginTop: 4, display: 'block' }}>
+                  Clusters take ~4 hours to provision. Schedule cluster rows at least 4 hours before their tenants.
+                </span>
               </div>
             </Alert>
           )}
+
+          {/* Tenant cluster readiness — a tenant needs somewhere to run:
+              either a shared cluster pool exists, OR its cluster provisioner
+              deploys in this same batch. If neither, it will fail. */}
+          {missingTenantRefs && (() => {
+            const all = [
+              ...(missingTenantRefs.missing_refs || []),
+              ...(missingTenantRefs.ref_no_pool || []),
+            ];
+            const willFail = all.filter((r: any) => !r.pool_exists && !r.has_cluster_row);
+            const viaFreshCluster = all.filter((r: any) => !r.pool_exists && r.has_cluster_row);
+
+            if (willFail.length === 0 && viaFreshCluster.length === 0) return null;
+
+            return (
+              <>
+                {willFail.length > 0 && (
+                  <Alert
+                    variant="danger"
+                    isInline
+                    title={`${willFail.length} workshop(s) will fail — no cluster to run on`}
+                    style={{ marginBottom: 12 }}
+                    actionLinks={
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={() => {
+                            // Use cluster_ref from CatalogItem if available; otherwise
+                            // derive from tenant CI by swapping -tenant. → -cluster.
+                            // Never fall back to the tenant CI itself — that would create
+                            // a pool named after the tenant, which Babylon can't provision.
+                            const cis = [...new Set(willFail.map((r: any) => {
+                              if (r.cluster_ref) return r.cluster_ref;
+                              const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
+                              return derived !== r.ci ? derived : null;
+                            }).filter(Boolean))] as string[];
+                            setPoolCreateCIs(cis);
+                            setPoolCreateYaml('');
+                            setPoolCreateResults([]);
+                            setPoolCreateApplied(false);
+                            setShowPoolCreateModal(true);
+                          }}
+                        >
+                          {(() => {
+                            const cis = [...new Set(willFail.map((r: any) => {
+                              if (r.cluster_ref) return r.cluster_ref;
+                              const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
+                              return derived !== r.ci ? derived : null;
+                            }).filter(Boolean))];
+                            return `Create ${cis.length} TenantClusterPool${cis.length === 1 ? '' : 's'}`;
+                          })()}
+                        </Button>
+                        <Button
+                          variant="link"
+                          size="sm"
+                          onClick={async () => {
+                            try { setMissingTenantRefs(await api.checkTenantClusterRefs()); } catch { /* ignore */ }
+                          }}
+                        >
+                          Re-check cluster refs
+                        </Button>
+                      </div>
+                    }
+                  >
+                    <div style={{ marginBottom: 8 }}>
+                      These tenant workshops need a cluster to run on, but no <code>TenantClusterPool</code> exists
+                      in <code>shared-clusters</code> and no matching cluster CI is in this CSV:
+                    </div>
+                    <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
+                      {willFail.slice(0, 5).map((ref: any, i: number) => (
+                        <li key={i}><strong>{ref.workshop_name}</strong></li>
+                      ))}
+                      {willFail.length > 5 && (
+                        <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>
+                          ...and {willFail.length - 5} more
+                        </li>
+                      )}
+                    </ul>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)' }}>
+                      Fix: click <strong>Create TenantClusterPools</strong> above to create the shared pool (Babylon will provision clusters automatically),
+                      or add the matching <code>-cluster.*</code> CI row to your CSV to deploy a dedicated cluster alongside.
+                    </div>
+                  </Alert>
+                )}
+                {viaFreshCluster.length > 0 && (
+                  <Alert
+                    variant="info"
+                    isInline
+                    title={`${viaFreshCluster.length} workshop(s) covered by cluster CI in this CSV — OK`}
+                    style={{ marginBottom: 12 }}
+                  >
+                    <div style={{ marginBottom: 6 }}>
+                      No shared pool exists yet, but each of these tenant workshops has a matching
+                      <code> -cluster.*</code> CI row in this CSV and the same namespace.
+                      Babylon will route the tenant onto that dedicated cluster:
+                    </div>
+                    <ul style={{ margin: '0 0 6px 20px', fontSize: '0.9rem' }}>
+                      {viaFreshCluster.slice(0, 5).map((ref: any, i: number) => (
+                        <li key={i}><strong>{ref.workshop_name}</strong></li>
+                      ))}
+                      {viaFreshCluster.length > 5 && (
+                        <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>
+                          ...and {viaFreshCluster.length - 5} more
+                        </li>
+                      )}
+                    </ul>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)' }}>
+                      Dedicated clusters provision from scratch (~2–4 h). A <code>TenantClusterPool</code> is faster
+                      for future events since Babylon keeps clusters warm in advance.
+                    </div>
+                  </Alert>
+                )}
+              </>
+            );
+          })()}
 
           {/* Multi-asset password info */}
           {needsPasswordWarning && (
@@ -2059,34 +2086,6 @@ export const UploadTab: React.FC<Props> = ({
                     />
                   </Tooltip>
                 </SplitItem>
-                <SplitItem>
-                  <Tooltip content="Tenant workshops run ON TOP of a cluster. Flow reschedules each cluster row (including rows auto-added by Flow) to deploy this many hours BEFORE its tenant. If that time is already past, Flow uses now + 30 min so it deploys immediately. Tenants always follow their cluster.">
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Switch
-                        id="auto-timing-switch"
-                        label=""
-                        isChecked={enableAutoTiming}
-                        onChange={(_e, checked) => setEnableAutoTiming(checked)}
-                      />
-                      <span style={{ fontSize: '0.875rem', whiteSpace: 'nowrap' }}>
-                        Cluster pools start
-                      </span>
-                      <input
-                        type="number"
-                        min={0.5}
-                        max={24}
-                        step={0.5}
-                        value={timingBufferHours}
-                        disabled={!enableAutoTiming}
-                        onChange={e => setTimingBufferHours(Number(e.target.value))}
-                        style={{ width: 44, padding: '2px 4px', borderRadius: 4, border: '1px solid var(--pf-v6-global--BorderColor--100)', fontSize: '0.875rem', textAlign: 'center', opacity: enableAutoTiming ? 1 : 0.4 }}
-                      />
-                      <span style={{ fontSize: '0.875rem', color: 'var(--pf-v6-global--Color--200)', whiteSpace: 'nowrap' }}>
-                        hr before tenants
-                      </span>
-                    </span>
-                  </Tooltip>
-                </SplitItem>
                 {pickerAllowed && deployClusters.length > 0 && (
                   <SplitItem>
                     <Tooltip content="Choose which physical cluster to deploy to. Restricted to approved operators. Defaults to this app's own cluster.">
@@ -2107,7 +2106,6 @@ export const UploadTab: React.FC<Props> = ({
                             setCatalogNotFound([]);
                             setPoolCapacityWarnings([]);
                             setPoolsNotFound([]);
-                            setClusterTenantValidation(null);
                             setMissingTenantRefs(null);
                             setClusterNeeds(null);
                             setPoolLookupData({});

@@ -1519,8 +1519,6 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                         limit_errors.append(
                             f"{s.ci_name} ({s.ci}): {s.users} requested, max {info['maximum']}"
                         )
-            if any(s.is_tenant for s in schedules):
-                _tenant_validation(schedules, config_check, fail_closed=True)
         finally:
             cluster_targets.cleanup_kubeconfig(config_check.kubeconfig_path if body.target_cluster else None)
         if limit_errors:
