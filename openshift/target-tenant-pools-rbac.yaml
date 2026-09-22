@@ -24,3 +24,29 @@ subjects:
   - kind: ServiceAccount
     name: rhdp-flow-deployer
     namespace: rhdp-flow
+---
+# Capacity checks count existing Poolboy ResourceClaims across the target
+# cluster.  Keep this read-only and cluster-scoped because the query uses the
+# cluster-level custom-object endpoint (ResourceClaims may live in any target
+# namespace).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: rhdp-flow-resourceclaim-observer
+rules:
+  - apiGroups: [poolboy.gpte.redhat.com]
+    resources: [resourceclaims]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: rhdp-flow-resourceclaim-observer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: rhdp-flow-resourceclaim-observer
+subjects:
+  - kind: ServiceAccount
+    name: rhdp-flow-deployer
+    namespace: rhdp-flow

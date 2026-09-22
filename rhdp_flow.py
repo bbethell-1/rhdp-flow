@@ -3944,6 +3944,98 @@ def _get_workshop_for_ci(
     return None
 
 
+def _get_workshop_provision_readiness(
+    namespace: str,
+    ci: str,
+    config: "RHDPConfig",
+    workshop_name: str | None = None,
+) -> dict[str, object]:
+    """Return authoritative WorkshopProvision readiness for a workshop.
+
+    A Workshop object is created before its WorkshopProvision has finished
+    provisioning.  Treating the presence of that Workshop as ready produces
+    false-positive QA results (and is especially misleading while the
+    ResourceClaims are still provisioning).  Babylon exposes the useful
+    aggregate counts on WorkshopProvision, so QA requires all requested
+    instances to be active and no instances to be provisioning or failed.
+    """
+    result: dict[str, object] = {
+        "exists": False,
+        "healthy": False,
+        "ready": False,
+        "active": 0,
+        "provisioning": 0,
+        "failed": 0,
+        "reason": "WorkshopProvision was not found",
+    }
+    try:
+        env = os.environ.copy()
+        if config.kubeconfig_path:
+            env["KUBECONFIG"] = config.kubeconfig_path
+        r = subprocess.run(
+            [config.oc_command, "get", "workshopprovision", "-n", namespace,
+             "-l", f"babylon.gpte.redhat.com/catalogItemName={ci}", "-o", "json"],
+            capture_output=True, text=True, timeout=30, env=env,
+        )
+        if r.returncode != 0:
+            result["reason"] = r.stderr.strip() or "WorkshopProvision lookup failed"
+            return result
+        items = json.loads(r.stdout).get("items", [])
+        if workshop_name:
+            matching = [
+                item for item in items
+                if item.get("metadata", {}).get("name") == workshop_name
+                or any(
+                    workshop_name in owner.get("name", "")
+                    for owner in item.get("metadata", {}).get("ownerReferences", [])
+                )
+            ]
+            if matching:
+                items = matching
+        if not items:
+            return result
+
+        wp = items[0]
+        status = wp.get("status", {}) or {}
+        spec = wp.get("spec", {}) or {}
+
+        def count(name: str) -> int:
+            value = status.get(name, 0)
+            try:
+                return int(value or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        active = count("activeCount")
+        provisioning = count("provisioningCount")
+        failed = count("failedCount")
+        try:
+            desired = int(spec.get("count", 1) or 1)
+        except (TypeError, ValueError):
+            desired = 1
+
+        result.update({
+            "exists": True,
+            "active": active,
+            "provisioning": provisioning,
+            "failed": failed,
+            "healthy": failed == 0,
+            "ready": active >= desired and provisioning == 0 and failed == 0,
+        })
+        if bool(result["ready"]):
+            result["reason"] = f"{active}/{desired} instances active"
+        elif failed:
+            result["reason"] = f"{failed} instance(s) failed"
+        else:
+            result["reason"] = (
+                f"{active}/{desired} instances active; "
+                f"{provisioning} provisioning"
+            )
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        result["reason"] = f"WorkshopProvision readiness unavailable: {exc}"
+    return result
+
+
 def qa1_verify_setup(
     csv_file: str,
     namespace: str,
@@ -4066,6 +4158,16 @@ def qa1_verify_setup(
                             matches_schedule = False
                         if not _compare_timestamps("End date", schedule.auto_destroy, end_date, issues):
                             matches_schedule = False
+                        readiness = _get_workshop_provision_readiness(
+                            namespace, schedule.ci, config, mw_name
+                        )
+                        ready = bool(readiness["ready"])
+                        healthy = bool(readiness["healthy"])
+                        readiness_status = (
+                            "✅ MULTI-WORKSHOP READY" if ready
+                            else "⚠️ MULTI-WORKSHOP PROVISIONING" if healthy
+                            else "❌ MULTI-WORKSHOP FAILED"
+                        )
 
                         result = {
                             "ci_name": schedule.ci_name,
@@ -4073,9 +4175,9 @@ def qa1_verify_setup(
                             "namespace": namespace,
                             "scheduled": "Yes",
                             "deployed": "Yes",
-                            "status": "✅ MULTI-WORKSHOP",
+                            "status": readiness_status,
                             "matches_schedule": "Yes" if matches_schedule else "No",
-                            "issues": "; ".join(issues) if issues else "",
+                            "issues": "; ".join([*issues, str(readiness["reason"])]) if not ready else "; ".join(issues),
                             "expected_users": expected_total if expected_total is not None else expected_users,
                             "actual_count": number_seats,
                             "workshop_users_assigned": workshop_users_assigned,
@@ -4090,8 +4192,8 @@ def qa1_verify_setup(
                             "resourceclaims": [mw_name],
                             "link_to_service": url,
                             "landing_page_url": landing_page_url,
-                            "healthy": True,
-                            "ready": True
+                            "healthy": healthy,
+                            "ready": ready
                         }
                         results.append(result)
                         logger.info(f"✅ {schedule.ci_name} ({schedule.ci}) - MultiWorkshop: {mw_name} with {len(assets)} assets")
@@ -4148,6 +4250,16 @@ def qa1_verify_setup(
                         actual_stop = action_sched.get('stop', '')
                         actual_destroy = lifespan.get('end', '')
                         locked = _get_workshop_lock_status(workshop)
+                        readiness = _get_workshop_provision_readiness(
+                            namespace, schedule.ci, config, workshop_name
+                        )
+                        ready = bool(readiness["ready"])
+                        healthy = bool(readiness["healthy"])
+                        readiness_status = (
+                            "✅ WORKSHOP READY" if ready
+                            else "⚠️ WORKSHOP PROVISIONING" if healthy
+                            else "❌ WORKSHOP FAILED"
+                        )
 
                         matches_schedule = True
                         issues: list[str] = []
@@ -4164,9 +4276,9 @@ def qa1_verify_setup(
                             "namespace": namespace,
                             "scheduled": "Yes",
                             "deployed": "Yes",
-                            "status": "✅ WORKSHOP (direct)",
+                            "status": readiness_status,
                             "matches_schedule": "Yes" if matches_schedule else "No",
-                            "issues": "; ".join(issues) if issues else "",
+                            "issues": "; ".join([*issues, str(readiness["reason"])]) if not ready else "; ".join(issues),
                             "expected_users": _effective_users(schedule) if _effective_users(schedule) is not None else "",
                             "actual_count": user_count,
                             "provisioning_date": schedule.provisioning_date,
@@ -4180,8 +4292,8 @@ def qa1_verify_setup(
                             "resourceclaims": [workshop_name],
                             "link_to_service": full_url,
                             "landing_page_url": catalog_url,
-                            "healthy": True,
-                            "ready": True
+                            "healthy": healthy,
+                            "ready": ready
                         }
                         results.append(result)
                         logger.info(f"✅ {schedule.ci_name} ({schedule.ci}) - Workshop: {workshop_name}" + (" [LOCKED]" if locked else ""))
@@ -4412,6 +4524,16 @@ def qa2_verify_deployment_status(
                         spec = matching_mw.get('spec', {})
                         assets = spec.get('assets', [])
                         number_seats = spec.get('numberSeats', 0)
+                        readiness = _get_workshop_provision_readiness(
+                            namespace, schedule.ci, config, mw_name
+                        )
+                        ready = bool(readiness["ready"])
+                        healthy = bool(readiness["healthy"])
+                        readiness_status = (
+                            "✅ MULTI-WORKSHOP READY" if ready
+                            else "⚠️ MULTI-WORKSHOP PROVISIONING" if healthy
+                            else "❌ MULTI-WORKSHOP FAILED"
+                        )
                         # Workshop Users Assigned in UI = assigned/total (e.g. 0/30)
                         status_obj = matching_mw.get('status', {})
                         user_count = status_obj.get('userCount', {})
@@ -4440,21 +4562,22 @@ def qa2_verify_deployment_status(
                             "namespace": namespace,
                             "scheduled": "Yes",
                             "deployed": "Yes",
-                            "status": "✅ MULTI-WORKSHOP",
+                            "status": readiness_status,
                             "expected_seats": expected_seats if expected_seats is not None else "",
                             "actual_seats": number_seats,
                             "workshop_users_assigned": workshop_users_assigned,
                             "total_seats": total_seats,
                             "seats_match": "Yes" if seats_match else "No",
-                            "healthy": True,
-                            "ready": True,
-                            "provisioned": True,
+                            "healthy": healthy,
+                            "ready": ready,
+                            "provisioned": ready,
                             "lock_status": None,
                             "provisioning_date": schedule.provisioning_date,
                             "auto_stop": schedule.auto_stop,
                             "auto_destroy": schedule.auto_destroy,
                             "actual_start": start_date,
                             "actual_destroy": end_date,
+                            "issues": str(readiness["reason"]) if not ready else "",
                             "resourceclaim_name": mw_name,
                             "link_to_service": url,
                             "landing_page_url": landing_page_url,
@@ -4512,6 +4635,17 @@ def qa2_verify_deployment_status(
                         expected_seats = _effective_users(schedule)
                         seats_match = (expected_seats is None) or (user_count == expected_seats) if user_count > 0 else (expected_seats is None)
 
+                        readiness = _get_workshop_provision_readiness(
+                            namespace, schedule.ci, config, workshop_name
+                        )
+                        ready = bool(readiness["ready"])
+                        healthy = bool(readiness["healthy"])
+                        readiness_status = (
+                            "✅ WORKSHOP READY" if ready
+                            else "⚠️ WORKSHOP PROVISIONING" if healthy
+                            else "❌ WORKSHOP FAILED"
+                        )
+
                         action_sched = ws_spec.get('actionSchedule', {})
                         lifespan = ws_spec.get('lifespan', {})
 
@@ -4521,13 +4655,13 @@ def qa2_verify_deployment_status(
                             "namespace": namespace,
                             "scheduled": "Yes",
                             "deployed": "Yes",
-                            "status": "✅ WORKSHOP (direct)",
+                            "status": readiness_status,
                             "expected_seats": expected_seats if expected_seats is not None else "",
                             "actual_seats": user_count,
                             "seats_match": "Yes" if seats_match else "No",
-                            "healthy": True,
-                            "ready": True,
-                            "provisioned": True,
+                            "healthy": healthy,
+                            "ready": ready,
+                            "provisioned": ready,
                             "lock_status": locked,
                             "provisioning_date": schedule.provisioning_date,
                             "auto_stop": schedule.auto_stop,
@@ -4538,6 +4672,7 @@ def qa2_verify_deployment_status(
                             "resourceclaim_name": workshop_name,
                             "link_to_service": full_url,
                             "landing_page_url": catalog_url,
+                            "issues": str(readiness["reason"]) if not ready else "",
                         }
                         results.append(result)
                         lock_tag = " [LOCKED]" if locked else ""

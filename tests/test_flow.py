@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from rhdp_flow import (
+    _get_workshop_provision_readiness,
     build_resource_claim_payload,
     derive_base_domain,
     export_dry_run_manifest_yaml,
@@ -44,6 +45,46 @@ class TestVerifyDeploymentWorkshopPath:
             healthy, url, _ = verify_deployment("ws-abc123", "user-ns", "my.ci.prod", self._cfg())
         assert healthy is False
         assert url and "babylon-catalog.apps.ocp-us-west-2.infra.open.redhat.com" in url
+
+
+class TestWorkshopProvisionReadiness:
+    """QA must wait for WorkshopProvision instances, not Workshop existence."""
+
+    def _cfg(self):
+        cfg = make_config()
+        cfg.dry_run = False
+        return cfg
+
+    def test_provisioning_workshop_is_not_ready(self):
+        payload = {
+            "items": [{
+                "metadata": {"name": "wp-one"},
+                "spec": {"count": 1},
+                "status": {"activeCount": 0, "provisioningCount": 1, "failedCount": 0},
+            }]
+        }
+        command = MagicMock(returncode=0, stdout=json.dumps(payload), stderr="")
+        with patch("rhdp_flow.subprocess.run", return_value=command):
+            result = _get_workshop_provision_readiness("ns", "ci.prod", self._cfg())
+        assert result["exists"] is True
+        assert result["healthy"] is True
+        assert result["ready"] is False
+        assert "provisioning" in result["reason"]
+
+    def test_all_requested_instances_active_is_ready(self):
+        payload = {
+            "items": [{
+                "metadata": {"name": "wp-one"},
+                "spec": {"count": 2},
+                "status": {"activeCount": 2, "provisioningCount": 0, "failedCount": 0},
+            }]
+        }
+        command = MagicMock(returncode=0, stdout=json.dumps(payload), stderr="")
+        with patch("rhdp_flow.subprocess.run", return_value=command):
+            result = _get_workshop_provision_readiness("ns", "ci.prod", self._cfg())
+        assert result["healthy"] is True
+        assert result["ready"] is True
+        assert result["reason"] == "2/2 instances active"
 
 
 class TestDeriveBaseDomain:

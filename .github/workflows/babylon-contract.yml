@@ -23,7 +23,9 @@ jobs:
           repository: redhat-cop/babylon
           path: .upstream/babylon
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      # Keep action versions within the organization's allow-list.  The
+      # compatibility job must start before it can detect upstream drift.
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.11'
       - name: Detect changes to consumed contracts
@@ -31,19 +33,27 @@ jobs:
         continue-on-error: true
         run: python scripts/check_babylon_contract.py --update .upstream/babylon
       - name: Prepare compatibility update
-        uses: peter-evans/create-pull-request@v7
-        with:
-          branch: automation/babylon-contract
-          add-paths: contracts/babylon.json
-          commit-message: Record Babylon contract changes for compatibility review
-          title: Review Babylon changes affecting Flow provisioning
-          draft: true
-          body: |
-            Babylon changed a contract consumed by Flow. The manifest records the exact upstream commit and affected file hashes.
+        if: steps.contract.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git switch -C automation/babylon-contract
+          git add contracts/babylon.json
+          git commit -m "Record Babylon contract changes for compatibility review" || true
+          git push --force-with-lease origin HEAD:automation/babylon-contract
+          if ! gh pr list --head automation/babylon-contract --state open --json number --jq 'length' | grep -q '^1$'; then
+            gh pr create \
+              --head automation/babylon-contract \
+              --base "${{ github.event.repository.default_branch }}" \
+              --title "Review Babylon changes affecting Flow provisioning" \
+              --draft \
+              --body "Babylon changed a contract consumed by Flow. The manifest records the exact upstream commit and affected file hashes.
 
-            Compare the changed sources, adapt Flow and add regression coverage before accepting the baseline with `python scripts/check_babylon_contract.py --accept`.
-            Run backend tests and frontend checks, then push the reviewed changes to trigger CI. This bot-created draft does not automatically trigger other workflows or deploy changes.
-            After review and merge, the existing CI, semantic release and OpenShift rollout apply.
+              Compare the changed sources, adapt Flow and add regression coverage before accepting the baseline with python scripts/check_babylon_contract.py --accept.
+              Run backend tests and frontend checks, then merge the reviewed changes to trigger CI and the existing release rollout."
       - name: Require contract review
         if: steps.contract.outcome == 'failure'
         run: python scripts/check_babylon_contract.py
