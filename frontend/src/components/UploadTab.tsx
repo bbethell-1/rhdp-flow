@@ -1423,24 +1423,50 @@ export const UploadTab: React.FC<Props> = ({
                   <Alert
                     variant="danger"
                     isInline
-                    title={`${willFailDirect.length} workshop(s) blocked — no clusters registered in sandbox-api`}
+                    title={`${willFailDirect.length} workshop(s) blocked — no TenantClusterPool or clusters available`}
                     style={{ marginBottom: 12 }}
                     actionLinks={
-                      <Button
-                        variant="link"
-                        size="sm"
-                        onClick={async () => {
-                          try { setMissingTenantRefs(await api.checkTenantClusterRefs(targetCluster)); } catch { /* ignore */ }
-                        }}
-                      >
-                        Re-check
-                      </Button>
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={() => {
+                            const cis = [...new Set(willFailDirect.map((r: any) => {
+                              if (r.cluster_ref) return r.cluster_ref;
+                              const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
+                              return derived !== r.ci ? derived : null;
+                            }).filter(Boolean))] as string[];
+                            setPoolCreateCIs(cis);
+                            setPoolCreateYaml('');
+                            setPoolCreateResults([]);
+                            setPoolCreateApplied(false);
+                            setShowPoolCreateModal(true);
+                          }}
+                        >
+                          {(() => {
+                            const cis = [...new Set(willFailDirect.map((r: any) => {
+                              if (r.cluster_ref) return r.cluster_ref;
+                              const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
+                              return derived !== r.ci ? derived : null;
+                            }).filter(Boolean))];
+                            return `Create ${cis.length} TenantClusterPool${cis.length === 1 ? '' : 's'}`;
+                          })()}
+                        </Button>
+                        <Button
+                          variant="link"
+                          size="sm"
+                          onClick={async () => {
+                            try { setMissingTenantRefs(await api.checkTenantClusterRefs(targetCluster)); } catch { /* ignore */ }
+                          }}
+                        >
+                          Re-check
+                        </Button>
+                      </div>
                     }
                   >
                     <div style={{ marginBottom: 8 }}>
-                      These CIs use direct sandbox-api cluster assignment. The infra team must provision and register
-                      OCP clusters with sandbox-api before these can deploy. Creating a TenantClusterPool will not help
-                      until actual cluster infrastructure exists.
+                      These workshops use direct sandbox-api cluster assignment but have no TenantClusterPool with
+                      available clusters. Create the pool and enable it — Babylon will provision clusters automatically:
                     </div>
                     <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
                       {willFailDirect.slice(0, 5).map((ref: any, i: number) => (
@@ -1451,7 +1477,7 @@ export const UploadTab: React.FC<Props> = ({
                       )}
                     </ul>
                     <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)' }}>
-                      Remove these from your CSV or contact the infra team. You can also enable <strong>Ignore Capacity Warnings</strong> to force deploy if you know clusters are coming online.
+                      Make sure to set <strong>Enable pool</strong> in the creation dialog so Babylon starts provisioning immediately.
                     </div>
                   </Alert>
                 )}
