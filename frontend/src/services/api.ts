@@ -348,7 +348,9 @@ export const api = {
   deployStream: (jobId: string) => new EventSource(`${API}/deploy/stream/${jobId}`),
   deployWebSocket: (jobId: string) => {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return new WebSocket(`${proto}//${location.host}${API}/deploy/ws/${jobId}`);
+    const apiKey = getApiKey();
+    const qs = apiKey ? `?api_key=${encodeURIComponent(apiKey)}` : '';
+    return new WebSocket(`${proto}//${location.host}${API}/deploy/ws/${jobId}${qs}`);
   },
   deployCancel: (jobId: string) =>
     request<{ message: string }>(`/deploy/cancel/${jobId}`, { method: 'POST', body: '{}' }),
