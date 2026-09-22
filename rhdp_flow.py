@@ -2833,6 +2833,10 @@ def find_similar_catalog_items(ci: str, namespace: str, config: RHDPConfig, limi
         return []
 
 
+_catalog_exists_cache: dict[str, tuple[float, tuple]] = {}
+_CATALOG_CACHE_TTL = 300  # 5 minutes — catalog items don't change often
+
+
 def validate_catalog_item_exists(ci: str, expected_namespace: str, config: RHDPConfig) -> tuple[bool, str | None, str | None]:
     """
     Validate that a catalog item exists in the expected namespace.
@@ -2848,16 +2852,26 @@ def validate_catalog_item_exists(ci: str, expected_namespace: str, config: RHDPC
         - found_namespace: Namespace where item was found (if different from expected)
         - suggestion: Error message with suggestion if not found in expected namespace
     """
+    import time as _time
+    cache_key = f"{ci}::{expected_namespace}::{config.kubeconfig_path or ''}"
+    cached = _catalog_exists_cache.get(cache_key)
+    if cached and (_time.monotonic() - cached[0]) < _CATALOG_CACHE_TTL:
+        return cached[1]  # type: ignore[return-value]
+
     env = os.environ.copy()
     if config.kubeconfig_path:
         env["KUBECONFIG"] = config.kubeconfig_path
 
     # Try expected namespace first
+    def _cache_and_return(val: tuple) -> tuple:
+        _catalog_exists_cache[cache_key] = (_time.monotonic(), val)
+        return val
+
     try:
         cmd = [config.oc_command, "get", "catalogitem", ci, "-n", expected_namespace, "-o", "json"]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)
         if result.returncode == 0:
-            return (True, expected_namespace, None)
+            return _cache_and_return((True, expected_namespace, None))
     except Exception:
         pass
 
@@ -2869,12 +2883,11 @@ def validate_catalog_item_exists(ci: str, expected_namespace: str, config: RHDPC
             cmd = [config.oc_command, "get", "catalogitem", ci, "-n", ns, "-o", "json"]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)
             if result.returncode == 0:
-                # Item exists but in different namespace - this is OK to deploy
                 suggestion = (
                     f"Expected in {expected_namespace}, found in {ns}. "
                     f"Will deploy from {ns} (where item actually exists)."
                 )
-                return (False, ns, suggestion)
+                return _cache_and_return((False, ns, suggestion))
         except Exception:
             continue
 
@@ -2886,7 +2899,7 @@ def validate_catalog_item_exists(ci: str, expected_namespace: str, config: RHDPC
     else:
         suggestion = f"Item '{ci}' not found in any catalog namespace ({expected_namespace}, babylon-catalog-event, babylon-catalog-prod, babylon-catalog-dev). Verify the CI name is correct."
 
-    return (False, None, suggestion)
+    return _cache_and_return((False, None, suggestion))
 
 
 def get_catalog_item_info(ci: str, config: RHDPConfig) -> dict[str, str]:

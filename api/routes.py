@@ -1216,57 +1216,74 @@ def validate_num_users(_key=Depends(verify_api_key), config=Depends(_request_con
 @router.post("/schedules/validate-catalog-namespaces", response_model=CatalogNamespaceValidationResponse)
 def validate_catalog_namespaces(_key=Depends(verify_api_key), config=Depends(_request_config)):
     """Check whether catalog items exist in their expected catalog namespaces."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
+
+    # Build unique (ci, expected_ns) pairs to check
+    to_check: list[tuple[str, str, WorkshopSchedule]] = []
+    seen_cis: set[str] = set()
+    for s in _schedules:
+        cis = [s.ci]
+        if s.is_multi_asset and s.asset_cis:
+            cis += [c.strip() for c in s.asset_cis.split(",") if c.strip()]
+        for ci in cis:
+            if ci not in seen_cis:
+                seen_cis.add(ci)
+                expected_ns = get_catalog_namespace(ci, s.catalog_namespace or None)
+                to_check.append((ci, expected_ns, s))
+
+    # Run oc checks in parallel (one thread per unique CI)
+    ci_results: dict[str, tuple] = {}
+    lock = threading.Lock()
+
+    def _run(ci: str, expected_ns: str) -> None:
+        result = validate_catalog_item_exists(ci, expected_ns, config)
+        with lock:
+            ci_results[ci] = result
+
+    with ThreadPoolExecutor(max_workers=min(len(to_check), 16)) as executor:
+        futures = {executor.submit(_run, ci, expected_ns): ci for ci, expected_ns, _ in to_check}
+        for f in as_completed(futures):
+            f.result()  # raise any exception
+
     mismatches: list[CatalogNamespaceMismatch] = []
     not_found: list[dict] = []
     checked = 0
-    skipped = 0
-    ci_cache: dict[str, tuple] = {}  # Cache validation results
-
-    def _check_ci(ci: str, schedule: WorkshopSchedule):
-        nonlocal checked, skipped
-        expected_ns = get_catalog_namespace(ci, schedule.catalog_namespace or None)
-
-        if ci not in ci_cache:
-            exists, found_ns, suggestion = validate_catalog_item_exists(ci, expected_ns, config)
-            ci_cache[ci] = (exists, found_ns, suggestion)
-
-        exists, found_ns, suggestion = ci_cache[ci]
-        checked += 1
-
-        if not exists and found_ns is not None:
-            # Mismatch: found in different namespace
-            mismatches.append(CatalogNamespaceMismatch(
-                ci_name=schedule.ci_name,
-                ci=ci,
-                namespace=schedule.namespace,
-                expected_catalog_namespace=expected_ns,
-                found_catalog_namespace=found_ns,
-                suggestion=suggestion or f"Found in {found_ns} instead of {expected_ns}",
-            ))
-        elif not exists and found_ns is None:
-            # Not found anywhere
-            not_found.append({
-                "ci_name": schedule.ci_name,
-                "ci": ci,
-                "namespace": schedule.namespace,
-                "expected_catalog_namespace": expected_ns,
-                "message": suggestion or "Not found in any catalog namespace",
-            })
 
     for s in _schedules:
-        _check_ci(s.ci, s)
-        # Also check individual asset CIs for multi-asset workshops
+        cis = [s.ci]
         if s.is_multi_asset and s.asset_cis:
-            for asset_ci in (c.strip() for c in s.asset_cis.split(",") if c.strip()):
-                _check_ci(asset_ci, s)
+            cis += [c.strip() for c in s.asset_cis.split(",") if c.strip()]
+        for ci in cis:
+            expected_ns = get_catalog_namespace(ci, s.catalog_namespace or None)
+            exists, found_ns, suggestion = ci_results.get(ci, (True, expected_ns, None))
+            checked += 1
+            if not exists and found_ns is not None:
+                mismatches.append(CatalogNamespaceMismatch(
+                    ci_name=s.ci_name,
+                    ci=ci,
+                    namespace=s.namespace,
+                    expected_catalog_namespace=expected_ns,
+                    found_catalog_namespace=found_ns,
+                    suggestion=suggestion or f"Found in {found_ns} instead of {expected_ns}",
+                ))
+            elif not exists and found_ns is None:
+                not_found.append({
+                    "ci_name": s.ci_name,
+                    "ci": ci,
+                    "namespace": s.namespace,
+                    "expected_catalog_namespace": expected_ns,
+                    "message": suggestion or "Not found in any catalog namespace",
+                })
 
     return CatalogNamespaceValidationResponse(
         mismatches=mismatches,
         not_found=not_found,
         checked=checked,
-        skipped=skipped,
+        skipped=0,
     )
 
 
@@ -2895,7 +2912,14 @@ def create_tenant_cluster_pools(
         ci_tail = parts[1] if len(parts) > 1 else cluster_ci
         lab = re.sub(r"-cluster\.[^.]+$", "", ci_tail)
 
-        purpose = "prod" if body.environment_level == "production" else "dev"
+        # Derive purpose from CI stage suffix (.event → events, .prod → prod, else dev)
+        ci_suffix = cluster_ci.rsplit(".", 1)[-1] if "." in cluster_ci else ""
+        if ci_suffix == "event":
+            purpose = "events"
+        elif ci_suffix == "prod":
+            purpose = "prod"
+        else:
+            purpose = "dev"
 
         pool = {
             "apiVersion": "babylon.gpte.redhat.com/v1",
