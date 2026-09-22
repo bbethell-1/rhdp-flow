@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from fastapi.testclient import TestClient
 
 import api.routes as routes_module
