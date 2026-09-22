@@ -1510,8 +1510,6 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
         try:
             ci_cache: dict[str, dict | None] = {}
             limit_errors: list[str] = []
-            ns_cache: dict[str, tuple] = {}
-            not_found_errors: list[str] = []
             for s in schedules:
                 if s.users is not None and s.users > 0:
                     if s.ci not in ci_cache:
@@ -1521,27 +1519,12 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                         limit_errors.append(
                             f"{s.ci_name} ({s.ci}): {s.users} requested, max {info['maximum']}"
                         )
-                # Resolve catalog namespace: auto-redirect if item lives in a different namespace
-                expected_ns = get_catalog_namespace(s.ci, s.catalog_namespace or None)
-                if s.ci not in ns_cache:
-                    ns_cache[s.ci] = validate_catalog_item_exists(s.ci, expected_ns, config_check)
-                exists, found_ns, suggestion = ns_cache[s.ci]
-                if not exists and found_ns is not None and found_ns != expected_ns:
-                    # Item in a different namespace — redirect silently
-                    s.catalog_namespace = found_ns
-                elif not exists and found_ns is None:
-                    not_found_errors.append(f"{s.ci_name} ({s.ci}): {suggestion}")
         finally:
             cluster_targets.cleanup_kubeconfig(config_check.kubeconfig_path if body.target_cluster else None)
         if limit_errors:
             raise HTTPException(
                 400,
                 f"num_users limit exceeded: {'; '.join(limit_errors)}"
-            )
-        if not_found_errors:
-            raise HTTPException(
-                400,
-                f"Catalog items not found — cannot deploy: {'; '.join(not_found_errors)}"
             )
 
     if not body.dry_run:
@@ -2903,7 +2886,6 @@ def create_tenant_cluster_pools(
             "metadata": {
                 "name": cluster_ci,
                 "namespace": "shared-clusters",
-                "labels": {"flow.demo.redhat.com/managed": "true"},
             },
             "spec": {
                 "clusterProvisioning": {
