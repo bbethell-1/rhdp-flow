@@ -6,7 +6,10 @@ data:
   LOG_FORMAT: "json"
   LOG_LEVEL: "INFO"
   RHDP_LOG_DIR: "/app/logs"
-  RHDP_FRAME_ANCESTORS: "https://labagator.apps.ocpv-infra01.dal12.infra.demo.redhat.com"
+  # Space-separated list of origins allowed to frame Flow (CSP frame-ancestors).
+  # Both the prod and dev Labagator routes embed this single Flow instance, so
+  # both must be whitelisted or the dev embed is blocked by the browser.
+  RHDP_FRAME_ANCESTORS: "https://labagator.apps.ocpv-infra01.dal12.infra.demo.redhat.com https://labagator-dev.apps.ocpv-infra01.dal12.infra.demo.redhat.com"
   AGNOSTICV_REPO_URL: "git@github.com:rhpds/agnosticv.git"
   AGNOSTICV_CACHE_DIR: "/tmp/agnosticv-cache"
   AGNOSTICV_REFRESH_TTL_SECONDS: "900"
