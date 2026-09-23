@@ -1983,18 +1983,19 @@ def deploy_dry_run_yaml(request: Request, body: DeployRequest = DeployRequest(),
 
 @router.get("/clusters")
 def list_clusters(request: Request, _key=Depends(verify_api_key)):
-    """List deploy-target clusters available to the requesting user.
+    """List deploy-target clusters.
 
-    Returns ``allowed`` (may the user use the picker) and the configured target
-    clusters. Any OAuth-authenticated user is allowed by default; Events is
-    always a permitted deploy target. Selection is also enforced server-side.
+    Always returns the configured ``cluster-*`` Secrets so the UI can default to
+    Events and show the Deploy-to dropdown (including Labagator embeds that only
+    have an API key). ``allowed`` indicates whether the caller may leave the
+    Events default for another target.
     """
     allowed = identity.is_picker_allowed(request)
     clusters = cluster_targets.list_target_clusters()
     return {
         "allowed": allowed,
         "user": identity.get_user_email(request),
-        "clusters": clusters if allowed else [],
+        "clusters": clusters,
         "default": identity.DEFAULT_TARGET_CLUSTER,
     }
 

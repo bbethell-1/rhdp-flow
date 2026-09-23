@@ -109,6 +109,7 @@ describe('UploadTab', () => {
         { key: 'events', display_name: 'Events (us-west-2)' },
         { key: 'prod', display_name: 'Prod (us-east-1)' },
       ],
+      default: 'events',
     });
     render(
       <UploadTab
@@ -125,11 +126,36 @@ describe('UploadTab', () => {
     expect(picker).toBeInTheDocument();
     expect(screen.getByText('Events (us-west-2) (default)')).toBeInTheDocument();
     expect(screen.getByText('Prod (us-east-1)')).toBeInTheDocument();
-    expect(screen.getByText('This cluster (infra01)')).toBeInTheDocument();
+    expect(screen.getByText('This cluster (infra01) — Flow host only')).toBeInTheDocument();
     await waitFor(() => expect(picker).toHaveValue('events'));
   });
 
-  it('hides the deploy-target cluster picker for non-allowlisted users', async () => {
+  it('shows the picker and defaults to Events even without OAuth identity (Labagator embed)', async () => {
+    vi.spyOn(api, 'getClusters').mockResolvedValue({
+      allowed: true,
+      user: null,
+      clusters: [
+        { key: 'events', display_name: 'Events (us-west-2)' },
+      ],
+      default: 'events',
+    });
+    render(
+      <UploadTab
+        dryRun={true}
+        schedules={[mockSchedule]}
+        setSchedules={noop}
+        results={[]}
+        setResults={noop}
+        showToast={noop}
+        onClear={noop}
+      />
+    );
+    const picker = await screen.findByRole('combobox', { name: 'Deploy target cluster' });
+    expect(picker).toBeInTheDocument();
+    await waitFor(() => expect(picker).toHaveValue('events'));
+  });
+
+  it('hides the deploy-target cluster picker when no targets are configured', async () => {
     vi.spyOn(api, 'getClusters').mockResolvedValue({
       allowed: false,
       user: null,
@@ -146,7 +172,6 @@ describe('UploadTab', () => {
         onClear={noop}
       />
     );
-    // Deploy Settings render synchronously; give the effect a chance to resolve.
     await waitFor(() => expect(api.getClusters).toHaveBeenCalled());
     expect(screen.queryByRole('combobox', { name: 'Deploy target cluster' })).not.toBeInTheDocument();
   });

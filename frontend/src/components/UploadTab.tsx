@@ -47,8 +47,12 @@ import type { WorkshopSchedule, DeploymentResult, NumUsersViolation, UsersNotInC
 
 interface ScheduleWarning {
   index: number;
+  /** All schedule rows this warning applies to (for table highlighting). */
+  indices?: number[];
   field: string;
   message: string;
+  /** Grouped overlap/conflict summaries — shown in the expandable details list. */
+  kind?: 'conflict' | 'other';
 }
 
 /** Parse DD/MM/YYYY HH:MM (or DD/MM/YY HH:MM) into a Date, or null. Accepts space or colon separator for Labugator compatibility. */
@@ -192,8 +196,8 @@ export const UploadTab: React.FC<Props> = ({
   const [useCatalogLookup, setUseCatalogLookup] = useState(false);
   const [ignoreCapacityWarnings, setIgnoreCapacityWarnings] = useState(false);
 
-  // Multi-cluster deploy target picker (Feature 2 — identity-gated to approved operators).
-  // Default target is Events (us-west-2) when that cluster is configured; operators can still pick another.
+  // Multi-cluster deploy target. Always default to Events (us-west-2) when configured.
+  // Dropdown is shown whenever targets exist — Labagator embeds use API key only (no OAuth email).
   const DEFAULT_TARGET_CLUSTER = 'events';
   const [pickerAllowed, setPickerAllowed] = useState(false);
   const [deployClusters, setDeployClusters] = useState<import('../types').ClusterTarget[]>([]);
@@ -207,10 +211,11 @@ export const UploadTab: React.FC<Props> = ({
         const clusters = resp.clusters ?? [];
         setPickerAllowed(resp.allowed);
         setDeployClusters(clusters);
-        const hasEvents = clusters.some((c) => c.key === DEFAULT_TARGET_CLUSTER);
-        if (resp.allowed && hasEvents && !getSelectedTarget()) {
-          selectTargetCluster(DEFAULT_TARGET_CLUSTER);
-          setTargetCluster(DEFAULT_TARGET_CLUSTER);
+        const defaultKey = resp.default || DEFAULT_TARGET_CLUSTER;
+        const hasDefault = clusters.some((c) => c.key === defaultKey);
+        if (hasDefault && !getSelectedTarget()) {
+          selectTargetCluster(defaultKey);
+          setTargetCluster(defaultKey);
         }
       })
       .catch(() => {
@@ -292,28 +297,32 @@ export const UploadTab: React.FC<Props> = ({
     const warns: ScheduleWarning[] = [];
     const now = new Date();
 
-    // Same CI + Namespace is fine on different days; warn only when provision→destroy windows overlap.
-    type WindowEntry = { index: number; start: Date | null; end: Date | null };
-    const byCiNs = new Map<string, WindowEntry[]>();
+    // Same CI + Namespace on different days is normal for multi-day events.
+    // Only flag when 2+ sessions share CI+NS on the same UTC provision day.
+    type DayEntry = { index: number; ci_name: string };
+    const byCiNsDay = new Map<string, DayEntry[]>();
     schedules.forEach((s, i) => {
       if (s.multi_workshop_name) return;
-      const key = `${s.ci}||${s.namespace}`;
-      const start = parseScheduleDate(s.provisioning_date);
-      const end = parseScheduleDate(s.auto_destroy) || parseScheduleDate(s.auto_stop);
-      const prev = byCiNs.get(key) ?? [];
-      for (const p of prev) {
-        const canCompare = !!(start && end && p.start && p.end);
-        if (canCompare && start < p.end! && end! > p.start!) {
-          warns.push({
-            index: i,
-            field: 'ci',
-            message: `"${s.ci_name}" overlaps row ${p.index + 1} (same CI + Namespace with overlapping provision→destroy windows)`,
-          });
-        }
-      }
-      prev.push({ index: i, start, end });
-      byCiNs.set(key, prev);
+      const prov = parseScheduleDate(s.provisioning_date);
+      if (!prov) return;
+      const day = `${prov.getUTCFullYear()}-${String(prov.getUTCMonth() + 1).padStart(2, '0')}-${String(prov.getUTCDate()).padStart(2, '0')}`;
+      const key = `${s.ci}||${s.namespace}||${day}`;
+      const list = byCiNsDay.get(key) ?? [];
+      list.push({ index: i, ci_name: s.ci_name });
+      byCiNsDay.set(key, list);
     });
+    for (const [key, list] of byCiNsDay) {
+      if (list.length < 2) continue;
+      const day = key.split('||')[2];
+      const rows = list.map((e) => e.index + 1).join(', ');
+      warns.push({
+        index: list[0].index,
+        indices: list.map((e) => e.index),
+        field: 'ci',
+        kind: 'conflict',
+        message: `"${list[0].ci_name}" — ${list.length} sessions on ${day} UTC share the same CI + Namespace (rows ${rows})`,
+      });
+    }
 
     schedules.forEach((s, i) => {
       const prov = parseScheduleDate(s.provisioning_date);
@@ -322,59 +331,65 @@ export const UploadTab: React.FC<Props> = ({
 
       // Unparseable dates
       if (s.provisioning_date && !prov)
-        warns.push({ index: i, field: 'provisioning_date', message: `"${s.ci_name}" has an unparseable provisioning date: "${s.provisioning_date}"` });
+        warns.push({ index: i, field: 'provisioning_date', kind: 'other', message: `"${s.ci_name}" has an unparseable provisioning date: "${s.provisioning_date}"` });
       if (s.auto_stop && !stop)
-        warns.push({ index: i, field: 'auto_stop', message: `"${s.ci_name}" has an unparseable auto-stop date: "${s.auto_stop}"` });
+        warns.push({ index: i, field: 'auto_stop', kind: 'other', message: `"${s.ci_name}" has an unparseable auto-stop date: "${s.auto_stop}"` });
       if (s.auto_destroy && !destroy)
-        warns.push({ index: i, field: 'auto_destroy', message: `"${s.ci_name}" has an unparseable auto-destroy date: "${s.auto_destroy}"` });
+        warns.push({ index: i, field: 'auto_destroy', kind: 'other', message: `"${s.ci_name}" has an unparseable auto-destroy date: "${s.auto_destroy}"` });
 
       // Past provisioning date (dates in CSV are UTC; now is also UTC internally)
       if (prov && prov < now)
-        warns.push({ index: i, field: 'provisioning_date', message: `"${s.ci_name}" provisioning date is in the past — ${s.provisioning_date} UTC has already passed` });
+        warns.push({ index: i, field: 'provisioning_date', kind: 'other', message: `"${s.ci_name}" provisioning date is in the past — ${s.provisioning_date} UTC has already passed` });
 
       // Auto-stop before provisioning
       if (prov && stop && stop <= prov)
-        warns.push({ index: i, field: 'auto_stop', message: `"${s.ci_name}" auto-stop is before or equal to provisioning date` });
+        warns.push({ index: i, field: 'auto_stop', kind: 'other', message: `"${s.ci_name}" auto-stop is before or equal to provisioning date` });
 
       // Missing required dates
       if (!s.provisioning_date?.trim())
-        warns.push({ index: i, field: 'provisioning_date', message: `"${s.ci_name}" is missing a provisioning date` });
+        warns.push({ index: i, field: 'provisioning_date', kind: 'other', message: `"${s.ci_name}" is missing a provisioning date` });
       if (!s.auto_stop?.trim())
-        warns.push({ index: i, field: 'auto_stop', message: `"${s.ci_name}" is missing an auto-stop date` });
+        warns.push({ index: i, field: 'auto_stop', kind: 'other', message: `"${s.ci_name}" is missing an auto-stop date` });
       if (!s.auto_destroy?.trim())
-        warns.push({ index: i, field: 'auto_destroy', message: `"${s.ci_name}" is missing an auto-destroy date` });
+        warns.push({ index: i, field: 'auto_destroy', kind: 'other', message: `"${s.ci_name}" is missing an auto-destroy date` });
 
       // CI format check (expect vendor.item.env pattern)
       if (s.ci && !s.ci.includes('.'))
-        warns.push({ index: i, field: 'ci', message: `"${s.ci_name}" CI "${s.ci}" may be invalid (expected format: vendor.item.env)` });
+        warns.push({ index: i, field: 'ci', kind: 'other', message: `"${s.ci_name}" CI "${s.ci}" may be invalid (expected format: vendor.item.env)` });
 
       // Namespace format check
       if (s.namespace && !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(s.namespace))
-        warns.push({ index: i, field: 'namespace', message: `"${s.ci_name}" namespace "${s.namespace}" may be invalid (must be lowercase alphanumeric with hyphens)` });
+        warns.push({ index: i, field: 'namespace', kind: 'other', message: `"${s.ci_name}" namespace "${s.namespace}" may be invalid (must be lowercase alphanumeric with hyphens)` });
 
       // Users reasonableness
       if (s.users !== null && s.users > 500)
-        warns.push({ index: i, field: 'users', message: `"${s.ci_name}" has a high user count (${s.users}) — verify this is intentional` });
+        warns.push({ index: i, field: 'users', kind: 'other', message: `"${s.ci_name}" has a high user count (${s.users}) — verify this is intentional` });
       if (s.users !== null && s.users < 1)
-        warns.push({ index: i, field: 'users', message: `"${s.ci_name}" has an invalid user count (${s.users})` });
+        warns.push({ index: i, field: 'users', kind: 'other', message: `"${s.ci_name}" has an invalid user count (${s.users})` });
 
       // num_users catalog limit check
       if (s.users !== null && s.ci in numUsersLimits && s.users > numUsersLimits[s.ci])
-        warns.push({ index: i, field: 'users', message: `"${s.ci_name}" exceeds catalog limit: ${s.users} users requested, max ${numUsersLimits[s.ci]}` });
+        warns.push({ index: i, field: 'users', kind: 'other', message: `"${s.ci_name}" exceeds catalog limit: ${s.users} users requested, max ${numUsersLimits[s.ci]}` });
 
       // Blank optional fields - removed informational warnings as these fields have defaults
     });
     return warns;
   }, [schedules, numUsersLimits]);
 
-  const warningRowIndices = useMemo(() => new Set(warnings.map(w => w.index)), [warnings]);
+  const warningRowIndices = useMemo(
+    () => new Set(warnings.flatMap((w) => w.indices ?? [w.index])),
+    [warnings],
+  );
 
-  // Detect if there are missing date warnings
+  const conflictWarnings = useMemo(() => warnings.filter((w) => w.kind === 'conflict'), [warnings]);
+  const otherWarnings = useMemo(() => warnings.filter((w) => w.kind !== 'conflict'), [warnings]);
+  const [warningsExpanded, setWarningsExpanded] = useState(false);
+
   const hasMissingDateWarnings = useMemo(() => {
     return warnings.some(w =>
-      w.field === 'provisioning_date' && w.message.includes('missing') ||
-      w.field === 'auto_stop' && w.message.includes('missing') ||
-      w.field === 'auto_destroy' && w.message.includes('missing')
+      (w.field === 'provisioning_date' && w.message.includes('missing')) ||
+      (w.field === 'auto_stop' && w.message.includes('missing')) ||
+      (w.field === 'auto_destroy' && w.message.includes('missing'))
     );
   }, [warnings]);
 
@@ -1405,12 +1420,34 @@ export const UploadTab: React.FC<Props> = ({
             </Alert>
           )}
 
-          {/* Validation warnings */}
+          {/* Validation warnings — compact summary, expand for details */}
           {warnings.length > 0 && (
-            <Alert variant="warning" isInline title={`${warnings.length} validation warning(s) — review before deploying`} style={{ marginBottom: 12 }}>
-              <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
-                {warnings.map((w, i) => <li key={i}>{w.message}</li>)}
-              </ul>
+            <Alert
+              variant="warning"
+              isInline
+              title={
+                conflictWarnings.length && !otherWarnings.length
+                  ? `${conflictWarnings.length} same-day CI+Namespace conflict(s) — different days are OK`
+                  : `${warnings.length} validation warning(s) — review before deploying`
+              }
+              style={{ marginBottom: 12 }}
+            >
+              <p style={{ margin: '0 0 8px', fontSize: '0.85rem' }}>
+                {conflictWarnings.length > 0 && (
+                  <>{conflictWarnings.length} lab(s) have multiple sessions on the same UTC day in one namespace. </>
+                )}
+                {otherWarnings.length > 0 && <>{otherWarnings.length} other date/config issue(s). </>}
+                Non-blocking — expand for row details.
+              </p>
+              <ExpandableSection
+                toggleText={warningsExpanded ? 'Hide details' : 'Show details'}
+                onToggle={(_e, open) => setWarningsExpanded(open)}
+                isExpanded={warningsExpanded}
+              >
+                <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+                  {warnings.map((w, i) => <li key={i}>{w.message}</li>)}
+                </ul>
+              </ExpandableSection>
               {hasMissingDateWarnings && (
                 <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--pf-v6-global--BorderColor--100)' }}>
                   <Button variant="secondary" onClick={() => setShowFillDatesModal(true)} size="sm">
@@ -2370,9 +2407,9 @@ export const UploadTab: React.FC<Props> = ({
                     />
                   </Tooltip>
                 </SplitItem>
-                {pickerAllowed && deployClusters.length > 0 && (
+                {deployClusters.length > 0 && (
                   <SplitItem>
-                    <Tooltip content="Choose which physical cluster to deploy to. Restricted to approved operators. Defaults to Events (us-west-2).">
+                    <Tooltip content="Physical OpenShift cluster for this deploy. Defaults to Events (us-west-2) — not infra01 where Flow runs. Infra01 is only for the Flow app itself.">
                       <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <span style={{ fontSize: '0.875rem', whiteSpace: 'nowrap' }}>Deploy to</span>
                         <FormSelect
@@ -2395,11 +2432,14 @@ export const UploadTab: React.FC<Props> = ({
                             setPoolLookupData({});
                             setAllPools([]);
                             setShowPoolCreateModal(false);
-                            showToast('Target changed. Check prerequisites before deploying.', 'info');
+                            const label = value === ''
+                              ? 'This cluster (infra01)'
+                              : (deployClusters.find((c) => c.key === value)?.display_name || value);
+                            showToast(`Deploy target: ${label}. Check prerequisites before deploying.`, 'info');
                           }}
                           style={{ width: 'auto', minWidth: 180 }}
                         >
-                          <FormSelectOption value="" label="This cluster (infra01)" />
+                          <FormSelectOption value="" label="This cluster (infra01) — Flow host only" />
                           {deployClusters.map((c) => (
                             <FormSelectOption
                               key={c.key}
@@ -2410,6 +2450,12 @@ export const UploadTab: React.FC<Props> = ({
                         </FormSelect>
                       </span>
                     </Tooltip>
+                  </SplitItem>
+                )}
+                {deployClusters.length > 0 && targetCluster && (
+                  <SplitItem style={{ fontSize: '0.8rem', color: 'var(--pf-t--global--text--color--subtle)', alignSelf: 'center' }}>
+                    → {deployClusters.find((c) => c.key === targetCluster)?.display_name || targetCluster}
+                    {targetCluster === DEFAULT_TARGET_CLUSTER ? ' (event workshops)' : ''}
                   </SplitItem>
                 )}
               </Split>
