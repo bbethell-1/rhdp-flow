@@ -3156,14 +3156,10 @@ def create_multi_workshop(
             catalog_namespace = catalog_info.get('namespace', 'babylon-catalog-prod')
             display_name = catalog_info.get('displayName', asset_ci)
             
-            # Generate Workshop name for this asset
-            # Pattern from example: bbethell-p5djq-zt-ansiblebu.ansible-network-automation-ba-jwlqp
-            # Use the full multi-workshop name as prefix, then asset CI (with dots), then let Kubernetes generate suffix
-            asset_ci_safe = asset_ci.replace('.', '-')
-            # Truncate if too long (Kubernetes name limit is 63 chars)
-            if len(f"{multi_workshop_name}-{asset_ci_safe}") > 50:
-                asset_ci_safe = asset_ci_safe[:50-len(multi_workshop_name)-1]
-            asset_workshop_prefix = f"{multi_workshop_name}-{asset_ci_safe}-"
+            # Generate Workshop name for this asset (unique per asset under 63-char limit)
+            asset_workshop_prefix = multi_asset_workshop_generate_name(
+                multi_workshop_name, asset_ci
+            )
             
             # Build a minimal ResourceClaim payload for this asset
             asset_param_values: dict = {
@@ -5936,6 +5932,43 @@ def _sanitize_k8s_name(value):
     import re
     sanitized = re.sub(r'[^a-z0-9-]', '', value.lower())
     return sanitized[:63] if sanitized else "showroom"
+
+
+def multi_asset_workshop_generate_name(multi_workshop_name: str, asset_ci: str, max_prefix: int = 58) -> str:
+    """Build a unique DNS-1123 ``generateName`` prefix for a multi-asset Workshop.
+
+    Kubernetes names max out at 63 chars; generateName needs headroom for a
+    random suffix. Naïve truncation of ``{multi}-{asset_ci}`` can drop the
+    distinguishing ``-1`` / ``-2`` tail (e.g. LB1577 RHEL troubleshooting
+    assets), so every asset collides on the same prefix. Always preserve a
+    short unique fingerprint from the full asset CI.
+    """
+    import hashlib
+    import re
+
+    mw = re.sub(r"[^a-z0-9-]", "-", (multi_workshop_name or "mw").lower()).strip("-") or "mw"
+    asset = re.sub(r"[^a-z0-9-]", "-", asset_ci.lower().replace(".", "-")).strip("-")
+    # 6-char fingerprint survives truncation of long CIs (…troubleshooting-1 vs -2)
+    fingerprint = hashlib.sha1(asset_ci.encode("utf-8")).hexdigest()[:6]
+    # Budget: prefix must end with '-' and leave room for ~5-char generateName suffix
+    max_prefix = max(16, min(int(max_prefix), 58))
+    # Prefer readable form when it fits
+    full = f"{mw}-{asset}-"
+    if len(full) <= max_prefix:
+        return full
+    # Truncate middle; keep mw + fingerprint so assets never collide
+    # {mw}-{head}-{fp}-
+    tail = f"-{fingerprint}-"
+    head_budget = max_prefix - len(mw) - 1 - len(tail)
+    if head_budget < 4:
+        mw = mw[: max(4, max_prefix - len(tail) - 1)]
+        head_budget = max_prefix - len(mw) - 1 - len(tail)
+    head = asset[: max(0, head_budget)].rstrip("-")
+    prefix = f"{mw}-{head}{tail}" if head else f"{mw}{tail}"
+    prefix = re.sub(r"-{2,}", "-", prefix)
+    if not prefix.endswith("-"):
+        prefix += "-"
+    return prefix[:max_prefix] if len(prefix) > max_prefix else prefix
 
 
 _SHOWROOM_REPO_RE = re.compile(r'^(https?://|git@)[a-zA-Z0-9._:/@~-]+$')
