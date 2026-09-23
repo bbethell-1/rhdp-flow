@@ -60,14 +60,34 @@ def test_concurrent_targets_use_separate_credentials_and_cleanup(monkeypatch, tm
 
 
 def test_target_access_denied_before_credentials_are_resolved(monkeypatch):
+    """Non-default targets still require identity; Events is exempt as the default."""
     resolve = Mock(side_effect=AssertionError("must not read credentials"))
     monkeypatch.setattr(routes, "_get_config", resolve)
     with TestClient(app) as client:
         response = client.post("/api/schedules/validate-namespaces", headers={
-            "X-RHDP-Target-Cluster": "events", "X-API-Key": os.environ.get("RHDP_API_KEY", ""),
+            "X-RHDP-Target-Cluster": "integration", "X-API-Key": os.environ.get("RHDP_API_KEY", ""),
         })
     assert response.status_code == 403
     resolve.assert_not_called()
+
+
+def test_default_events_target_allowed_without_forwarded_email(monkeypatch):
+    """Labagator / API-key deploys may use the Events default without OAuth headers."""
+    monkeypatch.setattr(
+        routes,
+        "_get_config",
+        lambda **kw: SimpleNamespace(kubeconfig_path=None, oc_command="oc"),
+    )
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(returncode=0, stdout="[]", stderr=""),
+    )
+    with TestClient(app) as client:
+        response = client.post("/api/schedules/validate-namespaces", headers={
+            "X-RHDP-Target-Cluster": "events", "X-API-Key": os.environ.get("RHDP_API_KEY", ""),
+        })
+    assert response.status_code != 403
 
 
 def test_forbidden_pool_is_unknown_and_never_created(monkeypatch):
