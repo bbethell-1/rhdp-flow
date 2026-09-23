@@ -122,7 +122,6 @@ class DeployRequest(BaseModel):
     redirect: bool = Field(True, description="Enable workshop UI redirect (labUserInterface.redirect)")
     showroom_novnc: bool = Field(False, description="Enable noVNC remote desktop in Showroom")
     showroom_zerotouch: bool = Field(False, description="Use zerotouch Showroom chart with setup/runtime automation")
-    ignore_capacity_warnings: bool = Field(False, description="Skip tenant cluster capacity checks before deployment")
     deploy_delay_seconds: float | None = Field(
         None,
         ge=0,

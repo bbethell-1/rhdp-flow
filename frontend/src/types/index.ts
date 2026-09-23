@@ -157,7 +157,6 @@ export interface DeployRequest {
   redirect?: boolean;
   showroom_novnc?: boolean;
   showroom_zerotouch?: boolean;
-  ignore_capacity_warnings?: boolean;
   deploy_delay_seconds?: number | null;
   target_cluster?: string | null;
 }
