@@ -18,15 +18,17 @@ export function useTheme() {
   const [theme, setThemeState] = useState<Theme>(() => {
     // When embedded, prefer the ?theme= URL param over localStorage so
     // the host app's theme drives both apps on first load.
-    const param = new URLSearchParams(window.location.search).get('theme');
+    const param = new URLSearchParams(
+      typeof window !== 'undefined' ? window.location.search : '',
+    ).get('theme');
     if (param === 'dark' || param === 'light') return param;
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = window.localStorage?.getItem(STORAGE_KEY) ?? null;
     return (stored === 'light' || stored === 'dark') ? stored : 'dark';
   });
 
   useEffect(() => {
     applyTheme(theme);
-    localStorage.setItem(STORAGE_KEY, theme);
+    window.localStorage?.setItem(STORAGE_KEY, theme);
   }, [theme]);
 
   // When embedded, listen for postMessage theme updates from the host so
