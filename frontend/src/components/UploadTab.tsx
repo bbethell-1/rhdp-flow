@@ -1663,15 +1663,15 @@ export const UploadTab: React.FC<Props> = ({
               setShowPoolCreateModal(true);
             };
 
-            const shiftTenantsPlus4h = async (refs: typeof willFail) => {
+            const shiftTenantsEarlier4h = async (refs: typeof willFail) => {
               const tenantCIs = new Set(refs.map((r: any) => r.ci as string));
               const shifted = schedules.map((s) =>
                 tenantCIs.has(s.ci)
                   ? {
                       ...s,
-                      provisioning_date: shiftScheduleDate(s.provisioning_date, 4),
-                      auto_stop: shiftScheduleDate(s.auto_stop, 4),
-                      auto_destroy: shiftScheduleDate(s.auto_destroy, 4),
+                      provisioning_date: shiftScheduleDate(s.provisioning_date, -4),
+                      auto_stop: shiftScheduleDate(s.auto_stop, -4),
+                      auto_destroy: shiftScheduleDate(s.auto_destroy, -4),
                     }
                   : s,
               );
@@ -1682,7 +1682,7 @@ export const UploadTab: React.FC<Props> = ({
               try { await api.updateSchedules(shifted); } catch { /* non-fatal */ }
               showToast(
                 shiftedCount > 0
-                  ? `Schedule drift: ${shiftedCount} workshop(s) provision/stop/destroy +4h — later than Labagator/event times; duration unchanged`
+                  ? `Schedule drift: ${shiftedCount} workshop(s) −4h earlier than Labagator/event — extra cluster hours before students (cost)`
                   : 'No start times changed',
                 shiftedCount > 0 ? 'info' : 'danger',
               );
@@ -1795,9 +1795,9 @@ export const UploadTab: React.FC<Props> = ({
                         <Button
                           variant="tertiary"
                           size="sm"
-                          onClick={() => shiftTenantsPlus4h(willFailNoPoolUnique)}
+                          onClick={() => shiftTenantsEarlier4h(willFailNoPoolUnique)}
                         >
-                          Optional: +4h schedule drift
+                          Optional: −4h earlier (cost)
                         </Button>
                         <Button
                           variant="link"
@@ -1838,9 +1838,9 @@ export const UploadTab: React.FC<Props> = ({
                     </ul>
                     <div style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)' }}>
                       Optional only (not applied automatically):{' '}
-                      <strong>pre-create pools</strong> fills capacity sooner but burns cluster hours before students arrive;{' '}
-                      <strong>+4h schedule drift</strong> pushes provision/stop/destroy later than Labagator/event times
-                      (same duration, later wall-clock); or add matching <code>-cluster.*</code> CI rows to the CSV.
+                      <strong>pre-create pools</strong> or <strong>−4h earlier</strong> starts capacity before
+                      Labagator/event times — you pay for idle cluster hours until students arrive; or add matching
+                      {' '}<code>-cluster.*</code> CI rows to the CSV.
                     </div>
                   </Alert>
                 )}
@@ -3279,9 +3279,9 @@ export const UploadTab: React.FC<Props> = ({
                     if (created) parts.push(`${created} created`);
                     if (enabled) parts.push(`${enabled} existing pool(s) enabled`);
                     if (active) parts.push(`${active} already active`);
-                    showToast(`Done — ${parts.join(', ')}. Babylon will provision clusters (30–60 min). Use “move +4 hours” on the warning if you need schedule runway.`, 'success');
+                    showToast(`Done — ${parts.join(', ')}. Babylon will provision clusters (30–60 min). Use “−4h earlier” on the warning if you want runway before event times (extra cost).`, 'success');
                     // Do NOT re-validate here: pool CRD exists but has no ready clusters yet.
-                    // Do NOT auto-shift times — optional “move +4 hours” on the warning only.
+                    // Do NOT auto-shift times — optional “−4h earlier” on the warning only.
                   } else {
                     showToast('Some pools failed to apply — see results below', 'danger');
                   }
@@ -3352,9 +3352,9 @@ export const UploadTab: React.FC<Props> = ({
               )}
 
               {poolCreateTimeShifted > 0 && (
-                <Alert variant="warning" isInline title={`Schedule drift: +4h on ${poolCreateTimeShifted} workshop${poolCreateTimeShifted === 1 ? '' : 's'}`} style={{ marginTop: 8 }}>
-                  Provisioning and stop/destroy were moved later than Labagator/event times (same workshop duration).
-                  This is optional runway for pool fill — not applied unless you click <strong>+4h schedule drift</strong>.
+                <Alert variant="warning" isInline title={`Schedule drift: −4h earlier on ${poolCreateTimeShifted} workshop${poolCreateTimeShifted === 1 ? '' : 's'}`} style={{ marginTop: 8 }}>
+                  Provisioning and stop/destroy were moved earlier than Labagator/event times (extra cluster hours before students — cost).
+                  Not applied unless you click <strong>−4h earlier</strong> on the warning.
                 </Alert>
               )}
 
