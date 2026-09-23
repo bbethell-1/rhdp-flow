@@ -1,5 +1,5 @@
 {
-  "commit": "f95785d49a6acac3c6771b1ee1c1af7965b11a85",
+  "commit": "126fe7dbad6d1871ebe71f3c9e03fdb38fd8eb51",
   "observed": {
     "client/python/babylon_async/src/babylon_async/agnosticvcomponent.py": "0406babea78b20d0ee242bbc52fcae8a0d0bb75b4d5ac3337a396d2f38be95b5",
     "client/python/babylon_async/src/babylon_async/catalogitem.py": "42be60288319f834ac93d4decb9b7c102d0d375659e3d16b0ccde6982fe8af70",
@@ -9,7 +9,7 @@
     "helm/crds/workshopprovisions.babylon.gpte.redhat.com.yaml": "8ed03de16355032fcf03870ed96d01f8a012d521d7c9bc7049325b29d8a9e110",
     "tenant-cluster-pool-manager/operator/operator.py": "856d2a4b7dbd3c012a77cf797e21159a5216fe37f8bbc589e48c7ee6686a601c",
     "workshop-manager/operator/workshop.py": "4608a5e974589588ccdd94e430eb831964247e1d02785b1d5c5b9b777ef942e8",
-    "workshop-manager/operator/workshopprovision.py": "c2cfb3d80b3b96d0fd70fe0841aab8277631d3aa4ae07b57b8c0531cff5b70cf"
+    "workshop-manager/operator/workshopprovision.py": "06fe480dac7a363c301448cf4409162b586f978cc8ec02fe21232813737f8102"
   },
   "reviewed": {
     "client/python/babylon_async/src/babylon_async/agnosticvcomponent.py": "0406babea78b20d0ee242bbc52fcae8a0d0bb75b4d5ac3337a396d2f38be95b5",
