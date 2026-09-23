@@ -77,6 +77,26 @@ function shiftScheduleDate(dateStr: string, hours: number): string {
   return `${pad(d.getUTCDate())}/${pad(d.getUTCMonth() + 1)}/${d.getUTCFullYear()} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 }
 
+/** First schedule row per catalog item — avoids duplicate CI lines in tenant alerts. */
+function uniqueByCi<T extends { ci: string }>(refs: T[]): T[] {
+  const seen = new Set<string>();
+  return refs.filter((r) => {
+    if (seen.has(r.ci)) return false;
+    seen.add(r.ci);
+    return true;
+  });
+}
+
+function clusterCisFromTenantRefs(refs: { ci: string; cluster_ref?: string }[]): string[] {
+  return [...new Set(
+    refs.map((r) => {
+      if (r.cluster_ref) return r.cluster_ref;
+      const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
+      return derived !== r.ci ? derived : null;
+    }).filter(Boolean),
+  )] as string[];
+}
+
 interface Props {
   dryRun: boolean;
   schedules: WorkshopSchedule[];
@@ -1008,15 +1028,17 @@ export const UploadTab: React.FC<Props> = ({
 
   const columnCount = 14; // Updated for Item Type + Cluster Link columns
 
-  // Compute blocking issues — used to disable Deploy button and confirm modal
-  const _tenantWillFail = missingTenantRefs
+  // Block deploy only for hard failures (missing catalog, num_users, direct-sandbox
+  // with no clusters). Missing TenantClusterPool alone is a warning — Babylon can
+  // create/manage the pool on provision (longer deploy).
+  const _tenantBlockDirect = missingTenantRefs
     ? [...(missingTenantRefs.missing_refs || []), ...(missingTenantRefs.ref_no_pool || [])]
-        .filter((r: any) => !r.pool_exists && !r.has_cluster_row)
+        .filter((r: any) => !r.pool_exists && !r.has_cluster_row && r.direct_sandbox)
     : [];
   const hasBlockingIssues =
     catalogNotFound.length > 0 ||
     numUsersViolations.length > 0 ||
-    _tenantWillFail.length > 0;
+    _tenantBlockDirect.length > 0;
   const deployBlocked = hasBlockingIssues && !ignoreCapacityWarnings;
 
   return (
@@ -1615,9 +1637,9 @@ export const UploadTab: React.FC<Props> = ({
             </Alert>
           )}
 
-          {/* Tenant cluster readiness — a tenant needs somewhere to run:
-              either a shared cluster pool exists, OR its cluster provisioner
-              deploys in this same batch. If neither, it will fail. */}
+          {/* Tenant cluster readiness — preferred path is let Babylon manage the
+              pool on provision (longer deploy). Direct-sandbox with no clusters
+              still blocks; missing pool alone is a warning. */}
           {missingTenantRefs && (() => {
             const all = [
               ...(missingTenantRefs.missing_refs || []),
@@ -1627,44 +1649,65 @@ export const UploadTab: React.FC<Props> = ({
             const willFailDirect = willFail.filter((r: any) => r.direct_sandbox);
             const willFailNoPool = willFail.filter((r: any) => !r.direct_sandbox);
             const viaFreshCluster = all.filter((r: any) => !r.pool_exists && r.has_cluster_row);
+            const willFailDirectUnique = uniqueByCi(willFailDirect);
+            const willFailNoPoolUnique = uniqueByCi(willFailNoPool);
 
             if (willFail.length === 0 && viaFreshCluster.length === 0) return null;
 
+            const openPoolCreate = (refs: typeof willFail) => {
+              setPoolCreateCIs(clusterCisFromTenantRefs(refs));
+              setPoolCreateYaml('');
+              setPoolCreateResults([]);
+              setPoolCreateApplied(false);
+              setPoolCreateTimeShifted(0);
+              setShowPoolCreateModal(true);
+            };
+
+            const shiftTenantsEarlier4h = async (refs: typeof willFail) => {
+              const tenantCIs = new Set(refs.map((r: any) => r.ci as string));
+              const shifted = schedules.map((s) =>
+                tenantCIs.has(s.ci)
+                  ? {
+                      ...s,
+                      provisioning_date: shiftScheduleDate(s.provisioning_date, -4),
+                      auto_stop: shiftScheduleDate(s.auto_stop, -4),
+                      auto_destroy: shiftScheduleDate(s.auto_destroy, -4),
+                    }
+                  : s,
+              );
+              const shiftedCount = shifted.filter(
+                (s, i) => s.provisioning_date !== schedules[i].provisioning_date,
+              ).length;
+              setSchedules(shifted);
+              try { await api.updateSchedules(shifted); } catch { /* non-fatal */ }
+              showToast(
+                shiftedCount > 0
+                  ? `Schedule drift: ${shiftedCount} workshop(s) −4h earlier than Labagator/event — extra cluster hours before students (cost)`
+                  : 'No start times changed',
+                shiftedCount > 0 ? 'info' : 'danger',
+              );
+            };
+
             return (
               <>
-                {willFailDirect.length > 0 && (
+                {willFailDirectUnique.length > 0 && (
                   <Alert
                     variant="danger"
                     isInline
-                    title={`${willFailDirect.length} workshop(s) blocked — no clusters registered in sandbox-api`}
+                    title={
+                      willFailDirect.length === willFailDirectUnique.length
+                        ? `${willFailDirectUnique.length} catalog item(s) blocked — no clusters registered in sandbox-api`
+                        : `${willFailDirectUnique.length} catalog item(s) blocked (${willFailDirect.length} schedule rows) — no clusters registered in sandbox-api`
+                    }
                     style={{ marginBottom: 12 }}
                     actionLinks={
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         <Button
                           variant="danger"
                           size="sm"
-                          onClick={() => {
-                            const cis = [...new Set(willFailDirect.map((r: any) => {
-                              if (r.cluster_ref) return r.cluster_ref;
-                              const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
-                              return derived !== r.ci ? derived : null;
-                            }).filter(Boolean))] as string[];
-                            setPoolCreateCIs(cis);
-                            setPoolCreateYaml('');
-                            setPoolCreateResults([]);
-                            setPoolCreateApplied(false);
-                            setPoolCreateTimeShifted(0);
-                            setShowPoolCreateModal(true);
-                          }}
+                          onClick={() => openPoolCreate(willFailDirectUnique)}
                         >
-                          {(() => {
-                            const cis = [...new Set(willFailDirect.map((r: any) => {
-                              if (r.cluster_ref) return r.cluster_ref;
-                              const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
-                              return derived !== r.ci ? derived : null;
-                            }).filter(Boolean))];
-                            return `Option 2: Create ${cis.length} TenantClusterPool${cis.length === 1 ? '' : 's'}`;
-                          })()}
+                          {`Option 2: Create ${clusterCisFromTenantRefs(willFailDirectUnique).length} TenantClusterPool${clusterCisFromTenantRefs(willFailDirectUnique).length === 1 ? '' : 's'}`}
                         </Button>
                         <Button
                           variant="link"
@@ -1687,13 +1730,20 @@ export const UploadTab: React.FC<Props> = ({
                       CI&apos;s <code>event.yaml</code> in agnosticv. Babylon will manage the cluster pool automatically going forward.
                     </div>
                     <ul style={{ margin: '0 0 10px 20px', fontSize: '0.85rem' }}>
-                      {willFailDirect.map((ref: any, i: number) => {
+                      {willFailDirectUnique.map((ref: any) => {
                         const parts = (ref.ci as string).split('.');
                         const agvPath = parts.slice(0, -1).join('/') + '/' + parts[parts.length - 1] + '.yaml';
                         const agvUrl = `https://github.com/rhpds/agnosticv/edit/master/${agvPath}`;
+                        const rowCount = willFailDirect.filter((r: any) => r.ci === ref.ci).length;
                         return (
-                          <li key={i}>
-                            <strong>{ref.workshop_name}</strong>{' '}
+                          <li key={ref.ci}>
+                            <strong>{ref.workshop_name}</strong>
+                            {rowCount > 1 ? (
+                              <span style={{ color: 'var(--pf-v6-global--Color--200)', fontSize: '0.8rem' }}>
+                                {' '}({rowCount} schedule rows)
+                              </span>
+                            ) : null}
+                            {' '}
                             <a href={agvUrl} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>
                               edit event.yaml in agnosticv ↗
                             </a>
@@ -1703,45 +1753,51 @@ export const UploadTab: React.FC<Props> = ({
                     </ul>
                     <div style={{ fontSize: '0.9rem', marginBottom: 4 }}>
                       <strong>Option 2 — Quick fix for this event:</strong> Create TenantClusterPool(s) now and enable them.
-                      Babylon will provision clusters automatically once the pool is enabled.
+                      Babylon will provision clusters automatically once the pool is enabled (allow ~4h before tenant start).
                     </div>
                     <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)' }}>
                       Make sure to set <strong>Enable pool</strong> in the creation dialog so Babylon starts provisioning immediately.
                     </div>
                   </Alert>
                 )}
-                {willFailNoPool.length > 0 && (
+                {willFailNoPoolUnique.length > 0 && (
                   <Alert
-                    variant="danger"
+                    variant="warning"
                     isInline
-                    title={`${willFailNoPool.length} workshop(s) will fail — no TenantClusterPool and no cluster CI in CSV`}
+                    title={
+                      willFailNoPool.length === willFailNoPoolUnique.length
+                        ? `${willFailNoPoolUnique.length} catalog item(s) — no TenantClusterPool yet (Babylon can create on deploy)`
+                        : `${willFailNoPoolUnique.length} catalog item(s) (${willFailNoPool.length} schedule rows) — no TenantClusterPool yet (Babylon can create on deploy)`
+                    }
                     style={{ marginBottom: 12 }}
                     actionLinks={
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         <Button
-                          variant="danger"
+                          variant="primary"
                           size="sm"
                           onClick={() => {
-                            const cis = [...new Set(willFailNoPool.map((r: any) => {
-                              if (r.cluster_ref) return r.cluster_ref;
-                              const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
-                              return derived !== r.ci ? derived : null;
-                            }).filter(Boolean))] as string[];
-                            setPoolCreateCIs(cis);
-                            setPoolCreateYaml('');
-                            setPoolCreateResults([]);
-                            setPoolCreateApplied(false);
-                            setShowPoolCreateModal(true);
+                            setIgnoreCapacityWarnings(true);
+                            showToast(
+                              'Proceeding — Babylon will manage TenantClusterPools; expect a longer deploy',
+                              'info',
+                            );
                           }}
                         >
-                          {(() => {
-                            const cis = [...new Set(willFailNoPool.map((r: any) => {
-                              if (r.cluster_ref) return r.cluster_ref;
-                              const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
-                              return derived !== r.ci ? derived : null;
-                            }).filter(Boolean))];
-                            return `Create ${cis.length} TenantClusterPool${cis.length === 1 ? '' : 's'}`;
-                          })()}
+                          Let Babylon handle it
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => openPoolCreate(willFailNoPoolUnique)}
+                        >
+                          {`Optional: pre-create ${clusterCisFromTenantRefs(willFailNoPoolUnique).length} pool${clusterCisFromTenantRefs(willFailNoPoolUnique).length === 1 ? '' : 's'}`}
+                        </Button>
+                        <Button
+                          variant="tertiary"
+                          size="sm"
+                          onClick={() => shiftTenantsEarlier4h(willFailNoPoolUnique)}
+                        >
+                          Optional: −4h earlier (cost)
                         </Button>
                         <Button
                           variant="link"
@@ -1750,28 +1806,41 @@ export const UploadTab: React.FC<Props> = ({
                             try { setMissingTenantRefs(await api.checkTenantClusterRefs(targetCluster)); } catch { /* ignore */ }
                           }}
                         >
-                          Re-check cluster refs
+                          Re-check
                         </Button>
                       </div>
                     }
                   >
                     <div style={{ marginBottom: 8 }}>
-                      These tenant workshops need a cluster to run on, but no <code>TenantClusterPool</code> exists
-                      in <code>shared-clusters</code> and no matching cluster CI is in this CSV:
+                      <strong>Default:</strong> Deploy anyway and let Babylon create/manage the
+                      {' '}<code>TenantClusterPool</code> when tenants provision. This is safe to ignore —
+                      expect a <strong>longer deploy</strong> while clusters fill (often 30–60+ min).
                     </div>
                     <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
-                      {willFailNoPool.slice(0, 5).map((ref: any, i: number) => (
-                        <li key={i}><strong>{ref.workshop_name}</strong></li>
-                      ))}
-                      {willFailNoPool.length > 5 && (
+                      {willFailNoPoolUnique.slice(0, 5).map((ref: any) => {
+                        const rowCount = willFailNoPool.filter((r: any) => r.ci === ref.ci).length;
+                        return (
+                          <li key={ref.ci}>
+                            <strong>{ref.workshop_name}</strong>
+                            {rowCount > 1 ? (
+                              <span style={{ color: 'var(--pf-v6-global--Color--200)', fontSize: '0.8rem' }}>
+                                {' '}({rowCount} schedule rows)
+                              </span>
+                            ) : null}
+                          </li>
+                        );
+                      })}
+                      {willFailNoPoolUnique.length > 5 && (
                         <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>
-                          ...and {willFailNoPool.length - 5} more
+                          ...and {willFailNoPoolUnique.length - 5} more
                         </li>
                       )}
                     </ul>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)' }}>
-                      Fix: click <strong>Create TenantClusterPools</strong> to create the shared pool,
-                      or add the matching <code>-cluster.*</code> CI row to your CSV to deploy a dedicated cluster alongside.
+                    <div style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)' }}>
+                      Optional only (not applied automatically):{' '}
+                      <strong>pre-create pools</strong> or <strong>−4h earlier</strong> starts capacity before
+                      Labagator/event times — you pay for idle cluster hours until students arrive; or add matching
+                      {' '}<code>-cluster.*</code> CI rows to the CSV.
                     </div>
                   </Alert>
                 )}
@@ -3210,33 +3279,9 @@ export const UploadTab: React.FC<Props> = ({
                     if (created) parts.push(`${created} created`);
                     if (enabled) parts.push(`${enabled} existing pool(s) enabled`);
                     if (active) parts.push(`${active} already active`);
-                    showToast(`Done — ${parts.join(', ')}. Babylon will provision clusters (30–60 min).`, 'success');
+                    showToast(`Done — ${parts.join(', ')}. Babylon will provision clusters (30–60 min). Use “−4h earlier” on the warning if you want runway before event times (extra cost).`, 'success');
                     // Do NOT re-validate here: pool CRD exists but has no ready clusters yet.
-                    // The danger alert should stay until the pool is actually provisioned.
-
-                    // Shift start times +4h for affected workshops when pools were newly created or enabled.
-                    // Clusters take 30-60 min to provision — an immediate deploy would still fail.
-                    if (created + enabled > 0) {
-                      const tenantCIs = new Set(
-                        poolCreateCIs.map(pci => pci.replace(/-cluster\./, '-tenant.'))
-                      );
-                      const shifted = schedules.map(s =>
-                        tenantCIs.has(s.ci)
-                          ? {
-                              ...s,
-                              provisioning_date: shiftScheduleDate(s.provisioning_date, 4),
-                              auto_stop: shiftScheduleDate(s.auto_stop, 4),
-                              auto_destroy: shiftScheduleDate(s.auto_destroy, 4),
-                            }
-                          : s
-                      );
-                      const shiftedCount = shifted.filter((s, i) => s.provisioning_date !== schedules[i].provisioning_date).length;
-                      if (shiftedCount > 0) {
-                        setSchedules(shifted);
-                        setPoolCreateTimeShifted(shiftedCount);
-                        try { await api.updateSchedules(shifted); } catch { /* non-fatal */ }
-                      }
-                    }
+                    // Do NOT auto-shift times — optional “−4h earlier” on the warning only.
                   } else {
                     showToast('Some pools failed to apply — see results below', 'danger');
                   }
@@ -3307,10 +3352,9 @@ export const UploadTab: React.FC<Props> = ({
               )}
 
               {poolCreateTimeShifted > 0 && (
-                <Alert variant="info" isInline title={`Start times pushed back 4 hours for ${poolCreateTimeShifted} workshop${poolCreateTimeShifted === 1 ? '' : 's'}`} style={{ marginTop: 8 }}>
-                  Clusters take 30–60 minutes to provision after pool creation — deploying immediately would fail.
-                  Provisioning and stop/destroy times have been shifted forward by 4 hours in the schedule table
-                  so your workshops deploy into a ready cluster pool.
+                <Alert variant="warning" isInline title={`Schedule drift: −4h earlier on ${poolCreateTimeShifted} workshop${poolCreateTimeShifted === 1 ? '' : 's'}`} style={{ marginTop: 8 }}>
+                  Provisioning and stop/destroy were moved earlier than Labagator/event times (extra cluster hours before students — cost).
+                  Not applied unless you click <strong>−4h earlier</strong> on the warning.
                 </Alert>
               )}
 
