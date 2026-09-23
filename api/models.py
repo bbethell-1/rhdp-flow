@@ -447,6 +447,21 @@ class CatalogNotFoundItem(BaseModel):
     suffix_options: list[str] = Field(default_factory=list)
 
 
+class ProdNotEventAdvisory(BaseModel):
+    """CI will deploy via .prod (or already is .prod) instead of .event.
+
+    Non-blocking: deploy succeeds. Surfaces event-stage awareness for Summit-style runs.
+    """
+
+    ci_name: str
+    ci: str
+    namespace: str
+    event_published: bool = Field(
+        description="True when base.event also exists on the cluster"
+    )
+    message: str
+
+
 class CatalogNamespaceValidationResponse(BaseModel):
     """Response for POST /schedules/validate-catalog-namespaces."""
 
@@ -454,6 +469,8 @@ class CatalogNamespaceValidationResponse(BaseModel):
     not_found: list[CatalogNotFoundItem] = Field(
         default_factory=list, description="CIs not found in any catalog namespace"
     )
+    # Using .prod while .event is preferred for big events — never blocks deploy.
+    prod_not_event: list[ProdNotEventAdvisory] = Field(default_factory=list)
     checked: int = 0
     skipped: int = 0
 

@@ -70,6 +70,7 @@ from api.models import (
     PoolInfo,
     PoolLookupResponse,
     PoolNotFoundWarning,
+    ProdNotEventAdvisory,
     QARequest,
     QAResultItem,
     RetryRequest,
@@ -1389,9 +1390,46 @@ def validate_catalog_namespaces(_key=Depends(verify_api_key), config=Depends(_re
 
     mismatches: list[CatalogNamespaceMismatch] = []
     not_found: list[CatalogNotFoundItem] = []
+    prod_not_event: list[ProdNotEventAdvisory] = []
     not_found_cis: set[str] = set()
     mismatch_keys: set[tuple[str, str]] = set()
+    prod_advisory_cis: set[str] = set()
     checked = 0
+    index = _catalog_name_index(config)
+
+    def _base_ci(name: str) -> str:
+        for sfx in (".event", ".prod", ".dev"):
+            if name.endswith(sfx):
+                return name[: -len(sfx)]
+        return name
+
+    def _note_prod_not_event(ci_name: str, effective_ci: str, ns: str) -> None:
+        """Info-only: schedule will use .prod instead of the event-stage default."""
+        if not effective_ci.endswith(".prod") or effective_ci in prod_advisory_cis:
+            return
+        base = _base_ci(effective_ci)
+        event_name = f"{base}.event"
+        event_published = bool(index.get(event_name))
+        if event_published:
+            msg = (
+                f"Using '{effective_ci}' but '{event_name}' is also published. "
+                f"Deploy will succeed — this does not block. Prefer .event for big-event "
+                f"batches, or keep .prod if that is intentional."
+            )
+        else:
+            msg = (
+                f"Using '{effective_ci}' — no '{event_name}' published. "
+                f"Deploy will succeed — this does not block. Add event.yaml in agnosticv "
+                f"if you want the event stage; otherwise .prod is the correct default."
+            )
+        prod_advisory_cis.add(effective_ci)
+        prod_not_event.append(ProdNotEventAdvisory(
+            ci_name=ci_name,
+            ci=effective_ci,
+            namespace=ns,
+            event_published=event_published,
+            message=msg,
+        ))
 
     for s in _schedules:
         cis = [s.ci]
@@ -1417,6 +1455,7 @@ def validate_catalog_namespaces(_key=Depends(verify_api_key), config=Depends(_re
                     found_catalog_namespace=found_ns,
                     suggestion=suggestion or f"Found in {found_ns} instead of {expected_ns}",
                 ))
+                _note_prod_not_event(s.ci_name, ci, s.namespace)
             elif not exists and found_ns is None:
                 # One entry per CI — schedule-row duplicates only inflate the alert
                 if ci in not_found_cis:
@@ -1431,10 +1470,16 @@ def validate_catalog_namespaces(_key=Depends(verify_api_key), config=Depends(_re
                     suggested_ci=suggested_ci,
                     suffix_options=list(suffix_options or []),
                 ))
+                # After auto-correct the effective name is suggested_ci
+                if suggested_ci:
+                    _note_prod_not_event(s.ci_name, suggested_ci, s.namespace)
+            elif exists:
+                _note_prod_not_event(s.ci_name, ci, s.namespace)
 
     return CatalogNamespaceValidationResponse(
         mismatches=mismatches,
         not_found=not_found,
+        prod_not_event=prod_not_event,
         checked=checked,
         skipped=0,
     )

@@ -289,7 +289,7 @@ export const UploadTab: React.FC<Props> = ({
   const [showroomNovnc, setShowroomNovnc] = useState(false);
   const [showroomZerotouch, setShowroomZerotouch] = useState(false);
   const [useCatalogLookup, setUseCatalogLookup] = useState(false);
-  // '' = auto pace by batch size (1s / 3s / 5s)
+  // '' = auto pace by batch size (0s / 0.5s / 1s) — create-only scheduling
   const [deployDelaySeconds, setDeployDelaySeconds] = useState('');
 
   // Multi-cluster deploy target. Always default to Events (us-west-2) when configured.
@@ -337,6 +337,9 @@ export const UploadTab: React.FC<Props> = ({
     ci_name: string;
     message: string;
   }>>([]);
+  /** Non-blocking: rows using .prod instead of .event (nice-to-know for event batches). */
+  const [prodNotEvent, setProdNotEvent] = useState<import('../types').ProdNotEventAdvisory[]>([]);
+  const [prodNotEventExpanded, setProdNotEventExpanded] = useState(false);
   const [skippedCatalogSummary, setSkippedCatalogSummary] = useState<{
     rows: number;
     remaining: number;
@@ -583,6 +586,7 @@ export const UploadTab: React.FC<Props> = ({
     setCatalogNamespaceMismatches([]);
     setCatalogNotFound([]);
     setCatalogSuffixCorrections([]);
+    setProdNotEvent([]);
     setSkippedCatalogSummary(null);
     setPoolCapacityWarnings([]);
     setPoolsNotFound([]);
@@ -666,6 +670,8 @@ export const UploadTab: React.FC<Props> = ({
     }
     if (pcRes.warnings?.length) setPoolCapacityWarnings(pcRes.warnings);
     if (pcRes.not_found?.length) setPoolsNotFound(pcRes.not_found);
+    if (cnRes.prod_not_event?.length) setProdNotEvent(cnRes.prod_not_event);
+    else setProdNotEvent([]);
     return { nsRes, nuRes, cnRes, pcRes };
   }, [onOperatorOverrideRecorded]);
 
@@ -2205,7 +2211,8 @@ export const UploadTab: React.FC<Props> = ({
             >
               <div style={{ fontSize: '0.9rem', marginBottom: 8 }}>
                 These CIs already exist — the schedule pointed at the wrong catalog namespace.
-                {' '}<strong>Local Flow only</strong> — diverges from Labagator if the plan still lists the other namespace.
+                Flow auto-corrected locally so deploy works — <strong>still fix Labagator</strong> so the
+                next export ships the right namespace (otherwise this warning returns).
               </div>
               <AffectsItemsList
                 count={catalogNamespaceMismatches.length}
@@ -2219,8 +2226,55 @@ export const UploadTab: React.FC<Props> = ({
                 ))}
               </AffectsItemsList>
               <div style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)' }}>
-                Namespace column updated — no action needed.
+                Flow namespace column updated for this session. Correct the catalog namespace / CI stage in Labagator when you can.
               </div>
+            </Alert>
+          )}
+
+          {/* Using .prod instead of .event — info only, never blocks deploy */}
+          {prodNotEvent.length > 0 && (
+            <Alert
+              variant="info"
+              isInline
+              title={`${prodNotEvent.length} item(s) using .prod (not .event) — deploy OK`}
+              style={{ marginBottom: 12 }}
+              actionLinks={
+                <Button variant="link" size="sm" onClick={() => setProdNotEvent([])}>
+                  Dismiss
+                </Button>
+              }
+            >
+              <div style={{ fontSize: '0.9rem', marginBottom: 8 }}>
+                Big-event default prefers <code>.event</code> when published. These rows will deploy
+                via <code>.prod</code> — <strong>this does not block deployment</strong>. Still worth
+                correcting upstream so Labagator / the next export match the event stage.
+              </div>
+              <div style={{ fontSize: '0.9rem', marginBottom: 6, fontWeight: 600 }}>Suggested fixes:</div>
+              <ol style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
+                <li>
+                  <strong>Preferred:</strong> add <code>event.yaml</code> in agnosticv → publish{' '}
+                  <code>babylon-catalog-event/&lt;ci&gt;.event</code>, then re-export from Labagator
+                </li>
+                <li>
+                  <strong>Or</strong> set the CI suffix / catalog stage in Labagator so the master plan
+                  ships <code>.prod</code> intentionally (not as a silent default)
+                </li>
+                <li>
+                  <strong>Keep .prod</strong> for this Flow run — deploy proceeds as-is
+                </li>
+              </ol>
+              <AffectsItemsList
+                count={prodNotEvent.length}
+                expanded={prodNotEventExpanded}
+                onToggle={() => setProdNotEventExpanded((v) => !v)}
+              >
+                {sortByCiName(prodNotEvent).map((a) => (
+                  <li key={a.ci}>
+                    <strong>{a.ci_name}</strong>: <code>{a.ci}</code>
+                    {a.event_published ? ' (.event also published)' : ' (no .event published)'}
+                  </li>
+                ))}
+              </AffectsItemsList>
             </Alert>
           )}
 
@@ -3241,7 +3295,7 @@ export const UploadTab: React.FC<Props> = ({
                   </Tooltip>
                 </SplitItem>
                 <SplitItem>
-                  <Tooltip content="Pause between workshops to ease API pressure on large batches. Auto: 1s (<10), 3s (10–24), 5s (25+).">
+                  <Tooltip content="Pause between Workshop/WorkshopProvision creates (API scheduling only — not VM provision). Auto: 0s (<10), 0.5s (10–24), 1s (25+).">
                     <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ fontSize: '0.875rem', whiteSpace: 'nowrap' }}>Deploy pace</span>
                       <FormSelect
@@ -3252,10 +3306,11 @@ export const UploadTab: React.FC<Props> = ({
                         style={{ width: 'auto', minWidth: 140 }}
                       >
                         <FormSelectOption value="" label="Auto (by batch size)" />
-                        <FormSelectOption value="1" label="1s (fast)" />
-                        <FormSelectOption value="3" label="3s" />
-                        <FormSelectOption value="5" label="5s (large)" />
-                        <FormSelectOption value="10" label="10s (gentle)" />
+                        <FormSelectOption value="0" label="0s (no pause)" />
+                        <FormSelectOption value="0.5" label="0.5s" />
+                        <FormSelectOption value="1" label="1s" />
+                        <FormSelectOption value="3" label="3s (gentle)" />
+                        <FormSelectOption value="5" label="5s" />
                       </FormSelect>
                     </span>
                   </Tooltip>
@@ -3277,6 +3332,8 @@ export const UploadTab: React.FC<Props> = ({
                             setUsersNotInCatalog([]);
                             setNumUsersLimits({});
                             setCatalogNamespaceMismatches([]);
+                            setProdNotEvent([]);
+                            setCatalogSuffixCorrections([]);
                             setCatalogNotFound([]);
                             setSkippedCatalogSummary(null);
                             setPoolCapacityWarnings([]);
