@@ -18,8 +18,10 @@ kind: ConfigMap
 metadata:
   name: rhdp-scheduler-oauth-emails
 data:
-  # One email per line. Only these users can reach the app at all. Keep this in
-  # sync with DEPLOY_PICKER_ALLOWED_EMAILS (the in-app deploy-target allowlist).
+  # One email per line. Only these users can reach the app at all.
+  # Add Labagator / event operators here so they get Flow + the deploy-target picker.
+  # Keep in mind: picker visibility also needs an OAuth session (X-Forwarded-Email).
   authenticated-emails.txt: |
     jdisrael@redhat.com
     bbethell@redhat.com
+    prutledg@redhat.com

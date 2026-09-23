@@ -2,13 +2,14 @@
 
 This overlay adds two things to the infra01 `rhdp-flow` instance:
 
-1. **Identity gate** — an `oauth-proxy` sidecar in front of the whole web UI,
-   restricted to an email allowlist (Josh + Billy).
-2. **Deploy-target picker** — an operator-only dropdown in Deploy Settings that
-   deploys the loaded schedule (CSV upload *or* Labagator import) to one of
-   several physical clusters. Defaults to **Events (us-west-2)** when that
-   target Secret exists; operators can still choose this cluster (infra01),
-   integration, or prod.
+1. **Identity gate** — an `oauth-proxy` sidecar in front of the whole web UI.
+   Emails in `oauth-proxy.yaml` (`authenticated-emails.txt`) may reach the app
+   (Josh, Billy, Patrick / Labagator operators, …). Add more Labagator folks
+   there to grant access.
+2. **Deploy-target picker** — dropdown in Deploy Settings. Defaults to
+   **Events (us-west-2)**. Any authenticated user may use the default; leaving
+   Events for infra01 / integration / prod is allowed for all authenticated
+   users unless `DEPLOY_PICKER_ALLOWED_EMAILS` is set to a tighter list.
 
 Everything committed to git is non-secret. The two live credentials — the
 oauth cookie secret and the per-target-cluster ServiceAccount tokens — are
@@ -29,8 +30,9 @@ The serving cert (`rhdp-scheduler-tls`) is minted automatically by the
 service-ca operator from the annotation on the Service — nothing to do.
 
 The allowlist itself lives in `oauth-proxy.yaml` (`authenticated-emails.txt`).
-Keep it in sync with the app-side `DEPLOY_PICKER_ALLOWED_EMAILS` allowlist
-(defaults to the same two operators in `api/identity.py`).
+Who can open Flow at all is controlled there. By default any authenticated user
+may use the deploy-target picker; set `DEPLOY_PICKER_ALLOWED_EMAILS` to a
+comma-separated list only if you need to restrict leaving the Events default.
 
 ## 2. Target-cluster ServiceAccounts + Secrets (per target cluster)
 
@@ -98,6 +100,7 @@ remove a target.
 - The proxy admits only allowlisted emails and injects `X-Forwarded-Email`.
 - The app trusts that header only because the proxy is the sole ingress path
   (the NetworkPolicy exposes :8443 to the router, never :8000).
-- Choosing a non-default target on deploy re-checks the allowlist in-app
-  (`require_picker_access`) and resolves the matching `cluster-<key>` Secret into
-  a short-lived kubeconfig, deleted when the deploy finishes.
+- Choosing a non-default target on deploy re-checks identity in-app
+  (`require_picker_access`) — Events (default) is always allowed; other
+  targets need an authenticated session. Resolves the matching `cluster-<key>`
+  Secret into a short-lived kubeconfig, deleted when the deploy finishes.
