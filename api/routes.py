@@ -1369,7 +1369,11 @@ def validate_catalog_namespaces(_key=Depends(verify_api_key), config=Depends(_re
                 expected_ns = get_catalog_namespace(ci, s.catalog_namespace or None)
                 to_check.append((ci, expected_ns, s))
 
-    # Run oc checks in parallel (one thread per unique CI)
+    # Prefetch bulk catalog index once (3 oc list calls) before parallel per-CI lookups
+    from rhdp_flow import _catalog_name_index
+    _catalog_name_index(config)
+
+    # Run lookups in parallel — each hit is O(1) against the shared index
     ci_results: dict[str, tuple] = {}
     lock = threading.Lock()
 
@@ -1378,7 +1382,7 @@ def validate_catalog_namespaces(_key=Depends(verify_api_key), config=Depends(_re
         with lock:
             ci_results[ci] = result
 
-    with ThreadPoolExecutor(max_workers=min(len(to_check), 16)) as executor:
+    with ThreadPoolExecutor(max_workers=min(max(len(to_check), 1), 32)) as executor:
         futures = {executor.submit(_run, ci, expected_ns): ci for ci, expected_ns, _ in to_check}
         for f in as_completed(futures):
             f.result()  # raise any exception
@@ -1690,16 +1694,30 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                         limit_errors.append(
                             f"{s.ci_name} ({s.ci}): {s.users} requested, max {info['maximum']}"
                         )
-                # Resolve catalog namespace: auto-redirect if item lives in a different namespace
+                # Resolve catalog namespace / CI suffix: auto-redirect NS, auto-apply suggested_ci
                 expected_ns = get_catalog_namespace(s.ci, s.catalog_namespace or None)
                 if s.ci not in ns_cache:
                     ns_cache[s.ci] = validate_catalog_item_exists(s.ci, expected_ns, config_check)
-                exists, found_ns, suggestion, _suggested_ci, _suffix_opts = ns_cache[s.ci]
+                exists, found_ns, suggestion, suggested_ci, _suffix_opts = ns_cache[s.ci]
                 if not exists and found_ns is not None and found_ns != expected_ns:
                     # Exact CI in a different namespace — redirect catalog_namespace only
                     s.catalog_namespace = found_ns
+                elif not exists and found_ns is None and suggested_ci:
+                    # Same as Upload validate auto-correct: bare → .event/.prod
+                    old_ci = s.ci
+                    s.ci = suggested_ci
+                    s.catalog_namespace = get_catalog_namespace(suggested_ci)
+                    if s.asset_cis:
+                        parts = [p.strip() for p in s.asset_cis.split(",") if p.strip()]
+                        s.asset_cis = ",".join(
+                            suggested_ci if p == old_ci else p for p in parts
+                        )
+                    logger.info(
+                        "Deploy preflight auto-corrected CI %s → %s (diverges from Labagator)",
+                        old_ci,
+                        suggested_ci,
+                    )
                 elif not exists and found_ns is None:
-                    # Do NOT auto-apply suggested_ci (.prod vs .event) — operator must choose
                     not_found_errors.append(f"{s.ci_name} ({s.ci}): {suggestion}")
         finally:
             cluster_targets.cleanup_kubeconfig(config_check.kubeconfig_path if body.target_cluster else None)

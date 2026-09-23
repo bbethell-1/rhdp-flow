@@ -2783,19 +2783,20 @@ def find_similar_catalog_items(ci: str, namespace: str, config: RHDPConfig, limi
     Returns:
         List of similar catalog item names
     """
-    env = os.environ.copy()
-    if config.kubeconfig_path:
-        env["KUBECONFIG"] = config.kubeconfig_path
-
     try:
-        # List all catalog items in namespace
-        cmd = [config.oc_command, "get", "catalogitem", "-n", namespace, "-o", "json"]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)
-        if result.returncode != 0:
-            return []
-
-        data = json.loads(result.stdout)
-        all_items = [item['metadata']['name'] for item in data.get('items', [])]
+        # Prefer bulk index (warm after validate) — avoid another per-call oc list
+        index = _catalog_name_index(config)
+        all_items = [name for name, nss in index.items() if not namespace or namespace in nss]
+        if not all_items:
+            env = os.environ.copy()
+            if config.kubeconfig_path:
+                env["KUBECONFIG"] = config.kubeconfig_path
+            cmd = [config.oc_command, "get", "catalogitem", "-n", namespace, "-o", "json"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)
+            if result.returncode != 0:
+                return []
+            data = json.loads(result.stdout)
+            all_items = [item['metadata']['name'] for item in data.get('items', [])]
 
         # Normalize user input for matching
         ci_normalized = ci.lower().replace('.event', '').replace('.prod', '').replace('.dev', '')
@@ -2825,6 +2826,51 @@ def find_similar_catalog_items(ci: str, namespace: str, config: RHDPConfig, limi
 _catalog_exists_cache: dict[str, tuple[float, tuple]] = {}
 _CATALOG_CACHE_TTL = 300  # 5 minutes — catalog items don't change often
 
+# Bulk name→namespaces index (3 oc list calls total) — used by validate_catalog_item_exists
+_catalog_name_index_cache: dict[str, tuple[float, dict[str, list[str]]]] = {}
+
+
+def _catalog_name_index(config: RHDPConfig) -> dict[str, list[str]]:
+    """
+    Map CatalogItem name → namespaces where it exists.
+
+    One ``oc get catalogitem -n <ns> -o json`` per catalog namespace (3 calls),
+    cached 5 minutes. Orders of magnitude faster than per-CI ``oc get``.
+    """
+    import time as _time
+
+    cache_key = config.kubeconfig_path or ""
+    cached = _catalog_name_index_cache.get(cache_key)
+    if cached and (_time.monotonic() - cached[0]) < _CATALOG_CACHE_TTL:
+        return cached[1]
+
+    index: dict[str, list[str]] = {}
+    env = os.environ.copy()
+    if config.kubeconfig_path:
+        env["KUBECONFIG"] = config.kubeconfig_path
+    for ns in ("babylon-catalog-event", "babylon-catalog-prod", "babylon-catalog-dev"):
+        try:
+            cmd = [config.oc_command, "get", "catalogitem", "-n", ns, "-o", "json"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=90, env=env)
+            if result.returncode != 0:
+                logger.debug(
+                    "catalog name index: oc get failed in %s: %s",
+                    ns,
+                    (result.stderr or result.stdout or "").strip()[:200],
+                )
+                continue
+            data = json.loads(result.stdout or "{}")
+            for item in data.get("items") or []:
+                name = ((item.get("metadata") or {}).get("name") or "").strip()
+                if not name:
+                    continue
+                index.setdefault(name, []).append(ns)
+        except Exception as e:
+            logger.warning("catalog name index failed for %s: %s", ns, e)
+
+    _catalog_name_index_cache[cache_key] = (_time.monotonic(), index)
+    return index
+
 
 def validate_catalog_item_exists(
     ci: str, expected_namespace: str, config: RHDPConfig
@@ -2845,31 +2891,24 @@ def validate_catalog_item_exists(
     if cached and (_time.monotonic() - cached[0]) < _CATALOG_CACHE_TTL:
         return cached[1]  # type: ignore[return-value]
 
-    env = os.environ.copy()
-    if config.kubeconfig_path:
-        env["KUBECONFIG"] = config.kubeconfig_path
-
     def _cache_and_return(val: tuple) -> tuple:
         _catalog_exists_cache[cache_key] = (_time.monotonic(), val)
         return val
 
-    def _oc_get(name: str, ns: str) -> bool:
-        try:
-            cmd = [config.oc_command, "get", "catalogitem", name, "-n", ns, "-o", "name"]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)
-            return result.returncode == 0
-        except Exception:
-            return False
+    index = _catalog_name_index(config)
+
+    def _ns_for(name: str) -> list[str]:
+        return index.get(name) or []
 
     # Exact name in expected namespace
-    if _oc_get(ci, expected_namespace):
+    if expected_namespace in _ns_for(ci):
         return _cache_and_return((True, expected_namespace, None, None, []))
 
     # Exact name in other catalog namespaces (same CI string — namespace redirect only)
     for ns in ("babylon-catalog-event", "babylon-catalog-prod", "babylon-catalog-dev"):
         if ns == expected_namespace:
             continue
-        if _oc_get(ci, ns):
+        if ns in _ns_for(ci):
             suggestion = (
                 f"Expected in {expected_namespace}, found in {ns}. "
                 f"Will deploy from {ns} (where item actually exists)."
@@ -2882,7 +2921,7 @@ def validate_catalog_item_exists(
     if not has_env_suffix:
         suffix_hits: list[tuple[str, str]] = []  # (alt_ci, namespace)
         seen_alts: set[str] = set()
-        for suffix, ns in (
+        for suffix, preferred_ns in (
             (".event", "babylon-catalog-event"),
             (".prod", "babylon-catalog-prod"),
             (".dev", "babylon-catalog-dev"),
@@ -2890,11 +2929,13 @@ def validate_catalog_item_exists(
             alt = f"{ci}{suffix}"
             if alt in seen_alts:
                 continue
-            for try_ns in dict.fromkeys([ns, expected_namespace]):
-                if try_ns and _oc_get(alt, try_ns):
-                    suffix_hits.append((alt, try_ns))
-                    seen_alts.add(alt)
-                    break
+            ns_list = _ns_for(alt)
+            if not ns_list:
+                continue
+            # Prefer the canonical NS for that suffix, else first hit
+            try_ns = preferred_ns if preferred_ns in ns_list else ns_list[0]
+            suffix_hits.append((alt, try_ns))
+            seen_alts.add(alt)
 
         options = [a for a, _n in suffix_hits]
         if len(suffix_hits) == 1:
@@ -2910,7 +2951,6 @@ def validate_catalog_item_exists(
             has_prod = any(a.endswith(".prod") for a in options)
             options_txt = ", ".join(f"'{a}' ({n})" for a, n in suffix_hits)
             if has_event:
-                # Big-event default: prefer .event whenever it exists (even if .prod/.dev also exist).
                 event = next(a for a in options if a.endswith(".event"))
                 suggestion = (
                     f"Bare CI '{ci}' not published; .event exists ({options_txt}). "
@@ -2919,7 +2959,6 @@ def validate_catalog_item_exists(
                 )
                 return _cache_and_return((False, None, suggestion, event, options))
             if has_prod:
-                # No .event published — same idea as namespace auto-correct → use .prod.
                 prod = next(a for a in options if a.endswith(".prod"))
                 suggestion = (
                     f"No .event CatalogItem for '{ci}' (published: {options_txt}). "
