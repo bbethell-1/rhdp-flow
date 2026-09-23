@@ -2915,10 +2915,19 @@ def validate_catalog_item_exists(
             )
             return _cache_and_return((False, ns, suggestion, None, []))
 
-    # Bare CI (no .prod/.event/.dev): collect ALL suffix hits.
+    # Bare CI, or wrong env suffix (e.g. .event when only .prod exists): collect suffix hits.
     # Prefer .event when published (big-event default). Else auto .prod when present.
     has_env_suffix = ci.endswith((".prod", ".event", ".dev"))
-    if not has_env_suffix:
+    base_ci = ci
+    if has_env_suffix:
+        for _sfx in (".event", ".prod", ".dev"):
+            if ci.endswith(_sfx):
+                base_ci = ci[: -len(_sfx)]
+                break
+
+    # Resolve published suffixes for bare names, and for wrong-suffix names
+    # (exact name already failed above — retry against the stripped base).
+    if (not has_env_suffix) or (has_env_suffix and base_ci != ci):
         suffix_hits: list[tuple[str, str]] = []  # (alt_ci, namespace)
         seen_alts: set[str] = set()
         for suffix, preferred_ns in (
@@ -2926,8 +2935,8 @@ def validate_catalog_item_exists(
             (".prod", "babylon-catalog-prod"),
             (".dev", "babylon-catalog-dev"),
         ):
-            alt = f"{ci}{suffix}"
-            if alt in seen_alts:
+            alt = f"{base_ci}{suffix}"
+            if alt == ci or alt in seen_alts:
                 continue
             ns_list = _ns_for(alt)
             if not ns_list:
@@ -2938,11 +2947,12 @@ def validate_catalog_item_exists(
             seen_alts.add(alt)
 
         options = [a for a, _n in suffix_hits]
+        label = f"Bare CI '{ci}'" if not has_env_suffix else f"CI '{ci}'"
         if len(suffix_hits) == 1:
             alt, try_ns = suffix_hits[0]
             suggestion = (
-                f"Bare CI '{ci}' not published; auto-correcting to '{alt}' in {try_ns}. "
-                f"Local Flow only — differs from Labagator if the plan still has the bare name."
+                f"{label} not published; auto-correcting to '{alt}' in {try_ns}. "
+                f"Local Flow only — differs from Labagator if the plan still has the original name."
             )
             return _cache_and_return((False, None, suggestion, alt, options))
 
@@ -2953,7 +2963,7 @@ def validate_catalog_item_exists(
             if has_event:
                 event = next(a for a in options if a.endswith(".event"))
                 suggestion = (
-                    f"Bare CI '{ci}' not published; .event exists ({options_txt}). "
+                    f"{label} not published; .event exists ({options_txt}). "
                     f"Auto-correcting to '{event}'. Local Flow only — diverges from Labagator "
                     f"whenever the plan still has bare / .prod / .event / a different catalog namespace."
                 )
@@ -2961,18 +2971,18 @@ def validate_catalog_item_exists(
             if has_prod:
                 prod = next(a for a in options if a.endswith(".prod"))
                 suggestion = (
-                    f"No .event CatalogItem for '{ci}' (published: {options_txt}). "
+                    f"No .event CatalogItem for '{base_ci}' (published: {options_txt}). "
                     f"Auto-correcting to '{prod}'. Local Flow only — diverges from Labagator "
                     f"whenever the plan still has a different CI name/suffix. Options: "
                     f"(1) preferred: add event.yaml in agnosticv → "
-                    f"babylon-catalog-event/{ci}.event; "
+                    f"babylon-catalog-event/{base_ci}.event; "
                     f"(2) keep auto .prod; "
                     f"(3) fix Labagator CI suffix; "
                     f"(4) skip these items."
                 )
                 return _cache_and_return((False, None, suggestion, prod, options))
             suggestion = (
-                f"Bare CI '{ci}' not published. Published: {options_txt}. "
+                f"{label} not published. Published: {options_txt}. "
                 f"Choose explicitly — Flow will not guess."
             )
             return _cache_and_return((False, None, suggestion, None, options))

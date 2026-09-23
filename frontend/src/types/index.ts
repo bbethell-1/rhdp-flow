@@ -336,9 +336,20 @@ export interface CatalogNotFoundItem {
   suffix_options?: string[];
 }
 
+/** Non-blocking: schedule uses .prod instead of .event (info only). */
+export interface ProdNotEventAdvisory {
+  ci_name: string;
+  ci: string;
+  namespace: string;
+  event_published: boolean;
+  message: string;
+}
+
 export interface CatalogNamespaceValidationResponse {
   mismatches: CatalogNamespaceMismatch[];
   not_found: CatalogNotFoundItem[];
+  /** Using .prod while .event is preferred for big events — never blocks deploy. */
+  prod_not_event?: ProdNotEventAdvisory[];
   checked: number;
   skipped: number;
 }
