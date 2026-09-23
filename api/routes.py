@@ -1385,6 +1385,8 @@ def validate_catalog_namespaces(_key=Depends(verify_api_key), config=Depends(_re
 
     mismatches: list[CatalogNamespaceMismatch] = []
     not_found: list[CatalogNotFoundItem] = []
+    not_found_cis: set[str] = set()
+    mismatch_keys: set[tuple[str, str]] = set()
     checked = 0
 
     for s in _schedules:
@@ -1399,6 +1401,10 @@ def validate_catalog_namespaces(_key=Depends(verify_api_key), config=Depends(_re
             checked += 1
             if not exists and found_ns is not None:
                 # Exact CI name found in another catalog namespace — safe redirect
+                key = (ci, found_ns)
+                if key in mismatch_keys:
+                    continue
+                mismatch_keys.add(key)
                 mismatches.append(CatalogNamespaceMismatch(
                     ci_name=s.ci_name,
                     ci=ci,
@@ -1408,7 +1414,10 @@ def validate_catalog_namespaces(_key=Depends(verify_api_key), config=Depends(_re
                     suggestion=suggestion or f"Found in {found_ns} instead of {expected_ns}",
                 ))
             elif not exists and found_ns is None:
-                # Missing / ambiguous — never auto-rewrite CI (.prod vs .event)
+                # One entry per CI — schedule-row duplicates only inflate the alert
+                if ci in not_found_cis:
+                    continue
+                not_found_cis.add(ci)
                 not_found.append(CatalogNotFoundItem(
                     ci_name=s.ci_name,
                     ci=ci,

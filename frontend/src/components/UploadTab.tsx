@@ -297,6 +297,15 @@ export const UploadTab: React.FC<Props> = ({
   // Confirmation modal state
   const [showDeployConfirm, setShowDeployConfirm] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  /** One shared confirm for riskier local bypasses (skip CIs, rewrite CI suffix, etc.). */
+  const [riskConfirm, setRiskConfirm] = useState<{
+    kind: 'skip-missing' | 'apply-suffix' | 'users-to-instances' | 'clear-users' | 'cap-users';
+    title: string;
+    body: string;
+    bullets: string[];
+  } | null>(null);
+  const [deployRiskAck, setDeployRiskAck] = useState(false);
+  const [catalogNotFoundExpanded, setCatalogNotFoundExpanded] = useState(false);
 
   // Expandable rows state
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
@@ -933,6 +942,7 @@ export const UploadTab: React.FC<Props> = ({
 
   const handleDeploy = async () => {
     if (!dryRun && !showDeployConfirm) {
+      setDeployRiskAck(false);
       setShowDeployConfirm(true);
       return;
     }
@@ -1077,10 +1087,74 @@ export const UploadTab: React.FC<Props> = ({
         .filter((r: any) => !r.pool_exists && !r.has_cluster_row && r.direct_sandbox)
     : [];
   const catalogNotFoundUnique = uniqueByCi(catalogNotFound);
+  const catalogSuggestedCount = catalogNotFoundUnique.filter((n) => n.suggested_ci).length;
+  const highUsersIssues = usersNotInCatalog.filter((a) => a.severity === 'high');
+  const hasDeployRisks =
+    catalogNotFoundUnique.length > 0 ||
+    (skippedCatalogSummary?.items.length ?? 0) > 0 ||
+    highUsersIssues.length > 0;
   const hasBlockingIssues =
     numUsersViolations.length > 0 ||
     _tenantBlockDirect.length > 0;
   const deployBlocked = hasBlockingIssues;
+
+  const requestSkipMissing = () => {
+    if (catalogNotFoundUnique.length === 0) return;
+    setRiskConfirm({
+      kind: 'skip-missing',
+      title: 'Skip missing catalog items?',
+      body: `Remove ${catalogNotFoundUnique.length} unique CI(s) from this Flow session so the rest can deploy. Labagator is not changed.`,
+      bullets: catalogNotFoundUnique.slice(0, 8).map((n) => `${n.ci_name} — ${n.ci}`),
+    });
+  };
+
+  const requestApplySuffixes = () => {
+    const n = catalogNotFoundUnique.filter((x) => x.suggested_ci).length;
+    if (n === 0) return;
+    setRiskConfirm({
+      kind: 'apply-suffix',
+      title: 'Apply env suffixes to CI names?',
+      body: `Rewrite ${n} bare CI name(s) to the only matching .prod / .event / .dev on the cluster. This diverges from Labagator until you fix the source.`,
+      bullets: catalogNotFoundUnique
+        .filter((x) => x.suggested_ci)
+        .slice(0, 8)
+        .map((x) => `${x.ci} → ${x.suggested_ci}`),
+    });
+  };
+
+  const requestUsersFix = (mode: 'move-to-instances' | 'clear-users') => {
+    if (usersNotInCatalog.length === 0) return;
+    setRiskConfirm({
+      kind: mode === 'move-to-instances' ? 'users-to-instances' : 'clear-users',
+      title: mode === 'move-to-instances' ? 'Move Users → Instances?' : 'Clear Users (keep Instances)?',
+      body:
+        mode === 'move-to-instances'
+          ? `Copy Users into Instances and clear Users on ${usersNotInCatalog.length} advisory row(s). Local Flow only — not Labagator.`
+          : `Clear Users and leave Instances as-is on ${usersNotInCatalog.length} advisory row(s). Local Flow only — not Labagator.`,
+      bullets: usersNotInCatalog.slice(0, 6).map((a) => `${a.ci_name} (Users=${a.users})`),
+    });
+  };
+
+  const requestCapUsers = () => {
+    if (numUsersViolations.length === 0) return;
+    setRiskConfirm({
+      kind: 'cap-users',
+      title: 'Cap Users to catalog max?',
+      body: `Lower Users on ${numUsersViolations.length} row(s) to the catalog maximum so deploy is unblocked. Local Flow only — not Labagator.`,
+      bullets: numUsersViolations.slice(0, 6).map((v) => `${v.ci_name}: ${v.requested_users} → ${v.maximum}`),
+    });
+  };
+
+  const confirmRiskAction = async () => {
+    const kind = riskConfirm?.kind;
+    setRiskConfirm(null);
+    if (!kind) return;
+    if (kind === 'skip-missing') await skipMissingCatalogItems();
+    else if (kind === 'apply-suffix') await applySuggestedCatalogSuffixes();
+    else if (kind === 'users-to-instances') await applyUsersNotInCatalogFix('move-to-instances');
+    else if (kind === 'clear-users') await applyUsersNotInCatalogFix('clear-users');
+    else if (kind === 'cap-users') await capUsersToCatalogMax();
+  };
 
   /** Persist an operator-accepted local tweak so Deployments/logs show it was not Labagator. */
   const recordOperatorOverride = useCallback(async (body: {
@@ -1851,7 +1925,7 @@ export const UploadTab: React.FC<Props> = ({
               style={{ marginBottom: 12 }}
               actionLinks={
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <Button variant="secondary" size="sm" onClick={() => capUsersToCatalogMax()}>
+                  <Button variant="secondary" size="sm" onClick={() => requestCapUsers()}>
                     Cap Users to catalog max
                   </Button>
                   <Button
@@ -1928,12 +2002,12 @@ export const UploadTab: React.FC<Props> = ({
               actionLinks={
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <Tooltip content="Copy Users into Instances, then clear Users. Local schedule only — does not change Labagator.">
-                    <Button variant="secondary" size="sm" onClick={() => applyUsersNotInCatalogFix('move-to-instances')}>
+                    <Button variant="secondary" size="sm" onClick={() => requestUsersFix('move-to-instances')}>
                       Move Users → Instances
                     </Button>
                   </Tooltip>
                   <Tooltip content="Clear Users and keep the current Instances value (common when Instances is already correct). Local only.">
-                    <Button variant="secondary" size="sm" onClick={() => applyUsersNotInCatalogFix('clear-users')}>
+                    <Button variant="secondary" size="sm" onClick={() => requestUsersFix('clear-users')}>
                       Clear Users (keep Instances)
                     </Button>
                   </Tooltip>
@@ -1982,27 +2056,23 @@ export const UploadTab: React.FC<Props> = ({
             </Alert>
           )}
 
-          {/* Catalog items not found — warning; skip to deploy the rest */}
+          {/* Catalog items not found — compact warning; expand for details */}
           {catalogNotFoundUnique.length > 0 && (
             <Alert
               variant="warning"
               isInline
-              title={
-                catalogNotFound.length === catalogNotFoundUnique.length
-                  ? `${catalogNotFoundUnique.length} catalog item(s) not on this cluster`
-                  : `${catalogNotFoundUnique.length} catalog item(s) not on this cluster (${catalogNotFound.length} schedule rows)`
-              }
+              title={`${catalogNotFoundUnique.length} catalog item(s) missing under the exact CI name`}
               style={{ marginBottom: 12 }}
               actionLinks={
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {catalogNotFound.some((n) => n.suggested_ci) && (
-                    <Tooltip content="Only applies when exactly one of .prod / .event / .dev exists for that bare CI. If both exist, Flow will not guess — fix the CSV.">
-                      <Button variant="secondary" size="sm" onClick={() => applySuggestedCatalogSuffixes()}>
-                        Apply unambiguous .prod/.event/.dev
+                  {catalogSuggestedCount > 0 && (
+                    <Tooltip content="Only when exactly one of .prod / .event / .dev exists. Never guesses if both exist.">
+                      <Button variant="secondary" size="sm" onClick={() => requestApplySuffixes()}>
+                        Apply unambiguous suffixes ({catalogSuggestedCount})
                       </Button>
                     </Tooltip>
                   )}
-                  <Button variant="primary" size="sm" onClick={() => skipMissingCatalogItems()}>
+                  <Button variant="primary" size="sm" onClick={() => requestSkipMissing()}>
                     Skip missing &amp; keep deploying
                   </Button>
                   <Button
@@ -2020,41 +2090,34 @@ export const UploadTab: React.FC<Props> = ({
                 </div>
               }
             >
-              <div style={{ marginBottom: 8, fontSize: '0.9rem' }}>
-                These CIs are not published under the exact schedule name (often missing{' '}
-                <code>.prod</code> / <code>.event</code> / <code>.dev</code>).
-                Flow never auto-picks a suffix when more than one exists.
+              <div style={{ fontSize: '0.9rem', marginBottom: 6 }}>
+                Often a missing <code>.prod</code> / <code>.event</code> on the CI name (namespace override alone is not enough).
+                {catalogSuggestedCount > 0
+                  ? ` ${catalogSuggestedCount} have an unambiguous suffix match.`
+                  : ' No single unambiguous suffix match for the rest — fix Labagator/CSV or skip.'}
               </div>
-              <ul style={{ margin: '0 0 8px 20px', fontSize: '0.85rem' }}>
-                {catalogNotFoundUnique.slice(0, 8).map((nf) => {
-                  const rowCount = catalogNotFound.filter((r) => r.ci === nf.ci).length;
-                  return (
-                    <li key={nf.ci}>
-                      <strong>{nf.ci_name}</strong>{' '}
-                      <code>{nf.ci}</code>
-                      {rowCount > 1 ? (
-                        <span style={{ color: 'var(--pf-v6-global--Color--200)' }}>
-                          {' '}({rowCount} rows)
-                        </span>
-                      ) : null}
-                      {nf.suggested_ci ? (
-                        <div style={{ color: 'var(--pf-v6-global--Color--200)', fontSize: '0.8rem' }}>
-                          Unambiguous match: <code>{nf.suggested_ci}</code>
-                        </div>
-                      ) : nf.message ? (
-                        <div style={{ color: 'var(--pf-v6-global--Color--200)', fontSize: '0.8rem' }}>
-                          {nf.message}
-                        </div>
-                      ) : null}
-                    </li>
-                  );
-                })}
-                {catalogNotFoundUnique.length > 8 && (
-                  <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>
-                    ...and {catalogNotFoundUnique.length - 8} more
+              <ul style={{ margin: '0 0 6px 20px', fontSize: '0.85rem' }}>
+                {catalogNotFoundUnique.slice(0, catalogNotFoundExpanded ? 50 : 5).map((nf) => (
+                  <li key={nf.ci}>
+                    <code>{nf.ci}</code>
+                    {nf.suggested_ci ? (
+                      <span style={{ color: 'var(--pf-v6-global--Color--200)' }}> → {nf.suggested_ci}</span>
+                    ) : null}
                   </li>
-                )}
+                ))}
               </ul>
+              {catalogNotFoundUnique.length > 5 && (
+                <Button
+                  variant="link"
+                  isInline
+                  size="sm"
+                  onClick={() => setCatalogNotFoundExpanded((v) => !v)}
+                >
+                  {catalogNotFoundExpanded
+                    ? 'Show less'
+                    : `Show all ${catalogNotFoundUnique.length}…`}
+                </Button>
+              )}
             </Alert>
           )}
 
@@ -3357,16 +3420,61 @@ export const UploadTab: React.FC<Props> = ({
               {schedules.length > 10 && <li>... and {schedules.length - 10} more</li>}
             </ul>
           </div>
+
+          {hasDeployRisks && !deployBlocked && (
+            <div style={{ marginTop: 16 }}>
+              <Checkbox
+                id="deploy-risk-ack"
+                isChecked={deployRiskAck}
+                onChange={(_e, checked) => setDeployRiskAck(checked)}
+                label="I understand this deploy is not Labagator-clean (skipped / missing CIs or high Users/Instances risks above)"
+              />
+            </div>
+          )}
         </ModalBody>
         <ModalFooter>
           <Button
             variant="danger"
             onClick={handleDeploy}
-            isDisabled={deployBlocked}
+            isDisabled={deployBlocked || (hasDeployRisks && !deployRiskAck)}
           >
-            {deployBlocked ? 'Cannot Deploy (blocked)' : 'Deploy Now'}
+            {deployBlocked
+              ? 'Cannot Deploy (blocked)'
+              : hasDeployRisks && !deployRiskAck
+                ? 'Acknowledge risks to deploy'
+                : 'Deploy Now'}
           </Button>
           <Button variant="link" onClick={() => setShowDeployConfirm(false)}>Cancel</Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Shared confirm for riskier local bypasses */}
+      <Modal
+        variant="small"
+        isOpen={!!riskConfirm}
+        onClose={() => setRiskConfirm(null)}
+        aria-labelledby="risk-confirm-title"
+      >
+        <ModalHeader title={riskConfirm?.title || 'Confirm'} labelId="risk-confirm-title" titleIconVariant="warning" />
+        <ModalBody>
+          <p style={{ marginBottom: 8 }}>{riskConfirm?.body}</p>
+          {riskConfirm && riskConfirm.bullets.length > 0 && (
+            <ul style={{ margin: '0 0 0 20px', fontSize: '0.85rem' }}>
+              {riskConfirm.bullets.map((b) => (
+                <li key={b}>{b}</li>
+              ))}
+              {/* hint when truncated */}
+            </ul>
+          )}
+          <p style={{ marginTop: 10, fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)' }}>
+            This is recorded as an operator override for the session audit.
+          </p>
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="warning" onClick={() => confirmRiskAction()}>
+            Confirm
+          </Button>
+          <Button variant="link" onClick={() => setRiskConfirm(null)}>Cancel</Button>
         </ModalFooter>
       </Modal>
 
