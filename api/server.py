@@ -121,10 +121,22 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # CSP headers middleware
 # ---------------------------------------------------------------------------
+_FRAME_ANCESTORS = os.environ.get("RHDP_FRAME_ANCESTORS", "").strip()
+
 class CSPMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):  # type: ignore[override]
         response: Response = await call_next(request)
+        # When RHDP_FRAME_ANCESTORS is set (e.g. the Labagator origin), allow
+        # framing from that origin via CSP frame-ancestors and drop the older
+        # X-Frame-Options header (frame-ancestors supersedes it in all modern
+        # browsers). Without the env var the default is DENY — no change.
+        if _FRAME_ANCESTORS:
+            frame_ancestors = f"frame-ancestors 'self' {_FRAME_ANCESTORS}; "
+        else:
+            response.headers["X-Frame-Options"] = "DENY"
+            frame_ancestors = ""
         response.headers["Content-Security-Policy"] = (
+            f"{frame_ancestors}"
             "default-src 'self'; "
             "script-src 'self'; "
             "style-src 'self' 'unsafe-inline'; "
@@ -133,7 +145,6 @@ class CSPMiddleware(BaseHTTPMiddleware):
             "font-src 'self'"
         )
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
         return response
 
 

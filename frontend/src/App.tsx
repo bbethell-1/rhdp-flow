@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, lazy, Suspense } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo, lazy, Suspense } from 'react';
 import {
   Page,
   Masthead,
@@ -53,6 +53,12 @@ function getTabFromHash(): string {
 }
 
 const App: React.FC = () => {
+  // Embed mode: when ?embedded=true the masthead is hidden so the host app
+  // (Labagator) provides the chrome. ?theme=dark|light syncs the theme.
+  const searchParams = useMemo(() => new URLSearchParams(window.location.search), []);
+  const isEmbedded = searchParams.get('embedded') === 'true';
+  const themeParam = searchParams.get('theme') as 'dark' | 'light' | null;
+
   const { theme, toggleTheme } = useTheme();
   const [locationHash, setLocationHash] = useState(() => window.location.hash);
   const [activeTab, setActiveTab] = useState<string | number>(getTabFromHash);
@@ -111,6 +117,18 @@ const App: React.FC = () => {
   const studentsCount = qaResults.filter(r => r.landing_page_url).length;
 
   const editView = locationHash === '#edit';
+
+  // When embedded, override theme from the ?theme= URL param so Labagator's
+  // theme toggle drives both apps without the user toggling twice.
+  useEffect(() => {
+    if (!themeParam) return;
+    const root = document.documentElement;
+    if (themeParam === 'dark') {
+      root.classList.add('pf-v6-theme-dark');
+    } else {
+      root.classList.remove('pf-v6-theme-dark');
+    }
+  }, [themeParam]);
 
   // Update document title and URL hash based on active tab (skip when full editor is open)
   useEffect(() => {
@@ -195,7 +213,7 @@ const App: React.FC = () => {
   );
 
   return (
-    <Page masthead={masthead}>
+    <Page masthead={isEmbedded ? undefined : masthead}>
       {/* Persistent live-mode warning when dry-run is off */}
       {!dryRun && (
         <PageSection padding={{ default: 'noPadding' }} style={{ padding: '8px 24px 0' }}>
