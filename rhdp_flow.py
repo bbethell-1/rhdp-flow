@@ -1856,14 +1856,9 @@ def create_resource_claim_via_oc(
                 env['KUBECONFIG'] = config.kubeconfig_path
             
             logger.debug(f"Running: {' '.join(cmd)}")
-            
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=config.timeout,
-                env=env
-            )
+
+            from lib.oc_retry import run_oc_with_retries
+            result = run_oc_with_retries(cmd, config=config, env=env)
             
             if result.returncode != 0:
                 error_msg = f"oc create failed: {result.stderr}"
@@ -2149,13 +2144,8 @@ def create_workshop_with_ui(
                 env['KUBECONFIG'] = config.kubeconfig_path
             
             logger.debug(f"Creating Workshop: {workshop_name_or_prefix} with UI enabled")
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=config.timeout,
-                env=env
-            )
+            from lib.oc_retry import run_oc_with_retries
+            result = run_oc_with_retries(cmd, config=config, env=env)
             
             if result.returncode == 0:
                 # If we used generateName, extract the actual name from the output
