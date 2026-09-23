@@ -7024,7 +7024,9 @@ def main():
 
         # Process each schedule
         results = []
-        for schedule in schedules:
+        from lib.deploy_pace import deploy_pace_seconds
+        pace = deploy_pace_seconds(len(schedules))
+        for i, schedule in enumerate(schedules):
             result = process_schedule(schedule, config, asset_passwords=asset_passwords, asset_num_users=asset_num_users)
             results.append(result)
             
@@ -7033,9 +7035,9 @@ def main():
                 f"Status: {result.status} - GUID: {result.guid}"
             )
             
-            # Small delay between schedules
-            if not config.dry_run and len(schedules) > 1:
-                time.sleep(1)
+            # Pace between schedules (scales up for large batches)
+            if not config.dry_run and i + 1 < len(schedules):
+                time.sleep(pace)
         
         # Write results
         output_path = Path(args.output_csv)
