@@ -332,6 +332,8 @@ export interface CatalogNotFoundItem {
   message: string;
   /** Exactly one env-suffix alternate (.prod OR .event OR .dev). Null if ambiguous. */
   suggested_ci?: string | null;
+  /** All published ci.{event,prod,dev} names found on the cluster. */
+  suffix_options?: string[];
 }
 
 export interface CatalogNamespaceValidationResponse {
