@@ -2834,8 +2834,9 @@ def validate_catalog_item_exists(
 
     Returns:
         (exists, found_namespace, suggestion, suggested_ci, suffix_options)
-        - suggested_ci: single published env suffix, OR ``.prod`` when no ``.event``
-          exists (auto-correct path). None when both ``.event`` and ``.prod`` exist.
+        - suggested_ci: preferred env suffix to auto-apply — ``.event`` when published,
+          else ``.prod`` when no ``.event``, else the only published suffix. None only when
+          choices remain ambiguous (e.g. only .dev + something unexpected).
         - suffix_options: all published ``ci.{event,prod,dev}`` names found (may be 0+)
     """
     import time as _time
@@ -2876,8 +2877,7 @@ def validate_catalog_item_exists(
             return _cache_and_return((False, ns, suggestion, None, []))
 
     # Bare CI (no .prod/.event/.dev): collect ALL suffix hits.
-    # Auto-suggest when exactly one exists, or when .prod exists and .event does not.
-    # Never auto-suggest when both .event and .prod are published.
+    # Prefer .event when published (big-event default). Else auto .prod when present.
     has_env_suffix = ci.endswith((".prod", ".event", ".dev"))
     if not has_env_suffix:
         suffix_hits: list[tuple[str, str]] = []  # (alt_ci, namespace)
@@ -2900,7 +2900,8 @@ def validate_catalog_item_exists(
         if len(suffix_hits) == 1:
             alt, try_ns = suffix_hits[0]
             suggestion = (
-                f"Bare CI '{ci}' not published; auto-correcting to '{alt}' in {try_ns}."
+                f"Bare CI '{ci}' not published; auto-correcting to '{alt}' in {try_ns}. "
+                f"Local Flow only — differs from Labagator if the plan still has the bare name."
             )
             return _cache_and_return((False, None, suggestion, alt, options))
 
@@ -2908,27 +2909,29 @@ def validate_catalog_item_exists(
             has_event = any(a.endswith(".event") for a in options)
             has_prod = any(a.endswith(".prod") for a in options)
             options_txt = ", ".join(f"'{a}' ({n})" for a, n in suffix_hits)
-            if not has_event and has_prod:
-                # Same idea as catalog-namespace auto-correct: safe default is .prod
-                # when .event was never published for this CI.
+            if has_event:
+                # Big-event default: prefer .event whenever it exists (even if .prod/.dev also exist).
+                event = next(a for a in options if a.endswith(".event"))
+                suggestion = (
+                    f"Bare CI '{ci}' not published; .event exists ({options_txt}). "
+                    f"Auto-correcting to '{event}'. Local Flow only — diverges from Labagator "
+                    f"whenever the plan still has bare / .prod / .event / a different catalog namespace."
+                )
+                return _cache_and_return((False, None, suggestion, event, options))
+            if has_prod:
+                # No .event published — same idea as namespace auto-correct → use .prod.
                 prod = next(a for a in options if a.endswith(".prod"))
                 suggestion = (
                     f"No .event CatalogItem for '{ci}' (published: {options_txt}). "
-                    f"Auto-correcting to '{prod}'. For a big event you want .event everywhere — "
-                    f"(1) preferred: add event.yaml in agnosticv and publish "
+                    f"Auto-correcting to '{prod}'. Local Flow only — diverges from Labagator "
+                    f"whenever the plan still has a different CI name/suffix. Options: "
+                    f"(1) preferred: add event.yaml in agnosticv → "
                     f"babylon-catalog-event/{ci}.event; "
                     f"(2) keep auto .prod; "
-                    f"(3) fix Labagator CI names to include the suffix; "
+                    f"(3) fix Labagator CI suffix; "
                     f"(4) skip these items."
                 )
                 return _cache_and_return((False, None, suggestion, prod, options))
-            if has_event and has_prod:
-                suggestion = (
-                    f"Bare CI '{ci}' not published. Both .event and .prod exist: {options_txt}. "
-                    f"For a big event prefer .event. Choose explicitly — Flow will not guess. "
-                    f"Or (1) fix Labagator, (2) skip."
-                )
-                return _cache_and_return((False, None, suggestion, None, options))
             suggestion = (
                 f"Bare CI '{ci}' not published. Published: {options_txt}. "
                 f"Choose explicitly — Flow will not guess."

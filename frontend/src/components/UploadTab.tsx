@@ -590,7 +590,7 @@ export const UploadTab: React.FC<Props> = ({
         })));
         await api.addOperatorOverride({
           action: 'auto_ci_suffix_correct',
-          summary: `Auto-corrected ${autoSuffix.length} bare CI(s) to env suffix`,
+          summary: `Auto-corrected ${autoSuffix.length} bare CI(s) to env suffix (diverges from Labagator)`,
           detail: autoSuffix.map((n) => `${n.ci} → ${n.suggested_ci}`).join('; '),
           affected_count: autoSuffix.length,
           source: 'upload',
@@ -2128,7 +2128,8 @@ export const UploadTab: React.FC<Props> = ({
             >
               <div style={{ fontSize: '0.9rem', marginBottom: 8 }}>
                 These CIs already exist — the schedule pointed at the wrong catalog namespace (e.g. expected{' '}
-                <code>babylon-catalog-event</code>, live item is in <code>babylon-catalog-prod</code>). Not the same as a missing CI suffix.
+                <code>babylon-catalog-event</code>, live item is in <code>babylon-catalog-prod</code>).
+                {' '}<strong>Local Flow only</strong> — diverges from Labagator if the plan still lists the other namespace.
               </div>
               <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
                 {catalogNamespaceMismatches.slice(0, 5).map((m, i) => (
@@ -2146,7 +2147,7 @@ export const UploadTab: React.FC<Props> = ({
             </Alert>
           )}
 
-          {/* CI suffix auto-correct (bare name → .prod when no .event, or only one suffix published) */}
+          {/* CI suffix auto-correct — .event when published, else .prod */}
           {catalogSuffixCorrections.length > 0 && (
             <Alert
               variant="info"
@@ -2160,24 +2161,38 @@ export const UploadTab: React.FC<Props> = ({
               }
             >
               <div style={{ fontSize: '0.9rem', marginBottom: 8 }}>
-                Schedule CI was bare (no <code>.prod</code> / <code>.event</code> / <code>.dev</code>).
-                No <code>.event</code> published → Flow auto-picked <code>.prod</code> (same idea as namespace auto-correct).
+                Schedule CI was bare. Flow looked for a published env suffix:{' '}
+                <code>.event</code> if it exists, otherwise <code>.prod</code>.
+                {' '}<strong>Local Flow only</strong> — this diverges from Labagator whenever the master plan
+                still has the bare name, <code>.prod</code>, <code>.event</code>, or a different catalog namespace.
               </div>
-              <ol style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
-                <li>
-                  <strong>Preferred:</strong> add <code>event.yaml</code> in agnosticv → publish{' '}
-                  <code>babylon-catalog-event/&lt;ci&gt;.event</code>
-                </li>
-                <li>
-                  <strong>Keep auto .prod</strong> (already applied)
-                </li>
-                <li>
-                  <strong>Fix Labagator</strong> so the master plan ships the correct CI suffix
-                </li>
-                <li>
-                  <strong>Skip</strong> items you do not want (use remaining-suffix alert if any)
-                </li>
-              </ol>
+              {catalogSuffixCorrections.some((c) => c.corrected_ci.endsWith('.prod')) && (
+                <>
+                  <div style={{ fontSize: '0.9rem', marginBottom: 6, fontWeight: 600 }}>
+                    No <code>.event</code> for some of these — options:
+                  </div>
+                  <ol style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
+                    <li>
+                      <strong>Preferred:</strong> add <code>event.yaml</code> in agnosticv → publish{' '}
+                      <code>babylon-catalog-event/&lt;ci&gt;.event</code>
+                    </li>
+                    <li>
+                      <strong>Keep auto .prod</strong> (already applied on those rows)
+                    </li>
+                    <li>
+                      <strong>Fix Labagator</strong> so the master plan ships the correct CI suffix
+                    </li>
+                    <li>
+                      <strong>Skip</strong> items you do not want (remaining-suffix alert if any)
+                    </li>
+                  </ol>
+                </>
+              )}
+              {catalogSuffixCorrections.some((c) => c.corrected_ci.endsWith('.event')) && (
+                <div style={{ fontSize: '0.85rem', marginBottom: 8, color: 'var(--pf-v6-global--Color--200)' }}>
+                  Rows auto-set to <code>.event</code> — preferred for big events. Still a Flow override if Labagator said otherwise.
+                </div>
+              )}
               <ul style={{ margin: '0 0 0 20px', fontSize: '0.85rem' }}>
                 {catalogSuffixCorrections.slice(0, 8).map((c) => (
                   <li key={c.ci}>
@@ -2191,12 +2206,12 @@ export const UploadTab: React.FC<Props> = ({
             </Alert>
           )}
 
-          {/* Remaining: usually both .event and .prod published — must pick */}
+          {/* Truly missing / ambiguous (rare after auto .event/.prod) */}
           {catalogNotFoundUnique.length > 0 && (
             <Alert
               variant="warning"
               isInline
-              title={`${catalogNotFoundUnique.length} catalog item(s) need a CI suffix choice`}
+              title={`${catalogNotFoundUnique.length} catalog item(s) still missing`}
               style={{ marginBottom: 12 }}
               actionLinks={
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -2213,7 +2228,7 @@ export const UploadTab: React.FC<Props> = ({
                         setRiskConfirm({
                           kind: 'apply-prod-no-event',
                           title: 'Use .prod for these CIs?',
-                          body: `Rewrite ${catalogRemainingWithProd.length} bare CI(s) to .prod. For a big event prefer .event when published.`,
+                          body: `Rewrite ${catalogRemainingWithProd.length} bare CI(s) to .prod. Local Flow — diverges from Labagator.`,
                           bullets: catalogRemainingWithProd.slice(0, 8).map((n) => `${n.ci} → ${n.ci}.prod`),
                         });
                       }}
@@ -2228,9 +2243,7 @@ export const UploadTab: React.FC<Props> = ({
               }
             >
               <div style={{ fontSize: '0.9rem', marginBottom: 8 }}>
-                Different from namespace auto-correct: the <em>exact</em> CI name is not published.
-                When both <code>.event</code> and <code>.prod</code> exist, Flow will not guess — for a big event prefer{' '}
-                <code>.event</code>.
+                Exact CI name not published and Flow could not auto-pick. Any manual pick here also diverges from Labagator.
               </div>
               <ul style={{ margin: '0 0 0 20px', fontSize: '0.85rem' }}>
                 {catalogNotFoundUnique.slice(0, catalogNotFoundExpanded ? 50 : 5).map((nf) => (
