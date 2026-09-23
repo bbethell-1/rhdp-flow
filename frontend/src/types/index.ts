@@ -170,6 +170,7 @@ export interface ClusterListResponse {
   allowed: boolean;
   user: string | null;
   clusters: ClusterTarget[];
+  default?: string;
 }
 
 export interface OperationResponse {

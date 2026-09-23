@@ -461,7 +461,7 @@ def _request_config(request: Request):
     """Resolve a request's target without changing process-wide credentials."""
     target = request.headers.get("X-RHDP-Target-Cluster") or request.query_params.get("target_cluster")
     if target:
-        identity.require_picker_access(request)
+        identity.require_picker_access(request, target)
     try:
         config = _get_config(target_cluster=target) if target else _get_config()
     except ValueError as exc:
@@ -1571,9 +1571,9 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
 
     schedules = _filter_schedules(body.ci_filter)
 
-    # Choosing a non-default target cluster is restricted to approved operators.
+    # Non-default targets (not Events) require an authenticated operator.
     if body.target_cluster:
-        identity.require_picker_access(request)
+        identity.require_picker_access(request, body.target_cluster)
     # Validate the deploy-target cluster early so a bad target fails fast.
     try:
         await asyncio.to_thread(cluster_targets.resolve_and_cleanup_check, body.target_cluster)
@@ -1731,7 +1731,7 @@ async def deploy_session(
     Per-workshop results are also on the job (``GET /api/deploy/status/{id}``).
     """
     if target_cluster:
-        identity.require_picker_access(request)
+        identity.require_picker_access(request, target_cluster)
     raw = await file.read()
     if len(raw) > MAX_UPLOAD_SIZE_BYTES:
         raise HTTPException(413, "File exceeds 10 MB size limit")
@@ -1835,7 +1835,7 @@ def deploy_dry_run(request: Request, body: DeployRequest = DeployRequest(), _key
         raise HTTPException(400, "No schedules loaded. Upload a CSV first.")
 
     if body.target_cluster:
-        identity.require_picker_access(request)
+        identity.require_picker_access(request, body.target_cluster)
     schedules = _filter_schedules(body.ci_filter)
     try:
         config = _get_config(
@@ -1921,7 +1921,7 @@ def deploy_dry_run_yaml(request: Request, body: DeployRequest = DeployRequest(),
         raise HTTPException(400, "No schedules loaded. Upload a CSV first.")
 
     if body.target_cluster:
-        identity.require_picker_access(request)
+        identity.require_picker_access(request, body.target_cluster)
     schedules = _filter_schedules(body.ci_filter)
     tmpdir = tempfile.mkdtemp(prefix="rhdp-dryrun-yaml-")
     config = None
@@ -1985,16 +1985,17 @@ def deploy_dry_run_yaml(request: Request, body: DeployRequest = DeployRequest(),
 def list_clusters(request: Request, _key=Depends(verify_api_key)):
     """List deploy-target clusters available to the requesting user.
 
-    Returns ``allowed`` (is this user on the picker allowlist) and, when allowed,
-    the configured target clusters. Non-allowlisted users get ``allowed: false``
-    and an empty list, so the UI simply hides the picker. Selection is also
-    enforced server-side on the deploy endpoints, so this is not the only gate.
+    Returns ``allowed`` (may the user use the picker) and the configured target
+    clusters. Any OAuth-authenticated user is allowed by default; Events is
+    always a permitted deploy target. Selection is also enforced server-side.
     """
     allowed = identity.is_picker_allowed(request)
+    clusters = cluster_targets.list_target_clusters()
     return {
         "allowed": allowed,
         "user": identity.get_user_email(request),
-        "clusters": cluster_targets.list_target_clusters() if allowed else [],
+        "clusters": clusters if allowed else [],
+        "default": identity.DEFAULT_TARGET_CLUSTER,
     }
 
 
@@ -2201,7 +2202,7 @@ async def deploy_retry(request: Request, body: RetryRequest, _key=Depends(verify
 
     target = request.headers.get("X-RHDP-Target-Cluster")
     if target:
-        identity.require_picker_access(request)
+        identity.require_picker_access(request, target)
 
     # Pre-deploy num_users limit check (live deploys only) - same as main deploy
     def preflight():

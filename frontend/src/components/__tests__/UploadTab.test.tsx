@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { afterEach, vi } from 'vitest';
 import { UploadTab } from '../UploadTab';
-import { api } from '../../services/api';
+import { api, selectTargetCluster } from '../../services/api';
 import { mockSchedule } from '../../test/mocks/api';
 
 const noop = () => {};
@@ -10,6 +10,7 @@ const noop = () => {};
 // unauthenticated (non-allowlisted) user, so the picker is hidden. Individual
 // tests override api.getClusters as needed.
 afterEach(() => {
+  selectTargetCluster('');
   vi.restoreAllMocks();
 });
 
@@ -122,8 +123,10 @@ describe('UploadTab', () => {
     );
     const picker = await screen.findByRole('combobox', { name: 'Deploy target cluster' });
     expect(picker).toBeInTheDocument();
-    expect(screen.getByText('Events (us-west-2)')).toBeInTheDocument();
+    expect(screen.getByText('Events (us-west-2) (default)')).toBeInTheDocument();
     expect(screen.getByText('Prod (us-east-1)')).toBeInTheDocument();
+    expect(screen.getByText('This cluster (infra01)')).toBeInTheDocument();
+    await waitFor(() => expect(picker).toHaveValue('events'));
   });
 
   it('hides the deploy-target cluster picker for non-allowlisted users', async () => {

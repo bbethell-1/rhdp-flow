@@ -1,16 +1,15 @@
 """Identity-based access control for the multi-cluster deploy picker.
 
-Choosing a *deploy-target cluster* (Feature 2) is restricted to a small
-allowlist of operators. rhdp-flow itself only holds a single shared API key and
-has no per-user identity, so real identity comes from an OpenShift OAuth proxy
-sidecar sitting in front of the app: it authenticates the user against the
-cluster's OAuth and forwards the identity in the ``X-Forwarded-Email`` /
-``X-Forwarded-User`` request headers.
+Choosing a *deploy-target cluster* (Feature 2) is available to any user who
+reaches the app through the OAuth proxy (``X-Forwarded-Email`` /
+``X-Forwarded-User``). Who can reach the app at all is controlled by the
+oauth-proxy email list (``authenticated-emails.txt``) — keep that in sync with
+Labagator operators (Josh, Billy, Patrick, …).
 
-The allowlist is configured via the ``DEPLOY_PICKER_ALLOWED_EMAILS`` environment
-variable (comma-separated, case-insensitive). If unset it defaults to the two
-approved operators. Enforcement is fail-closed: no recognised identity ⇒ no
-access to cluster selection.
+``DEPLOY_PICKER_ALLOWED_EMAILS`` is optional: when set, only those emails may
+**leave** the default target (Events). When unset or ``*``, any authenticated
+user may pick any configured cluster. The default target ``events`` never
+requires special access so Labagator embeds still land on us-west-2.
 """
 
 from __future__ import annotations
@@ -22,11 +21,18 @@ from fastapi import HTTPException, Request
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_ALLOWED = "jdisrael@redhat.com,bbethell@redhat.com"
+# Default target — always allowed without an operator allowlist check.
+DEFAULT_TARGET_CLUSTER = os.environ.get("RHDP_DEFAULT_TARGET_CLUSTER", "events").strip() or "events"
+
+# Optional tighter gate for non-default targets. Unused when env is ``*`` (default).
+_OPERATOR_EMAILS = "jdisrael@redhat.com,bbethell@redhat.com,prutledg@redhat.com"
 
 
-def _allowed_emails() -> set[str]:
-    raw = os.environ.get("DEPLOY_PICKER_ALLOWED_EMAILS", _DEFAULT_ALLOWED)
+def _allowed_emails() -> set[str] | None:
+    """Return the non-default-target allowlist, or None if any authenticated user may pick."""
+    raw = os.environ.get("DEPLOY_PICKER_ALLOWED_EMAILS", "*").strip()
+    if not raw or raw == "*":
+        return None
     return {e.strip().lower() for e in raw.split(",") if e.strip()}
 
 
@@ -39,21 +45,29 @@ def get_user_email(request: Request) -> str | None:
 
 
 def is_picker_allowed(request: Request) -> bool:
-    """True if the requesting user may choose a deploy-target cluster."""
+    """True if the requesting user may see/use the deploy-target picker."""
     email = get_user_email(request)
-    return bool(email and email in _allowed_emails())
+    if not email:
+        return False
+    allowed = _allowed_emails()
+    if allowed is None:
+        return True
+    return email in allowed
 
 
-def require_picker_access(request: Request) -> None:
-    """Raise HTTP 403 unless the requesting user is on the picker allowlist.
+def require_picker_access(request: Request, target_cluster: str | None = None) -> None:
+    """Raise HTTP 403 unless the user may deploy to ``target_cluster``.
 
-    Called on deploy paths only when a non-default ``target_cluster`` is
-    requested, so ordinary in-cluster deploys are unaffected.
+    The default target (Events / us-west-2) and empty (legacy in-cluster) do not
+    require picker access. Other targets require an authenticated, allowlisted
+    (or any-auth when allowlist is ``*``) user.
     """
+    if not target_cluster or target_cluster == DEFAULT_TARGET_CLUSTER:
+        return
     if not is_picker_allowed(request):
         email = get_user_email(request) or "unauthenticated"
-        logger.warning("Denied deploy-target selection for user %s", email)
+        logger.warning("Denied deploy-target selection for user %s → %s", email, target_cluster)
         raise HTTPException(
             403,
-            "Choosing a deploy-target cluster is restricted to approved operators.",
+            "Choosing a non-default deploy-target cluster requires an authenticated operator.",
         )

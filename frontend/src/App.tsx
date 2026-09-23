@@ -140,6 +140,15 @@ const App: React.FC = () => {
     }
   }, [themeParam]);
 
+  // Mark the document for embed-specific layout (fill the iframe, not 100vh).
+  useEffect(() => {
+    const root = document.documentElement;
+    if (isEmbedded) {
+      root.classList.add('rhdp-flow-embedded');
+    }
+    return () => root.classList.remove('rhdp-flow-embedded');
+  }, [isEmbedded]);
+
   // Update document title and URL hash based on active tab (skip when full editor is open)
   useEffect(() => {
     if (editView) {
@@ -223,24 +232,46 @@ const App: React.FC = () => {
   );
 
   return (
-    <Page masthead={isEmbedded ? undefined : masthead}>
+    <Page masthead={isEmbedded ? undefined : masthead} isContentFilled className={isEmbedded ? 'rhdp-flow-page-embedded' : undefined}>
+      {/* Embed chrome: masthead is hidden in Labagator, but Dry-Run must stay reachable. */}
+      {isEmbedded && (
+        <PageSection
+          padding={{ default: 'noPadding' }}
+          className={dryRun ? 'embed-chrome' : 'embed-chrome embed-chrome-live'}
+          style={{ padding: '6px 16px', flexShrink: 0 }}
+        >
+          <div className="embed-chrome-row">
+            <Tooltip content="Makes deployment jobs simulate without provisioning resources.">
+              <Checkbox
+                label="Dry-Run Mode"
+                isChecked={dryRun}
+                onChange={(_e, checked) => setDryRun(checked)}
+                id="embedDryRun"
+              />
+            </Tooltip>
+            <HealthBadge />
+            <span className="tz-indicator embed-tz">Times in UTC</span>
+          </div>
+        </PageSection>
+      )}
+
       {/* Persistent live-mode warning when dry-run is off */}
       {!dryRun && (
-        <PageSection padding={{ default: 'noPadding' }} style={{ padding: '8px 24px 0' }}>
+        <PageSection padding={{ default: 'noPadding' }} style={{ padding: isEmbedded ? '6px 16px 0' : '8px 24px 0' }}>
           <Alert variant="danger" isInline title="LIVE MODE — Dry-run is disabled. Deployments will provision real resources." />
         </PageSection>
       )}
 
       <div aria-live="polite" role="status">
         {toast && (
-          <PageSection padding={{ default: 'noPadding' }} style={{ padding: '8px 24px 0' }}>
+          <PageSection padding={{ default: 'noPadding' }} style={{ padding: isEmbedded ? '6px 16px 0' : '8px 24px 0' }}>
             <Alert variant={toast.variant} title={toast.msg} isInline isPlain timeout={3500} onTimeout={() => setToast(null)} />
           </PageSection>
         )}
       </div>
 
       {!editView && (
-        <PageSection padding={{ default: 'noPadding' }} style={{ padding: '0 24px' }}>
+        <PageSection padding={{ default: 'noPadding' }} style={{ padding: isEmbedded ? '0 16px' : '0 24px' }}>
           <SessionHistory
             onView={handleSessionView}
             onBack={handleBackToCurrent}
@@ -250,7 +281,7 @@ const App: React.FC = () => {
         </PageSection>
       )}
 
-      <PageSection isFilled>
+      <PageSection isFilled style={isEmbedded ? { paddingTop: 8 } : undefined}>
         {editView ? (
           <Suspense fallback={<Spinner />}>
             <ScheduleEditPage showToast={showToast} />

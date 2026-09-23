@@ -110,7 +110,10 @@ class DeployRequest(BaseModel):
     )
     target_cluster: str | None = Field(
         None,
-        description="Optional deploy-target cluster key (e.g. 'events'). Defaults to the in-cluster ServiceAccount.",
+        description=(
+            "Optional deploy-target cluster key (e.g. 'events'). "
+            "UI defaults to 'events' (us-west-2) when configured; omit or empty uses this app's in-cluster ServiceAccount."
+        ),
     )
     dry_run: bool = Field(False, description="Override global dry-run toggle")
     resource_lock: bool = Field(True, description="Apply lock-enabled label")

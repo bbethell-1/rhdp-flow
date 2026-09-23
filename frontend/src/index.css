@@ -53,6 +53,48 @@ html, body, #root {
   height: 100vh;
 }
 
+/* Embedded in Labagator: fill the iframe height chain (100vh overshoots / double-scrolls). */
+html.rhdp-flow-embedded,
+html.rhdp-flow-embedded body,
+html.rhdp-flow-embedded #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+html.rhdp-flow-embedded .pf-v6-c-page,
+html.rhdp-flow-embedded .rhdp-flow-page-embedded {
+  height: 100%;
+  max-height: 100%;
+}
+
+html.rhdp-flow-embedded .pf-v6-c-page__main-container,
+html.rhdp-flow-embedded .pf-v6-c-page__main {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+
+.embed-chrome {
+  border-bottom: 1px solid var(--pf-t--global--border--color--default, var(--pf-v6-global--BorderColor--100));
+  background: var(--pf-t--global--background--color--secondary--default, var(--pf-v6-global--BackgroundColor--200));
+}
+
+.embed-chrome-live {
+  border-bottom: 3px solid var(--rh-red, #ee0000);
+}
+
+.embed-chrome-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.embed-tz {
+  opacity: 0.75;
+  font-size: 0.85rem;
+}
+
 /* Let the main content section scroll vertically when content exceeds viewport */
 .pf-v6-c-page__main-section.pf-m-fill {
   overflow-y: auto;
