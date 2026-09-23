@@ -1395,8 +1395,8 @@ def validate_catalog_namespaces(_key=Depends(verify_api_key), config=Depends(_re
             cis += [c.strip() for c in s.asset_cis.split(",") if c.strip()]
         for ci in cis:
             expected_ns = get_catalog_namespace(ci, s.catalog_namespace or None)
-            exists, found_ns, suggestion, suggested_ci = ci_results.get(
-                ci, (True, expected_ns, None, None)
+            exists, found_ns, suggestion, suggested_ci, suffix_options = ci_results.get(
+                ci, (True, expected_ns, None, None, [])
             )
             checked += 1
             if not exists and found_ns is not None:
@@ -1425,6 +1425,7 @@ def validate_catalog_namespaces(_key=Depends(verify_api_key), config=Depends(_re
                     expected_catalog_namespace=expected_ns,
                     message=suggestion or "Not found in any catalog namespace",
                     suggested_ci=suggested_ci,
+                    suffix_options=list(suffix_options or []),
                 ))
 
     return CatalogNamespaceValidationResponse(
@@ -1693,7 +1694,7 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                 expected_ns = get_catalog_namespace(s.ci, s.catalog_namespace or None)
                 if s.ci not in ns_cache:
                     ns_cache[s.ci] = validate_catalog_item_exists(s.ci, expected_ns, config_check)
-                exists, found_ns, suggestion, _suggested_ci = ns_cache[s.ci]
+                exists, found_ns, suggestion, _suggested_ci, _suffix_opts = ns_cache[s.ci]
                 if not exists and found_ns is not None and found_ns != expected_ns:
                     # Exact CI in a different namespace — redirect catalog_namespace only
                     s.catalog_namespace = found_ns

@@ -1315,7 +1315,7 @@ def dry_run_validate_schedules(
     for schedule in schedules:
         # Validate catalog item exists in expected namespace
         expected_ns = get_catalog_namespace(schedule.ci, schedule.catalog_namespace)
-        exists, found_ns, suggestion, suggested_ci = validate_catalog_item_exists(schedule.ci, expected_ns, config)
+        exists, found_ns, suggestion, suggested_ci, _suffix_opts = validate_catalog_item_exists(schedule.ci, expected_ns, config)
         if suggested_ci:
             logger.warning(f"  ⚠️  {schedule.ci_name}: {suggestion}")
         elif not exists:
@@ -2828,18 +2828,15 @@ _CATALOG_CACHE_TTL = 300  # 5 minutes — catalog items don't change often
 
 def validate_catalog_item_exists(
     ci: str, expected_namespace: str, config: RHDPConfig
-) -> tuple[bool, str | None, str | None, str | None]:
+) -> tuple[bool, str | None, str | None, str | None, list[str]]:
     """
     Validate that a catalog item exists in the expected namespace.
 
     Returns:
-        (exists, found_namespace, suggestion, suggested_ci)
-        - exists: True if found under the exact ``ci`` name in expected_namespace
-        - found_namespace: namespace where the exact ``ci`` was found (same or other)
-        - suggestion: human-readable hint when not an exact expected hit
-        - suggested_ci: only set when exactly one env-suffix alternate exists
-          (e.g. bare → ``.prod`` OR bare → ``.event``). Never set when both
-          exist — operator must choose. Never auto-rewrites schedules.
+        (exists, found_namespace, suggestion, suggested_ci, suffix_options)
+        - suggested_ci: single published env suffix, OR ``.prod`` when no ``.event``
+          exists (auto-correct path). None when both ``.event`` and ``.prod`` exist.
+        - suffix_options: all published ``ci.{event,prod,dev}`` names found (may be 0+)
     """
     import time as _time
     cache_key = f"{ci}::{expected_namespace}::{config.kubeconfig_path or ''}"
@@ -2865,7 +2862,7 @@ def validate_catalog_item_exists(
 
     # Exact name in expected namespace
     if _oc_get(ci, expected_namespace):
-        return _cache_and_return((True, expected_namespace, None, None))
+        return _cache_and_return((True, expected_namespace, None, None, []))
 
     # Exact name in other catalog namespaces (same CI string — namespace redirect only)
     for ns in ("babylon-catalog-event", "babylon-catalog-prod", "babylon-catalog-dev"):
@@ -2876,11 +2873,11 @@ def validate_catalog_item_exists(
                 f"Expected in {expected_namespace}, found in {ns}. "
                 f"Will deploy from {ns} (where item actually exists)."
             )
-            return _cache_and_return((False, ns, suggestion, None))
+            return _cache_and_return((False, ns, suggestion, None, []))
 
-    # Bare CI (no .prod/.event/.dev): collect ALL suffix hits — do not prefer .prod.
-    # If only one exists, surface it as suggested_ci (operator must apply).
-    # If several exist, list them and leave suggested_ci unset.
+    # Bare CI (no .prod/.event/.dev): collect ALL suffix hits.
+    # Auto-suggest when exactly one exists, or when .prod exists and .event does not.
+    # Never auto-suggest when both .event and .prod are published.
     has_env_suffix = ci.endswith((".prod", ".event", ".dev"))
     if not has_env_suffix:
         suffix_hits: list[tuple[str, str]] = []  # (alt_ci, namespace)
@@ -2893,31 +2890,50 @@ def validate_catalog_item_exists(
             alt = f"{ci}{suffix}"
             if alt in seen_alts:
                 continue
-            # Check the suffix's natural namespace first, then expected_namespace
             for try_ns in dict.fromkeys([ns, expected_namespace]):
                 if try_ns and _oc_get(alt, try_ns):
                     suffix_hits.append((alt, try_ns))
                     seen_alts.add(alt)
                     break
 
+        options = [a for a, _n in suffix_hits]
         if len(suffix_hits) == 1:
             alt, try_ns = suffix_hits[0]
             suggestion = (
-                f"Item '{ci}' not published; found '{alt}' in {try_ns}. "
-                f"Apply the {alt.rsplit('.', 1)[-1]} suffix if that is the intended catalog item "
-                f"(not auto-applied — Labagator may have omitted the env suffix)."
+                f"Bare CI '{ci}' not published; auto-correcting to '{alt}' in {try_ns}."
             )
-            # found_namespace stays None so this stays a not-found / suggest path,
-            # not a silent namespace redirect.
-            return _cache_and_return((False, None, suggestion, alt))
+            return _cache_and_return((False, None, suggestion, alt, options))
 
         if len(suffix_hits) > 1:
-            options = ", ".join(f"'{a}' ({n})" for a, n in suffix_hits)
+            has_event = any(a.endswith(".event") for a in options)
+            has_prod = any(a.endswith(".prod") for a in options)
+            options_txt = ", ".join(f"'{a}' ({n})" for a, n in suffix_hits)
+            if not has_event and has_prod:
+                # Same idea as catalog-namespace auto-correct: safe default is .prod
+                # when .event was never published for this CI.
+                prod = next(a for a in options if a.endswith(".prod"))
+                suggestion = (
+                    f"No .event CatalogItem for '{ci}' (published: {options_txt}). "
+                    f"Auto-correcting to '{prod}'. For a big event you want .event everywhere — "
+                    f"(1) preferred: add event.yaml in agnosticv and publish "
+                    f"babylon-catalog-event/{ci}.event; "
+                    f"(2) keep auto .prod; "
+                    f"(3) fix Labagator CI names to include the suffix; "
+                    f"(4) skip these items."
+                )
+                return _cache_and_return((False, None, suggestion, prod, options))
+            if has_event and has_prod:
+                suggestion = (
+                    f"Bare CI '{ci}' not published. Both .event and .prod exist: {options_txt}. "
+                    f"For a big event prefer .event. Choose explicitly — Flow will not guess. "
+                    f"Or (1) fix Labagator, (2) skip."
+                )
+                return _cache_and_return((False, None, suggestion, None, options))
             suggestion = (
-                f"Item '{ci}' not published, but multiple env-suffixed items exist: {options}. "
-                f"Pick .event / .prod / .dev explicitly — Flow will not guess."
+                f"Bare CI '{ci}' not published. Published: {options_txt}. "
+                f"Choose explicitly — Flow will not guess."
             )
-            return _cache_and_return((False, None, suggestion, None))
+            return _cache_and_return((False, None, suggestion, None, options))
 
     # Fuzzy suggestions (never returned as suggested_ci — too risky to auto-apply)
     similar = find_similar_catalog_items(ci, expected_namespace, config, limit=3)
@@ -2937,7 +2953,7 @@ def validate_catalog_item_exists(
             f"Check the CI name — many items need a .prod or .event suffix."
         )
 
-    return _cache_and_return((False, None, suggestion, None))
+    return _cache_and_return((False, None, suggestion, None, []))
 
 
 def get_catalog_item_info(ci: str, config: RHDPConfig) -> dict[str, str]:
@@ -4888,7 +4904,7 @@ def qa3_verify_catalog_items_exist(
 
     for idx, (ci, schedule) in enumerate(ci_map.items(), 1):
         expected_ns = get_catalog_namespace(ci, schedule.catalog_namespace)
-        exists, found_ns, suggestion, suggested_ci = validate_catalog_item_exists(ci, expected_ns, config)
+        exists, found_ns, suggestion, suggested_ci, _suffix_opts = validate_catalog_item_exists(ci, expected_ns, config)
 
         if exists:
             status = "✅ OK"

@@ -442,8 +442,9 @@ class CatalogNotFoundItem(BaseModel):
     expected_catalog_namespace: str
     message: str
     # Only when exactly one env-suffixed alternate exists (.prod OR .event OR .dev).
-    # Never set when multiple suffixes exist — operator must choose.
     suggested_ci: str | None = None
+    # All published ci.{event,prod,dev} names found (empty if none).
+    suffix_options: list[str] = Field(default_factory=list)
 
 
 class CatalogNamespaceValidationResponse(BaseModel):

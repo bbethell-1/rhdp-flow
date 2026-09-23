@@ -280,6 +280,13 @@ export const UploadTab: React.FC<Props> = ({
   // Catalog namespace validation
   const [catalogNamespaceMismatches, setCatalogNamespaceMismatches] = useState<import('../types').CatalogNamespaceMismatch[]>([]);
   const [catalogNotFound, setCatalogNotFound] = useState<import('../types').CatalogNotFoundItem[]>([]);
+  /** Bare CI → .prod (or single-suffix) auto-corrections applied on validate — like namespace redirect. */
+  const [catalogSuffixCorrections, setCatalogSuffixCorrections] = useState<Array<{
+    ci: string;
+    corrected_ci: string;
+    ci_name: string;
+    message: string;
+  }>>([]);
   const [skippedCatalogSummary, setSkippedCatalogSummary] = useState<{
     rows: number;
     remaining: number;
@@ -299,7 +306,7 @@ export const UploadTab: React.FC<Props> = ({
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   /** One shared confirm for riskier local bypasses (skip CIs, rewrite CI suffix, etc.). */
   const [riskConfirm, setRiskConfirm] = useState<{
-    kind: 'skip-missing' | 'apply-suffix' | 'users-to-instances' | 'clear-users' | 'cap-users';
+    kind: 'skip-missing' | 'apply-prod-no-event' | 'apply-event' | 'users-to-instances' | 'clear-users' | 'cap-users';
     title: string;
     body: string;
     bullets: string[];
@@ -516,6 +523,7 @@ export const UploadTab: React.FC<Props> = ({
     setNumUsersLimits({});
     setCatalogNamespaceMismatches([]);
     setCatalogNotFound([]);
+    setCatalogSuffixCorrections([]);
     setSkippedCatalogSummary(null);
     setPoolCapacityWarnings([]);
     setPoolsNotFound([]);
@@ -542,11 +550,65 @@ export const UploadTab: React.FC<Props> = ({
         // Non-fatal — table may still show original namespace but deploy will redirect correctly
       }
     }
-    if (cnRes.not_found.length) setCatalogNotFound(cnRes.not_found);
+    // Auto-correct bare CI → suggested suffix (single hit, or .prod when no .event) — same pattern as namespace.
+    const autoSuffix = (cnRes.not_found || []).filter((n) => n.suggested_ci && n.suggested_ci !== n.ci);
+    const stillMissing = (cnRes.not_found || []).filter((n) => !n.suggested_ci);
+    if (autoSuffix.length > 0) {
+      const mapping = new Map(autoSuffix.map((n) => [n.ci, n.suggested_ci as string]));
+      try {
+        const current = await api.getSchedules();
+        const updated = current.map((s) => {
+          let next = s;
+          const main = mapping.get(s.ci);
+          if (main) {
+            const suffix = main.endsWith('.event') ? 'event' : main.endsWith('.dev') ? 'dev' : 'prod';
+            next = {
+              ...next,
+              ci: main,
+              catalog_namespace:
+                suffix === 'event' ? 'babylon-catalog-event'
+                  : suffix === 'dev' ? 'babylon-catalog-dev'
+                    : 'babylon-catalog-prod',
+            };
+          }
+          if (next.asset_cis) {
+            const assets = next.asset_cis.split(',').map((a) => a.trim()).filter(Boolean);
+            const rewritten = assets.map((a) => mapping.get(a) || a);
+            if (rewritten.some((a, i) => a !== assets[i])) {
+              next = { ...next, asset_cis: rewritten.join(',') };
+            }
+          }
+          return next;
+        });
+        setSchedules(updated);
+        await api.updateSchedules(updated);
+        setCatalogSuffixCorrections(autoSuffix.map((n) => ({
+          ci: n.ci,
+          corrected_ci: n.suggested_ci as string,
+          ci_name: n.ci_name,
+          message: n.message,
+        })));
+        await api.addOperatorOverride({
+          action: 'auto_ci_suffix_correct',
+          summary: `Auto-corrected ${autoSuffix.length} bare CI(s) to env suffix`,
+          detail: autoSuffix.map((n) => `${n.ci} → ${n.suggested_ci}`).join('; '),
+          affected_count: autoSuffix.length,
+          source: 'upload',
+        }).catch(() => {});
+        onOperatorOverrideRecorded?.();
+      } catch {
+        setCatalogNotFound(cnRes.not_found || []);
+        setCatalogSuffixCorrections([]);
+      }
+      setCatalogNotFound(stillMissing);
+    } else if (cnRes.not_found.length) {
+      setCatalogNotFound(cnRes.not_found);
+      setCatalogSuffixCorrections([]);
+    }
     if (pcRes.warnings?.length) setPoolCapacityWarnings(pcRes.warnings);
     if (pcRes.not_found?.length) setPoolsNotFound(pcRes.not_found);
     return { nsRes, nuRes, cnRes, pcRes };
-  }, []);
+  }, [onOperatorOverrideRecorded]);
 
   const handleValidate = async () => {
     if (schedules.length === 0) {
@@ -558,7 +620,9 @@ export const UploadTab: React.FC<Props> = ({
       const { nsRes, nuRes, cnRes, pcRes } = await refreshClusterValidation();
       const refs = await api.checkTenantClusterRefs(targetCluster);
       setMissingTenantRefs(refs);
-      if (cnRes.mismatches.length || cnRes.not_found.length || pcRes.not_found.length || pcRes.warnings.length) {
+      // Namespace mismatches + bare→.prod (no .event) are auto-corrected — only real ambiguity / pool issues need operator action.
+      const stillNeedCiPick = (cnRes.not_found || []).filter((n) => !n.suggested_ci).length;
+      if (stillNeedCiPick > 0 || pcRes.not_found.length || pcRes.warnings.length) {
         showToast('Prerequisite checks found issues on the selected target. Review the alerts below.', 'danger');
         return;
       }
@@ -1087,7 +1151,17 @@ export const UploadTab: React.FC<Props> = ({
         .filter((r: any) => !r.pool_exists && !r.has_cluster_row && r.direct_sandbox)
     : [];
   const catalogNotFoundUnique = uniqueByCi(catalogNotFound);
-  const catalogSuggestedCount = catalogNotFoundUnique.filter((n) => n.suggested_ci).length;
+  const catalogSuffixOpts = (n: import('../types').CatalogNotFoundItem) =>
+    (n.suffix_options && n.suffix_options.length > 0)
+      ? n.suffix_options
+      : (n.suggested_ci ? [n.suggested_ci] : []);
+  /** Remaining not-found that still have a published .prod (usually also .event → must pick). */
+  const catalogRemainingWithProd = catalogNotFoundUnique.filter((n) =>
+    catalogSuffixOpts(n).some((o) => o.endsWith('.prod')),
+  );
+  const catalogHasEventOpt = catalogNotFoundUnique.filter((n) =>
+    catalogSuffixOpts(n).some((o) => o.endsWith('.event')),
+  );
   const highUsersIssues = usersNotInCatalog.filter((a) => a.severity === 'high');
   const hasDeployRisks =
     catalogNotFoundUnique.length > 0 ||
@@ -1108,17 +1182,15 @@ export const UploadTab: React.FC<Props> = ({
     });
   };
 
-  const requestApplySuffixes = () => {
-    const n = catalogNotFoundUnique.filter((x) => x.suggested_ci).length;
-    if (n === 0) return;
+  const requestApplyEventWhereAvailable = () => {
+    if (catalogHasEventOpt.length === 0) return;
     setRiskConfirm({
-      kind: 'apply-suffix',
-      title: 'Apply env suffixes to CI names?',
-      body: `Rewrite ${n} bare CI name(s) to the only matching .prod / .event / .dev on the cluster. This diverges from Labagator until you fix the source.`,
-      bullets: catalogNotFoundUnique
-        .filter((x) => x.suggested_ci)
-        .slice(0, 8)
-        .map((x) => `${x.ci} → ${x.suggested_ci}`),
+      kind: 'apply-event',
+      title: 'Use .event where published?',
+      body:
+        `Rewrite ${catalogHasEventOpt.length} bare CI(s) to .event. ` +
+        `Only rows that have a published .event item are changed. Not Labagator.`,
+      bullets: catalogHasEventOpt.slice(0, 8).map((n) => `${n.ci} → ${n.ci}.event`),
     });
   };
 
@@ -1150,7 +1222,8 @@ export const UploadTab: React.FC<Props> = ({
     setRiskConfirm(null);
     if (!kind) return;
     if (kind === 'skip-missing') await skipMissingCatalogItems();
-    else if (kind === 'apply-suffix') await applySuggestedCatalogSuffixes();
+    else if (kind === 'apply-prod-no-event') await applySuffixChoice('prod', catalogRemainingWithProd);
+    else if (kind === 'apply-event') await applySuffixChoice('event', catalogHasEventOpt);
     else if (kind === 'users-to-instances') await applyUsersNotInCatalogFix('move-to-instances');
     else if (kind === 'clear-users') await applyUsersNotInCatalogFix('clear-users');
     else if (kind === 'cap-users') await capUsersToCatalogMax();
@@ -1236,17 +1309,15 @@ export const UploadTab: React.FC<Props> = ({
   };
 
   /**
-   * Apply only unambiguous env-suffix suggestions (exactly one of .prod/.event/.dev exists).
-   * Never guesses when both .prod and .event are published.
+   * Rewrite bare CI → chosen env-suffixed name. Operator-confirmed only.
    */
-  const applySuggestedCatalogSuffixes = async () => {
-    const mapping = new Map(
-      catalogNotFound
-        .filter((n) => n.suggested_ci && n.suggested_ci !== n.ci)
-        .map((n) => [n.ci, n.suggested_ci as string]),
-    );
+  const applyCiSuffixMapping = async (
+    mapping: Map<string, string>,
+    action: string,
+    summary: string,
+  ) => {
     if (mapping.size === 0) {
-      showToast('No unambiguous .prod/.event/.dev suggestions to apply', 'danger');
+      showToast('Nothing to apply', 'danger');
       return;
     }
     let n = 0;
@@ -1255,7 +1326,7 @@ export const UploadTab: React.FC<Props> = ({
       const main = mapping.get(s.ci);
       if (main) {
         n += 1;
-        const suffix = main.includes('.event') ? 'event' : main.includes('.dev') ? 'dev' : 'prod';
+        const suffix = main.endsWith('.event') ? 'event' : main.endsWith('.dev') ? 'dev' : 'prod';
         next = {
           ...next,
           ci: main,
@@ -1284,8 +1355,8 @@ export const UploadTab: React.FC<Props> = ({
     setCatalogNotFound([]);
     try { await api.updateSchedules(updated); } catch { /* non-fatal */ }
     await recordOperatorOverride({
-      action: 'apply_catalog_env_suffix',
-      summary: `Applied env suffix on ${mapping.size} CI(s) / ${n} row(s)`,
+      action,
+      summary,
       detail: [...mapping.entries()].map(([from, to]) => `${from} → ${to}`).join('; '),
       affected_count: n,
     });
@@ -1294,9 +1365,24 @@ export const UploadTab: React.FC<Props> = ({
       setCatalogNamespaceMismatches(cnRes.mismatches || []);
       setCatalogNotFound(cnRes.not_found || []);
     } catch { /* non-fatal */ }
-    showToast(
-      `Applied ${mapping.size} unambiguous CI suffix(es) locally (not Labagator)`,
-      'info',
+    showToast(`${summary} (local — not Labagator)`, 'info');
+  };
+
+  /** Apply .prod / .event / .dev on remaining not-found rows that have that suffix published. */
+  const applySuffixChoice = async (
+    suffix: 'prod' | 'event' | 'dev',
+    items: import('../types').CatalogNotFoundItem[],
+  ) => {
+    const mapping = new Map<string, string>();
+    for (const n of items) {
+      const opts = catalogSuffixOpts(n);
+      const hit = opts.find((o) => o.endsWith(`.${suffix}`));
+      if (hit) mapping.set(n.ci, hit);
+    }
+    await applyCiSuffixMapping(
+      mapping,
+      `apply_catalog_${suffix}_suffix`,
+      `Applied .${suffix} on ${mapping.size} CI(s)`,
     );
   };
 
@@ -2032,7 +2118,7 @@ export const UploadTab: React.FC<Props> = ({
             </Alert>
           )}
 
-          {/* Catalog namespace mismatches — auto-corrected at deploy time */}
+          {/* Catalog namespace mismatches — auto-corrected (CI exists, wrong NS column) */}
           {catalogNamespaceMismatches.length > 0 && (
             <Alert
               variant="info"
@@ -2040,6 +2126,10 @@ export const UploadTab: React.FC<Props> = ({
               title={`Catalog namespace auto-corrected for ${catalogNamespaceMismatches.length} item(s)`}
               style={{ marginBottom: 12 }}
             >
+              <div style={{ fontSize: '0.9rem', marginBottom: 8 }}>
+                These CIs already exist — the schedule pointed at the wrong catalog namespace (e.g. expected{' '}
+                <code>babylon-catalog-event</code>, live item is in <code>babylon-catalog-prod</code>). Not the same as a missing CI suffix.
+              </div>
               <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
                 {catalogNamespaceMismatches.slice(0, 5).map((m, i) => (
                   <li key={i}>
@@ -2051,57 +2141,105 @@ export const UploadTab: React.FC<Props> = ({
                 )}
               </ul>
               <div style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)' }}>
-                The catalog namespace column has been updated in the table above. Flow will deploy from the corrected namespace — no action needed.
+                Namespace column updated — no action needed.
               </div>
             </Alert>
           )}
 
-          {/* Catalog items not found — compact warning; expand for details */}
+          {/* CI suffix auto-correct (bare name → .prod when no .event, or only one suffix published) */}
+          {catalogSuffixCorrections.length > 0 && (
+            <Alert
+              variant="info"
+              isInline
+              title={`CI suffix auto-corrected for ${catalogSuffixCorrections.length} item(s)`}
+              style={{ marginBottom: 12 }}
+              actionLinks={
+                <Button variant="link" size="sm" onClick={() => setCatalogSuffixCorrections([])}>
+                  Dismiss
+                </Button>
+              }
+            >
+              <div style={{ fontSize: '0.9rem', marginBottom: 8 }}>
+                Schedule CI was bare (no <code>.prod</code> / <code>.event</code> / <code>.dev</code>).
+                No <code>.event</code> published → Flow auto-picked <code>.prod</code> (same idea as namespace auto-correct).
+              </div>
+              <ol style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
+                <li>
+                  <strong>Preferred:</strong> add <code>event.yaml</code> in agnosticv → publish{' '}
+                  <code>babylon-catalog-event/&lt;ci&gt;.event</code>
+                </li>
+                <li>
+                  <strong>Keep auto .prod</strong> (already applied)
+                </li>
+                <li>
+                  <strong>Fix Labagator</strong> so the master plan ships the correct CI suffix
+                </li>
+                <li>
+                  <strong>Skip</strong> items you do not want (use remaining-suffix alert if any)
+                </li>
+              </ol>
+              <ul style={{ margin: '0 0 0 20px', fontSize: '0.85rem' }}>
+                {catalogSuffixCorrections.slice(0, 8).map((c) => (
+                  <li key={c.ci}>
+                    <code>{c.ci}</code> → <code>{c.corrected_ci}</code>
+                  </li>
+                ))}
+                {catalogSuffixCorrections.length > 8 && (
+                  <li style={{ fontStyle: 'italic' }}>...and {catalogSuffixCorrections.length - 8} more</li>
+                )}
+              </ul>
+            </Alert>
+          )}
+
+          {/* Remaining: usually both .event and .prod published — must pick */}
           {catalogNotFoundUnique.length > 0 && (
             <Alert
               variant="warning"
               isInline
-              title={`${catalogNotFoundUnique.length} catalog item(s) missing under the exact CI name`}
+              title={`${catalogNotFoundUnique.length} catalog item(s) need a CI suffix choice`}
               style={{ marginBottom: 12 }}
               actionLinks={
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {catalogSuggestedCount > 0 && (
-                    <Tooltip content="Only when exactly one of .prod / .event / .dev exists. Never guesses if both exist.">
-                      <Button variant="secondary" size="sm" onClick={() => requestApplySuffixes()}>
-                        Apply unambiguous suffixes ({catalogSuggestedCount})
-                      </Button>
-                    </Tooltip>
+                  {catalogHasEventOpt.length > 0 && (
+                    <Button variant="secondary" size="sm" onClick={() => requestApplyEventWhereAvailable()}>
+                      Use .event ({catalogHasEventOpt.length})
+                    </Button>
+                  )}
+                  {catalogRemainingWithProd.length > 0 && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        setRiskConfirm({
+                          kind: 'apply-prod-no-event',
+                          title: 'Use .prod for these CIs?',
+                          body: `Rewrite ${catalogRemainingWithProd.length} bare CI(s) to .prod. For a big event prefer .event when published.`,
+                          bullets: catalogRemainingWithProd.slice(0, 8).map((n) => `${n.ci} → ${n.ci}.prod`),
+                        });
+                      }}
+                    >
+                      Use .prod ({catalogRemainingWithProd.length})
+                    </Button>
                   )}
                   <Button variant="primary" size="sm" onClick={() => requestSkipMissing()}>
-                    Skip missing &amp; keep deploying
-                  </Button>
-                  <Button
-                    variant="link"
-                    size="sm"
-                    onClick={async () => {
-                      try {
-                        const cnRes = await api.validateCatalogNamespaces();
-                        setCatalogNotFound(cnRes.not_found || []);
-                      } catch { /* ignore */ }
-                    }}
-                  >
-                    Re-check
+                    Skip these items
                   </Button>
                 </div>
               }
             >
-              <div style={{ fontSize: '0.9rem', marginBottom: 6 }}>
-                Often a missing <code>.prod</code> / <code>.event</code> on the CI name (namespace override alone is not enough).
-                {catalogSuggestedCount > 0
-                  ? ` ${catalogSuggestedCount} have an unambiguous suffix match.`
-                  : ' No single unambiguous suffix match for the rest — fix Labagator/CSV or skip.'}
+              <div style={{ fontSize: '0.9rem', marginBottom: 8 }}>
+                Different from namespace auto-correct: the <em>exact</em> CI name is not published.
+                When both <code>.event</code> and <code>.prod</code> exist, Flow will not guess — for a big event prefer{' '}
+                <code>.event</code>.
               </div>
-              <ul style={{ margin: '0 0 6px 20px', fontSize: '0.85rem' }}>
+              <ul style={{ margin: '0 0 0 20px', fontSize: '0.85rem' }}>
                 {catalogNotFoundUnique.slice(0, catalogNotFoundExpanded ? 50 : 5).map((nf) => (
                   <li key={nf.ci}>
                     <code>{nf.ci}</code>
-                    {nf.suggested_ci ? (
-                      <span style={{ color: 'var(--pf-v6-global--Color--200)' }}> → {nf.suggested_ci}</span>
+                    {catalogSuffixOpts(nf).length > 0 ? (
+                      <span style={{ color: 'var(--pf-v6-global--Color--200)' }}>
+                        {' '}— {catalogSuffixOpts(nf).map((o) => o.split('.').pop()).join(' / ')}
+                      </span>
                     ) : null}
                   </li>
                 ))}
@@ -2113,9 +2251,7 @@ export const UploadTab: React.FC<Props> = ({
                   size="sm"
                   onClick={() => setCatalogNotFoundExpanded((v) => !v)}
                 >
-                  {catalogNotFoundExpanded
-                    ? 'Show less'
-                    : `Show all ${catalogNotFoundUnique.length}…`}
+                  {catalogNotFoundExpanded ? 'Show less' : `Show all ${catalogNotFoundUnique.length}…`}
                 </Button>
               )}
             </Alert>
