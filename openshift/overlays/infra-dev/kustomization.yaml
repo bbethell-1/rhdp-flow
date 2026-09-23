@@ -54,3 +54,24 @@ patches:
       #     --from-literal=OPENSHIFT_TOKEN=<token> --dry-run=client -o yaml \
       #     | oc apply -f -
       # (Feature 2 / External Secrets Operator will manage this going forward.)
+
+  # Keep 1 replica (in-memory job/schedule state). Bump RAM/CPU for large event deploys.
+  - target:
+      kind: Deployment
+      name: rhdp-scheduler
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: 512Mi
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: 200m
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: 2Gi
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "1"
