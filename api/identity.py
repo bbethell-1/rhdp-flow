@@ -45,15 +45,20 @@ def get_user_email(request: Request) -> str | None:
 
 
 def is_picker_allowed(request: Request) -> bool:
-    """True if the requesting user may see/use the deploy-target picker."""
-    email = get_user_email(request)
-    if not email:
-        return False
+    """True if the requesting user may change deploy-target away from the default.
+
+    Labagator embeds often authenticate with the shared API key only (no
+    ``X-Forwarded-Email``). Those sessions still see the picker and default to
+    Events; leaving Events for infra01/integration/prod is allowed whenever
+    ``DEPLOY_PICKER_ALLOWED_EMAILS=*`` (the default). When a tighter email list
+    is configured, an OAuth email on that list is required to leave Events.
+    """
     allowed = _allowed_emails()
     if allowed is None:
+        # Wide open: any caller that passed API-key auth may use the picker.
         return True
-    return email in allowed
-
+    email = get_user_email(request)
+    return bool(email and email in allowed)
 
 def require_picker_access(request: Request, target_cluster: str | None = None) -> None:
     """Raise HTTP 403 unless the user may deploy to ``target_cluster``.
