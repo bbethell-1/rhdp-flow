@@ -35,7 +35,7 @@ import { generateServiceLinks } from '../utils/serviceLinks';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { AUTO_REFRESH_INTERVAL_MS, DEFAULT_PER_PAGE, RETRY_DELAY_MS } from '../constants';
 import { getStatusIndicator, STATUS_LABEL_TO_PF_COLOR } from '../utils/statusColors';
-import type { DeploymentResult } from '../types';
+import type { DeploymentResult, OperatorOverride } from '../types';
 
 interface ServiceLinkButtonProps {
   href?: string;
@@ -138,13 +138,24 @@ interface Props {
   setResults: (r: DeploymentResult[]) => void;
   showToast: (msg: string, variant: 'success' | 'danger' | 'info') => void;
   deployLogFile?: string | null;
+  operatorOverrides?: OperatorOverride[];
+  onOverridesChange?: (overrides: OperatorOverride[]) => void;
+  viewingSession?: boolean;
 }
 
 type StatusFilter = 'all' | 'verified' | 'unverified' | 'failed';
 
 type SortableColumn = 'ci_name' | 'ci' | 'namespace' | 'status' | 'timestamp';
 
-export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast, deployLogFile }) => {
+export const DeploymentsTab: React.FC<Props> = ({
+  results,
+  setResults,
+  showToast,
+  deployLogFile,
+  operatorOverrides = [],
+  onOverridesChange,
+  viewingSession = false,
+}) => {
   const [searchText, setSearchText] = useState(() => sessionStorage.getItem('rhdp-deploy-search') || '');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => (sessionStorage.getItem('rhdp-deploy-filter') as StatusFilter) || 'all');
   const [autoRefresh, setAutoRefresh] = useState(false);
@@ -156,6 +167,7 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
   const [retrying, setRetrying] = useState(false);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [overridesExpanded, setOverridesExpanded] = useState(false);
 
   // Persist search and filter to sessionStorage
   useEffect(() => { sessionStorage.setItem('rhdp-deploy-search', searchText); }, [searchText]);
@@ -175,6 +187,14 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
   useEffect(() => {
     refreshResults();
   }, [refreshResults]);
+
+  // Refresh operator override audit (current session only — archived sessions pass props).
+  useEffect(() => {
+    if (viewingSession || !onOverridesChange) return;
+    api.getOperatorOverrides()
+      .then((list) => onOverridesChange(Array.isArray(list) ? list : []))
+      .catch(() => {});
+  }, [viewingSession, onOverridesChange, results.length]);
 
   // Summary counts
   const statusCounts = useMemo(() => {
@@ -339,6 +359,62 @@ export const DeploymentsTab: React.FC<Props> = ({ results, setResults, showToast
 
   return (
     <PageSection>
+      {operatorOverrides.length > 0 && (
+        <Alert
+          variant="warning"
+          isInline
+          title={`${operatorOverrides.length} operator override(s) this session — Labagator was not the sole source of truth`}
+          style={{ marginBottom: 16 }}
+          actionLinks={
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Button variant="link" size="sm" onClick={() => setOverridesExpanded((v) => !v)}>
+                {overridesExpanded ? 'Hide details' : 'Show details'}
+              </Button>
+              {!viewingSession && (
+                <Button
+                  variant="link"
+                  size="sm"
+                  onClick={async () => {
+                    try {
+                      await api.clearOperatorOverrides();
+                      onOverridesChange?.([]);
+                      showToast('Cleared override audit list (schedules unchanged)', 'info');
+                    } catch (e) {
+                      showToast(`Clear overrides failed: ${e}`, 'danger');
+                    }
+                  }}
+                >
+                  Clear audit list
+                </Button>
+              )}
+            </div>
+          }
+        >
+          <div style={{ fontSize: '0.9rem', marginBottom: overridesExpanded ? 8 : 0 }}>
+            These were local Flow tweaks the operator accepted (Users→Instances, skip missing CIs, −4h, etc.).
+            If a deploy looks wrong vs Labagator, check this list and the deploy log first — do not blame Flow defaults.
+          </div>
+          {overridesExpanded && (
+            <ul style={{ margin: '0 0 0 20px', fontSize: '0.85rem' }}>
+              {operatorOverrides.map((o, i) => (
+                <li key={`${o.timestamp}-${o.action}-${i}`}>
+                  <strong>{o.action}</strong>
+                  {o.timestamp ? (
+                    <span style={{ color: 'var(--pf-v6-global--Color--200)' }}> · {o.timestamp}</span>
+                  ) : null}
+                  {' — '}
+                  {o.summary}
+                  {o.affected_count > 0 ? ` (${o.affected_count} row(s))` : ''}
+                  {o.detail ? (
+                    <div style={{ color: 'var(--pf-v6-global--Color--200)', fontSize: '0.8rem' }}>{o.detail}</div>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Alert>
+      )}
+
       {/* Summary cards */}
       {results.length > 0 && (
         <Flex style={{ marginBottom: 16 }} gap={{ default: 'gapMd' }}>

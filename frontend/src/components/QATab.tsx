@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   Alert,
   Button,
@@ -24,7 +24,7 @@ import {
 import SearchIcon from '@patternfly/react-icons/dist/esm/icons/search-icon';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
-import { api } from '../services/api';
+import { api, getSelectedTarget } from '../services/api';
 import { AUTO_REFRESH_INTERVAL_MS, DEFAULT_PER_PAGE } from '../constants';
 import type { QAResult } from '../types';
 import { QAResultsTable } from './QAResultsTable';
@@ -54,6 +54,13 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [qaSearch, setQaSearch] = useState('');
   const [qaStatusFilter, setQaStatusFilter] = useState<QAStatusFilter>('all');
+  const [targetCluster, setTargetCluster] = useState(() => getSelectedTarget());
+
+  useEffect(() => {
+    const sync = () => setTargetCluster(getSelectedTarget());
+    window.addEventListener('rhdp-target-change', sync);
+    return () => window.removeEventListener('rhdp-target-change', sync);
+  }, []);
 
   const refreshQA = useCallback(async () => {
     try {
@@ -198,6 +205,13 @@ export const QATab: React.FC<Props> = ({ qaResults, setQAResults, showToast }) =
         Run QA checks after deploying workshops to verify they were created correctly and are healthy.
         <strong> QA1</strong> should be run immediately after deployment to confirm configuration.
         <strong> QA2</strong> should be run once workshops have had time to provision (typically 10-30 min) to verify health and collect student landing page URLs.
+        {' '}
+        QA uses the same deploy target as Upload &amp; Deploy
+        {targetCluster ? (
+          <> (<code>{targetCluster}</code>) — no separate cluster picker here.</>
+        ) : (
+          <> ( whichever cluster you selected on Upload &amp; Deploy) — no separate picker here.</>
+        )}
       </Alert>
 
       {/* QA type selector + run controls */}

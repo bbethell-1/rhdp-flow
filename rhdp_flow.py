@@ -1315,12 +1315,11 @@ def dry_run_validate_schedules(
     for schedule in schedules:
         # Validate catalog item exists in expected namespace
         expected_ns = get_catalog_namespace(schedule.ci, schedule.catalog_namespace)
-        exists, found_ns, suggestion = validate_catalog_item_exists(schedule.ci, expected_ns, config)
-        if not exists:
-            if found_ns:
-                logger.error(f"  ❌ {schedule.ci_name}: {suggestion}")
-            else:
-                logger.error(f"  ❌ {schedule.ci_name}: {suggestion}")
+        exists, found_ns, suggestion, suggested_ci = validate_catalog_item_exists(schedule.ci, expected_ns, config)
+        if suggested_ci:
+            logger.warning(f"  ⚠️  {schedule.ci_name}: {suggestion}")
+        elif not exists:
+            logger.error(f"  ❌ {schedule.ci_name}: {suggestion}")
         elif found_ns == expected_ns:
             logger.info(f"  ✓ {schedule.ci_name}: Catalog item exists in {expected_ns}")
 
@@ -2827,20 +2826,20 @@ _catalog_exists_cache: dict[str, tuple[float, tuple]] = {}
 _CATALOG_CACHE_TTL = 300  # 5 minutes — catalog items don't change often
 
 
-def validate_catalog_item_exists(ci: str, expected_namespace: str, config: RHDPConfig) -> tuple[bool, str | None, str | None]:
+def validate_catalog_item_exists(
+    ci: str, expected_namespace: str, config: RHDPConfig
+) -> tuple[bool, str | None, str | None, str | None]:
     """
     Validate that a catalog item exists in the expected namespace.
 
-    Args:
-        ci: Catalog Item ID (e.g., "summit-2026.lb1234.event")
-        expected_namespace: Expected catalog namespace (e.g., "babylon-catalog-event")
-        config: RHDPConfig object
-
     Returns:
-        Tuple of (exists: bool, found_namespace: Optional[str], suggestion: Optional[str])
-        - exists: True if found in expected namespace
-        - found_namespace: Namespace where item was found (if different from expected)
-        - suggestion: Error message with suggestion if not found in expected namespace
+        (exists, found_namespace, suggestion, suggested_ci)
+        - exists: True if found under the exact ``ci`` name in expected_namespace
+        - found_namespace: namespace where the exact ``ci`` was found (same or other)
+        - suggestion: human-readable hint when not an exact expected hit
+        - suggested_ci: only set when exactly one env-suffix alternate exists
+          (e.g. bare → ``.prod`` OR bare → ``.event``). Never set when both
+          exist — operator must choose. Never auto-rewrites schedules.
     """
     import time as _time
     cache_key = f"{ci}::{expected_namespace}::{config.kubeconfig_path or ''}"
@@ -2852,36 +2851,75 @@ def validate_catalog_item_exists(ci: str, expected_namespace: str, config: RHDPC
     if config.kubeconfig_path:
         env["KUBECONFIG"] = config.kubeconfig_path
 
-    # Try expected namespace first
     def _cache_and_return(val: tuple) -> tuple:
         _catalog_exists_cache[cache_key] = (_time.monotonic(), val)
         return val
 
-    try:
-        cmd = [config.oc_command, "get", "catalogitem", ci, "-n", expected_namespace, "-o", "json"]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)
-        if result.returncode == 0:
-            return _cache_and_return((True, expected_namespace, None))
-    except Exception:
-        pass
+    def _oc_get(name: str, ns: str) -> bool:
+        try:
+            cmd = [config.oc_command, "get", "catalogitem", name, "-n", ns, "-o", "name"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)
+            return result.returncode == 0
+        except Exception:
+            return False
 
-    # Not found in expected namespace - check other namespaces
+    # Exact name in expected namespace
+    if _oc_get(ci, expected_namespace):
+        return _cache_and_return((True, expected_namespace, None, None))
+
+    # Exact name in other catalog namespaces (same CI string — namespace redirect only)
     for ns in ("babylon-catalog-event", "babylon-catalog-prod", "babylon-catalog-dev"):
         if ns == expected_namespace:
-            continue  # Already tried this one
-        try:
-            cmd = [config.oc_command, "get", "catalogitem", ci, "-n", ns, "-o", "json"]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)
-            if result.returncode == 0:
-                suggestion = (
-                    f"Expected in {expected_namespace}, found in {ns}. "
-                    f"Will deploy from {ns} (where item actually exists)."
-                )
-                return _cache_and_return((False, ns, suggestion))
-        except Exception:
             continue
+        if _oc_get(ci, ns):
+            suggestion = (
+                f"Expected in {expected_namespace}, found in {ns}. "
+                f"Will deploy from {ns} (where item actually exists)."
+            )
+            return _cache_and_return((False, ns, suggestion, None))
 
-    # Not found anywhere - try fuzzy matching to suggest similar items
+    # Bare CI (no .prod/.event/.dev): collect ALL suffix hits — do not prefer .prod.
+    # If only one exists, surface it as suggested_ci (operator must apply).
+    # If several exist, list them and leave suggested_ci unset.
+    has_env_suffix = ci.endswith((".prod", ".event", ".dev"))
+    if not has_env_suffix:
+        suffix_hits: list[tuple[str, str]] = []  # (alt_ci, namespace)
+        seen_alts: set[str] = set()
+        for suffix, ns in (
+            (".event", "babylon-catalog-event"),
+            (".prod", "babylon-catalog-prod"),
+            (".dev", "babylon-catalog-dev"),
+        ):
+            alt = f"{ci}{suffix}"
+            if alt in seen_alts:
+                continue
+            # Check the suffix's natural namespace first, then expected_namespace
+            for try_ns in dict.fromkeys([ns, expected_namespace]):
+                if try_ns and _oc_get(alt, try_ns):
+                    suffix_hits.append((alt, try_ns))
+                    seen_alts.add(alt)
+                    break
+
+        if len(suffix_hits) == 1:
+            alt, try_ns = suffix_hits[0]
+            suggestion = (
+                f"Item '{ci}' not published; found '{alt}' in {try_ns}. "
+                f"Apply the {alt.rsplit('.', 1)[-1]} suffix if that is the intended catalog item "
+                f"(not auto-applied — Labagator may have omitted the env suffix)."
+            )
+            # found_namespace stays None so this stays a not-found / suggest path,
+            # not a silent namespace redirect.
+            return _cache_and_return((False, None, suggestion, alt))
+
+        if len(suffix_hits) > 1:
+            options = ", ".join(f"'{a}' ({n})" for a, n in suffix_hits)
+            suggestion = (
+                f"Item '{ci}' not published, but multiple env-suffixed items exist: {options}. "
+                f"Pick .event / .prod / .dev explicitly — Flow will not guess."
+            )
+            return _cache_and_return((False, None, suggestion, None))
+
+    # Fuzzy suggestions (never returned as suggested_ci — too risky to auto-apply)
     similar = find_similar_catalog_items(ci, expected_namespace, config, limit=3)
     if similar:
         suggestions_text = ", ".join(f"'{s}'" for s in similar)
@@ -2899,7 +2937,7 @@ def validate_catalog_item_exists(ci: str, expected_namespace: str, config: RHDPC
             f"Check the CI name — many items need a .prod or .event suffix."
         )
 
-    return _cache_and_return((False, None, suggestion))
+    return _cache_and_return((False, None, suggestion, None))
 
 
 def get_catalog_item_info(ci: str, config: RHDPConfig) -> dict[str, str]:
@@ -4850,7 +4888,7 @@ def qa3_verify_catalog_items_exist(
 
     for idx, (ci, schedule) in enumerate(ci_map.items(), 1):
         expected_ns = get_catalog_namespace(ci, schedule.catalog_namespace)
-        exists, found_ns, suggestion = validate_catalog_item_exists(ci, expected_ns, config)
+        exists, found_ns, suggestion, suggested_ci = validate_catalog_item_exists(ci, expected_ns, config)
 
         if exists:
             status = "✅ OK"
@@ -4863,6 +4901,12 @@ def qa3_verify_catalog_items_exist(
             status = "⚠️ WRONG NAMESPACE"
             exists_str = "No"
             issues = suggestion or f"Found in {found_ns} instead of {expected_ns}"
+            not_found_count += 1
+            logger.warning(f"[{idx}/{total}] ⚠️ {ci} - {issues}")
+        elif suggested_ci:
+            status = "⚠️ MISSING SUFFIX?"
+            exists_str = "No"
+            issues = suggestion or f"Did you mean '{suggested_ci}'?"
             not_found_count += 1
             logger.warning(f"[{idx}/{total}] ⚠️ {ci} - {issues}")
         else:

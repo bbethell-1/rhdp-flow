@@ -62,7 +62,7 @@ export const SessionHistory: React.FC<Props> = ({ onView, onBack, viewingSession
               <FormSelectOption
                 key={s.session_id}
                 value={s.session_id}
-                label={`#${s.session_id} ${s.filename} (${s.schedule_count} sched, ${s.result_count} results)`}
+                label={`#${s.session_id} ${s.filename} (${s.schedule_count} sched, ${s.result_count} results${s.override_count ? `, ${s.override_count} override${s.override_count === 1 ? '' : 's'}` : ''})`}
               />
             ))}
           </FormSelect>
