@@ -13,14 +13,8 @@ import {
   Button,
 } from '@patternfly/react-core';
 import TimesIcon from '@patternfly/react-icons/dist/esm/icons/times-icon';
-
-interface CatalogItem {
-  id: string;
-  display_name: string;
-  catalog_namespace: string;
-  description?: string;
-  category?: string;
-}
+import { api } from '../services/api';
+import type { CatalogItemEntry } from '../types';
 
 interface CatalogItemSelectProps {
   value: string;
@@ -28,12 +22,36 @@ interface CatalogItemSelectProps {
   label?: string;
   isRequired?: boolean;
   helperText?: string;
-  filterNamespace?: string; // e.g., "babylon-catalog-event"
+  /** Prefer items in this namespace (sorted first); still shows other namespaces. */
+  filterNamespace?: string;
+}
+
+/** One shared fetch for all row dropdowns — avoids rate-limit storms (30/min). */
+let _sharedItems: CatalogItemEntry[] | null = null;
+let _sharedPromise: Promise<CatalogItemEntry[]> | null = null;
+let _sharedError: string | null = null;
+
+function loadCatalogItemsShared(): Promise<CatalogItemEntry[]> {
+  if (_sharedItems) return Promise.resolve(_sharedItems);
+  if (_sharedPromise) return _sharedPromise;
+  _sharedError = null;
+  _sharedPromise = api
+    .listCatalogItems()
+    .then((data) => {
+      _sharedItems = Array.isArray(data) ? data : [];
+      return _sharedItems;
+    })
+    .catch((err: unknown) => {
+      _sharedError = err instanceof Error ? err.message : 'Failed to load catalog items';
+      _sharedPromise = null;
+      throw err;
+    });
+  return _sharedPromise;
 }
 
 /**
  * Dropdown/typeahead for selecting Babylon catalog items.
- * Fetches from /api/catalog/items and provides fuzzy search.
+ * Fetches from /api/catalog/items once (shared) and provides fuzzy search.
  */
 export function CatalogItemSelect({
   value,
@@ -45,51 +63,96 @@ export function CatalogItemSelect({
 }: CatalogItemSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchValue, setSearchValue] = useState('');
-  const [items, setItems] = useState<CatalogItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<CatalogItemEntry[]>(_sharedItems || []);
+  const [loading, setLoading] = useState(!_sharedItems);
+  const [error, setError] = useState<string | null>(_sharedError);
 
   useEffect(() => {
-    const loadItems = async () => {
-      try {
-        const response = await fetch('/api/catalog/items');
-        const data = await response.json();
-        setItems(data || []);
-      } catch (error) {
-        console.error('Failed to load catalog items:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadItems();
+    let cancelled = false;
+    if (_sharedItems) {
+      setItems(_sharedItems);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    loadCatalogItemsShared()
+      .then((data) => {
+        if (!cancelled) {
+          setItems(data);
+          setError(null);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load catalog items');
+          setItems([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
   }, []);
 
-  // Filter items by namespace and search text
+  // Prefer matching namespace first; never hide other NS (bare/.prod often live in prod while row says event).
   const filteredItems = useMemo(() => {
     let filtered = items;
 
-    // Filter by namespace if specified
-    if (filterNamespace) {
-      filtered = filtered.filter((item) => item.catalog_namespace === filterNamespace);
-    }
-
-    // Filter by search text (fuzzy match on id and display_name)
     if (searchValue.trim()) {
       const search = searchValue.toLowerCase();
       filtered = filtered.filter(
         (item) =>
           item.id.toLowerCase().includes(search) ||
-          item.display_name.toLowerCase().includes(search)
+          item.display_name.toLowerCase().includes(search),
       );
     }
 
-    return filtered.slice(0, 100); // Limit to 100 results for performance
+    if (filterNamespace) {
+      filtered = [...filtered].sort((a, b) => {
+        const aMatch = a.catalog_namespace === filterNamespace ? 0 : 1;
+        const bMatch = b.catalog_namespace === filterNamespace ? 0 : 1;
+        if (aMatch !== bMatch) return aMatch - bMatch;
+        return a.id.localeCompare(b.id);
+      });
+    }
+
+    return filtered.slice(0, 100);
   }, [items, filterNamespace, searchValue]);
 
   if (loading) {
     return (
       <FormGroup label={label} isRequired={isRequired}>
         <Spinner size="md" />
+      </FormGroup>
+    );
+  }
+
+  if (error) {
+    return (
+      <FormGroup label={label} isRequired={isRequired}>
+        <div style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--danger-color--100)' }}>
+          Catalog lookup failed: {error}
+        </div>
+        <Button
+          variant="link"
+          isInline
+          size="sm"
+          onClick={() => {
+            _sharedItems = null;
+            _sharedPromise = null;
+            _sharedError = null;
+            setLoading(true);
+            setError(null);
+            loadCatalogItemsShared()
+              .then((data) => { setItems(data); setError(null); })
+              .catch((err: unknown) => {
+                setError(err instanceof Error ? err.message : 'Failed to load catalog items');
+              })
+              .finally(() => setLoading(false));
+          }}
+        >
+          Retry
+        </Button>
       </FormGroup>
     );
   }
@@ -129,7 +192,7 @@ export function CatalogItemSelect({
     <FormGroup label={label} isRequired={isRequired} fieldId="catalog-select">
       <Select
         isOpen={isOpen}
-        onOpenChange={(isOpen) => setIsOpen(isOpen)}
+        onOpenChange={(open) => setIsOpen(open)}
         onSelect={(_event, itemId) => {
           if (typeof itemId === 'string') {
             onChange(itemId);
@@ -143,7 +206,7 @@ export function CatalogItemSelect({
         <SelectList id="select-typeahead-listbox">
           {filteredItems.length > 0 ? (
             filteredItems.map((item) => (
-              <SelectOption key={item.id} value={item.id} description={`${item.catalog_namespace} — ${item.display_name}`}>
+              <SelectOption key={`${item.catalog_namespace}/${item.id}`} value={item.id} description={`${item.catalog_namespace} — ${item.display_name}`}>
                 {item.id}
               </SelectOption>
             ))
