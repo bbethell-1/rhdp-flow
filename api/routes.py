@@ -56,6 +56,8 @@ from api.models import (
     LabagatorEventSummary,
     LabagatorImportRequest,
     LabagatorPreviewResponse,
+    LabagatorSessionsResponse,
+    LabagatorSessionSummary,
     LockRequest,
     NumUsersValidationResponse,
     NumUsersViolation,
@@ -946,11 +948,33 @@ def list_all_pools(request: Request, config=Depends(_request_config)):
 # Schedules
 # ---------------------------------------------------------------------------
 
+def _parse_csv_int_list(raw: str | None) -> list[int] | None:
+    """Parse a comma-separated int list; None/blank -> None. Bad tokens skipped."""
+    if raw is None or not raw.strip():
+        return None
+    out: list[int] = []
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            out.append(int(token))
+        except ValueError:
+            continue
+    return out
+
+
 @router.get("/labagator/events", response_model=LabagatorEventsResponse)
-def list_labagator_events():
-    """List Labagator events happening in the next 7 days, soonest first."""
+def list_labagator_events(days: int | None = 7):
+    """List upcoming Labagator events, soonest first.
+
+    ``days`` bounds the look-ahead window (default 7 = "this week"). Pass a larger
+    value (e.g. 30, 90) to widen it, or ``days=0`` for all upcoming events.
+    """
+    # days=0 from the UI's "All upcoming" option means no upper bound.
+    window = None if not days else days
     try:
-        events = labagator_client.list_events()
+        events = labagator_client.list_events(days=window)
     except labagator_client.LabagatorError:
         return LabagatorEventsResponse(events=[], error="labagator_unreachable")
 
@@ -969,6 +993,29 @@ def list_labagator_events():
         return LabagatorEventsResponse(events=[], error="labagator_unreachable")
 
 
+@router.get("/schedules/labagator-sessions", response_model=LabagatorSessionsResponse)
+def list_labagator_sessions(event_id: int, event_name: str = "", filter_date: str | None = None):
+    """List an event's Flow-eligible room sessions for the import picker."""
+    try:
+        sessions = labagator_client.list_flow_sessions(event_id, filter_date=filter_date)
+    except labagator_client.LabagatorError:
+        return LabagatorSessionsResponse(
+            event_id=event_id, event_name=event_name, sessions=[], error="labagator_unreachable"
+        )
+
+    try:
+        return LabagatorSessionsResponse(
+            event_id=event_id,
+            event_name=event_name,
+            sessions=[LabagatorSessionSummary(**s) for s in sessions],
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        logger.warning("Labagator returned malformed session data: %s", exc)
+        return LabagatorSessionsResponse(
+            event_id=event_id, event_name=event_name, sessions=[], error="labagator_unreachable"
+        )
+
+
 @router.get("/schedules/labagator-preview", response_model=LabagatorPreviewResponse)
 def labagator_preview(
     event_id: int,
@@ -979,9 +1026,16 @@ def labagator_preview(
     white_glove: bool = True,
     auto_stop_days: int = 7,
     auto_destroy_days: int = 14,
+    room_session_ids: str | None = None,
 ):
-    """Fetch the Flow-format CSV for a Labagator event without ingesting it."""
+    """Fetch the Flow-format CSV for a Labagator event without ingesting it.
+
+    When ``room_session_ids`` (comma-separated) is supplied, only those room
+    sessions are included — the session-picker path. Omit it to preview the
+    whole event.
+    """
     _validate_namespace(namespace)
+    selected_ids = _parse_csv_int_list(room_session_ids)
     try:
         csv_text = labagator_client.get_deploy_handoff_csv(
             event_id=event_id,
@@ -991,6 +1045,7 @@ def labagator_preview(
             white_glove=white_glove,
             auto_stop_days=auto_stop_days,
             auto_destroy_days=auto_destroy_days,
+            room_session_ids=selected_ids,
         )
     except labagator_client.LabagatorError as e:
         raise HTTPException(502, str(e))

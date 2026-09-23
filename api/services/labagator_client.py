@@ -25,10 +25,15 @@ class LabagatorError(Exception):
     """Raised when Labagator is unreachable or returns an error response."""
 
 
-def list_events(today: date | None = None) -> list[dict]:
-    """Return Labagator events whose date range overlaps the next 7 days, soonest first."""
+def list_events(today: date | None = None, days: int | None = 7) -> list[dict]:
+    """Return upcoming Labagator events, soonest first.
+
+    ``days`` bounds how far ahead to look: an event is included when its date
+    range overlaps ``[today, today + days]``. Pass ``days=None`` to return all
+    upcoming events with no upper bound (still excludes events already ended).
+    """
     today = today or datetime.now(tz=UTC).date()
-    window_end = today + timedelta(days=7)
+    window_end = today + timedelta(days=days) if days is not None else None
     try:
         resp = requests.get(f"{LABAGATOR_BASE_URL}{_API_PREFIX}/events/", timeout=_TIMEOUT_SECONDS)
     except requests.RequestException as e:
@@ -41,10 +46,28 @@ def list_events(today: date | None = None) -> list[dict]:
     for event in events:
         start = _parse_date(event["start_date"])
         end = _parse_date(event["end_date"])
-        if start <= window_end and end >= today:
-            in_window.append(event)
+        if end < today:
+            continue
+        if window_end is not None and start > window_end:
+            continue
+        in_window.append(event)
     in_window.sort(key=lambda e: e["start_date"])
     return in_window
+
+
+def list_flow_sessions(event_id: int, filter_date: str | None = None) -> list[dict]:
+    """Return one selectable summary per Flow-eligible room session for an event."""
+    url = f"{LABAGATOR_BASE_URL}{_API_PREFIX}/exports/deploy-handoff/{event_id}/flow-sessions"
+    params = {}
+    if filter_date:
+        params["filter_date"] = filter_date
+    try:
+        resp = requests.get(url, params=params, timeout=_TIMEOUT_SECONDS)
+    except requests.RequestException as e:
+        raise LabagatorError(f"Labagator unreachable: {e}") from e
+    if resp.status_code != 200:
+        raise LabagatorError(f"Labagator returned {resp.status_code}: {resp.text[:200]}")
+    return resp.json().get("sessions", [])
 
 
 def get_deploy_handoff_csv(
@@ -55,8 +78,13 @@ def get_deploy_handoff_csv(
     white_glove: bool,
     auto_stop_days: int,
     auto_destroy_days: int,
+    room_session_ids: list[int] | None = None,
 ) -> str:
-    """Fetch the Flow-format CSV for one event's sessions from Labagator."""
+    """Fetch the Flow-format CSV for one event's sessions from Labagator.
+
+    When ``room_session_ids`` is provided, only those room sessions are exported
+    (the session-picker path); otherwise the whole event is exported.
+    """
     url = f"{LABAGATOR_BASE_URL}{_API_PREFIX}/exports/deploy-handoff/{event_id}/flow-csv"
     params = {
         "namespace": namespace,
@@ -66,6 +94,8 @@ def get_deploy_handoff_csv(
         "auto_stop_days": auto_stop_days,
         "auto_destroy_days": auto_destroy_days,
     }
+    if room_session_ids:
+        params["room_session_ids"] = ",".join(str(i) for i in room_session_ids)
     try:
         resp = requests.get(url, params=params, timeout=_TIMEOUT_SECONDS)
     except requests.RequestException as e:

@@ -75,6 +75,23 @@ export interface LabagatorPreviewResponse {
   csv_text: string;
 }
 
+export interface LabagatorSessionSummary {
+  room_session_id: number;
+  date: string;
+  title: string;
+  ci_name: string;
+  deploy_on: string;
+  users: string;
+  item_type: string;
+}
+
+export interface LabagatorSessionsResponse {
+  event_id: number;
+  event_name: string;
+  sessions: LabagatorSessionSummary[];
+  error: string | null;
+}
+
 /** Built-in example schedule (GET /api/schedules/examples). */
 export interface ScheduleExampleMeta {
   slug: string;

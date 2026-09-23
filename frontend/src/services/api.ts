@@ -27,6 +27,7 @@ import type {
   PoolLookupResponse,
   LabagatorEventsResponse,
   LabagatorPreviewResponse,
+  LabagatorSessionsResponse,
   ClusterListResponse,
 } from '../types';
 
@@ -143,7 +144,21 @@ export const api = {
     if (!res.ok || res.headers?.get('content-type')?.includes('text/html')) throw await responseError(res);
     return res.json();
   },
-  listLabagatorEvents: () => cachedRequest<LabagatorEventsResponse>('/labagator/events'),
+  /** List upcoming Labagator events. `days` bounds the look-ahead window (0 = all upcoming). */
+  listLabagatorEvents: (days = 7) =>
+    request<LabagatorEventsResponse>(`/labagator/events?days=${days}`),
+
+  /** List a Labagator event's Flow-eligible room sessions for the import picker. */
+  listLabagatorSessions: (params: {
+    event_id: number;
+    event_name?: string;
+    filter_date?: string;
+  }): Promise<LabagatorSessionsResponse> => {
+    const qs = new URLSearchParams({ event_id: String(params.event_id) });
+    if (params.event_name) qs.set('event_name', params.event_name);
+    if (params.filter_date) qs.set('filter_date', params.filter_date);
+    return request<LabagatorSessionsResponse>(`/schedules/labagator-sessions?${qs.toString()}`);
+  },
 
   previewLabagatorImport: (params: {
     event_id: number;
@@ -154,6 +169,7 @@ export const api = {
     white_glove: boolean;
     auto_stop_days: number;
     auto_destroy_days: number;
+    room_session_ids?: number[];
   }): Promise<LabagatorPreviewResponse> => {
     const qs = new URLSearchParams({
       event_id: String(params.event_id),
@@ -165,6 +181,9 @@ export const api = {
       auto_stop_days: String(params.auto_stop_days),
       auto_destroy_days: String(params.auto_destroy_days),
     });
+    if (params.room_session_ids && params.room_session_ids.length > 0) {
+      qs.set('room_session_ids', params.room_session_ids.join(','));
+    }
     return request<LabagatorPreviewResponse>(`/schedules/labagator-preview?${qs.toString()}`);
   },
 
