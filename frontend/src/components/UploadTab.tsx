@@ -1183,6 +1183,19 @@ export const UploadTab: React.FC<Props> = ({
                   </Button>
                 </SplitItem>
               </Split>
+              {!labagatorEventsLoading && labagatorEvents.length === 0 && (
+                <Alert
+                  variant="info"
+                  isInline
+                  title="No Labagator events returned for this window"
+                  style={{ marginBottom: 12 }}
+                >
+                  Prefer Labagator → Deploy Handoff → <strong>Review &amp; Deploy in Flow</strong> for
+                  session-selected deploys. This import lists upcoming events from Labagator&apos;s API —
+                  widen the look-ahead, or check Flow&apos;s <code>LABAGATOR_BASE_URL</code> points at the
+                  right instance.
+                </Alert>
+              )}
               {labagatorNamespaceError && (
                 <Alert variant="danger" isInline title={labagatorNamespaceError} style={{ marginBottom: 12 }} />
               )}

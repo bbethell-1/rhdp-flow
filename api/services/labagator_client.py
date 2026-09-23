@@ -31,17 +31,28 @@ def list_events(today: date | None = None, days: int | None = 7) -> list[dict]:
     ``days`` bounds how far ahead to look: an event is included when its date
     range overlaps ``[today, today + days]``. Pass ``days=None`` to return all
     upcoming events with no upper bound (still excludes events already ended).
+
+    Asks Labagator for ``upcoming=true`` so we are not capped to the first 50
+    events by primary key (which are often historical and filter to nothing).
     """
     today = today or datetime.now(tz=UTC).date()
     window_end = today + timedelta(days=days) if days is not None else None
+    # Pull a wide upcoming page; Labagator filters end_date >= today server-side.
+    params = {"upcoming": "true", "limit": 500}
     try:
-        resp = requests.get(f"{LABAGATOR_BASE_URL}{_API_PREFIX}/events/", timeout=_TIMEOUT_SECONDS)
+        resp = requests.get(
+            f"{LABAGATOR_BASE_URL}{_API_PREFIX}/events/",
+            params=params,
+            timeout=_TIMEOUT_SECONDS,
+        )
     except requests.RequestException as e:
         raise LabagatorError(f"Labagator unreachable: {e}") from e
     if resp.status_code != 200:
         raise LabagatorError(f"Labagator returned {resp.status_code} listing events")
 
     events = resp.json()
+    if not isinstance(events, list):
+        raise LabagatorError("Labagator returned unexpected events payload")
     in_window = []
     for event in events:
         start = _parse_date(event["start_date"])
