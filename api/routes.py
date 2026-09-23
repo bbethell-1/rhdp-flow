@@ -28,7 +28,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from api import cluster_targets, identity, jobs
 from api.limiter import limiter as _route_limiter
 from api.log_capture import get_log_dir, start_log_capture, stop_log_capture
-from lib.deploy_pace import deploy_pace_seconds
 from api.models import (
     CatalogItemEntry,
     CatalogItemParameter,
@@ -83,6 +82,7 @@ from api.models import (
 )
 from api.services import labagator_client
 from api.services.labagator_import import transform_labagator_to_flow
+from lib.deploy_pace import deploy_pace_seconds
 from rhdp_flow import (
     DeploymentResult,
     RHDPConfig,
