@@ -77,6 +77,26 @@ function shiftScheduleDate(dateStr: string, hours: number): string {
   return `${pad(d.getUTCDate())}/${pad(d.getUTCMonth() + 1)}/${d.getUTCFullYear()} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 }
 
+/** First schedule row per catalog item — avoids duplicate CI lines in tenant alerts. */
+function uniqueByCi<T extends { ci: string }>(refs: T[]): T[] {
+  const seen = new Set<string>();
+  return refs.filter((r) => {
+    if (seen.has(r.ci)) return false;
+    seen.add(r.ci);
+    return true;
+  });
+}
+
+function clusterCisFromTenantRefs(refs: { ci: string; cluster_ref?: string }[]): string[] {
+  return [...new Set(
+    refs.map((r) => {
+      if (r.cluster_ref) return r.cluster_ref;
+      const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
+      return derived !== r.ci ? derived : null;
+    }).filter(Boolean),
+  )] as string[];
+}
+
 interface Props {
   dryRun: boolean;
   schedules: WorkshopSchedule[];
@@ -1617,7 +1637,7 @@ export const UploadTab: React.FC<Props> = ({
 
           {/* Tenant cluster readiness — a tenant needs somewhere to run:
               either a shared cluster pool exists, OR its cluster provisioner
-              deploys in this same batch. If neither, it will fail. */}
+              deploys in this same batch. Deploy does not auto-create pools. */}
           {missingTenantRefs && (() => {
             const all = [
               ...(missingTenantRefs.missing_refs || []),
@@ -1627,44 +1647,65 @@ export const UploadTab: React.FC<Props> = ({
             const willFailDirect = willFail.filter((r: any) => r.direct_sandbox);
             const willFailNoPool = willFail.filter((r: any) => !r.direct_sandbox);
             const viaFreshCluster = all.filter((r: any) => !r.pool_exists && r.has_cluster_row);
+            const willFailDirectUnique = uniqueByCi(willFailDirect);
+            const willFailNoPoolUnique = uniqueByCi(willFailNoPool);
 
             if (willFail.length === 0 && viaFreshCluster.length === 0) return null;
 
+            const openPoolCreate = (refs: typeof willFail) => {
+              setPoolCreateCIs(clusterCisFromTenantRefs(refs));
+              setPoolCreateYaml('');
+              setPoolCreateResults([]);
+              setPoolCreateApplied(false);
+              setPoolCreateTimeShifted(0);
+              setShowPoolCreateModal(true);
+            };
+
+            const shiftTenantsPlus4h = async (refs: typeof willFail) => {
+              const tenantCIs = new Set(refs.map((r: any) => r.ci as string));
+              const shifted = schedules.map((s) =>
+                tenantCIs.has(s.ci)
+                  ? {
+                      ...s,
+                      provisioning_date: shiftScheduleDate(s.provisioning_date, 4),
+                      auto_stop: shiftScheduleDate(s.auto_stop, 4),
+                      auto_destroy: shiftScheduleDate(s.auto_destroy, 4),
+                    }
+                  : s,
+              );
+              const shiftedCount = shifted.filter(
+                (s, i) => s.provisioning_date !== schedules[i].provisioning_date,
+              ).length;
+              setSchedules(shifted);
+              try { await api.updateSchedules(shifted); } catch { /* non-fatal */ }
+              showToast(
+                shiftedCount > 0
+                  ? `Moved ${shiftedCount} workshop(s) +4 hours (pools still need time to fill)`
+                  : 'No start times changed',
+                shiftedCount > 0 ? 'info' : 'danger',
+              );
+            };
+
             return (
               <>
-                {willFailDirect.length > 0 && (
+                {willFailDirectUnique.length > 0 && (
                   <Alert
                     variant="danger"
                     isInline
-                    title={`${willFailDirect.length} workshop(s) blocked — no clusters registered in sandbox-api`}
+                    title={
+                      willFailDirect.length === willFailDirectUnique.length
+                        ? `${willFailDirectUnique.length} catalog item(s) blocked — no clusters registered in sandbox-api`
+                        : `${willFailDirectUnique.length} catalog item(s) blocked (${willFailDirect.length} schedule rows) — no clusters registered in sandbox-api`
+                    }
                     style={{ marginBottom: 12 }}
                     actionLinks={
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         <Button
                           variant="danger"
                           size="sm"
-                          onClick={() => {
-                            const cis = [...new Set(willFailDirect.map((r: any) => {
-                              if (r.cluster_ref) return r.cluster_ref;
-                              const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
-                              return derived !== r.ci ? derived : null;
-                            }).filter(Boolean))] as string[];
-                            setPoolCreateCIs(cis);
-                            setPoolCreateYaml('');
-                            setPoolCreateResults([]);
-                            setPoolCreateApplied(false);
-                            setPoolCreateTimeShifted(0);
-                            setShowPoolCreateModal(true);
-                          }}
+                          onClick={() => openPoolCreate(willFailDirectUnique)}
                         >
-                          {(() => {
-                            const cis = [...new Set(willFailDirect.map((r: any) => {
-                              if (r.cluster_ref) return r.cluster_ref;
-                              const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
-                              return derived !== r.ci ? derived : null;
-                            }).filter(Boolean))];
-                            return `Option 2: Create ${cis.length} TenantClusterPool${cis.length === 1 ? '' : 's'}`;
-                          })()}
+                          {`Option 2: Create ${clusterCisFromTenantRefs(willFailDirectUnique).length} TenantClusterPool${clusterCisFromTenantRefs(willFailDirectUnique).length === 1 ? '' : 's'}`}
                         </Button>
                         <Button
                           variant="link"
@@ -1687,13 +1728,20 @@ export const UploadTab: React.FC<Props> = ({
                       CI&apos;s <code>event.yaml</code> in agnosticv. Babylon will manage the cluster pool automatically going forward.
                     </div>
                     <ul style={{ margin: '0 0 10px 20px', fontSize: '0.85rem' }}>
-                      {willFailDirect.map((ref: any, i: number) => {
+                      {willFailDirectUnique.map((ref: any) => {
                         const parts = (ref.ci as string).split('.');
                         const agvPath = parts.slice(0, -1).join('/') + '/' + parts[parts.length - 1] + '.yaml';
                         const agvUrl = `https://github.com/rhpds/agnosticv/edit/master/${agvPath}`;
+                        const rowCount = willFailDirect.filter((r: any) => r.ci === ref.ci).length;
                         return (
-                          <li key={i}>
-                            <strong>{ref.workshop_name}</strong>{' '}
+                          <li key={ref.ci}>
+                            <strong>{ref.workshop_name}</strong>
+                            {rowCount > 1 ? (
+                              <span style={{ color: 'var(--pf-v6-global--Color--200)', fontSize: '0.8rem' }}>
+                                {' '}({rowCount} schedule rows)
+                              </span>
+                            ) : null}
+                            {' '}
                             <a href={agvUrl} target="_blank" rel="noreferrer" style={{ fontSize: '0.8rem' }}>
                               edit event.yaml in agnosticv ↗
                             </a>
@@ -1703,45 +1751,51 @@ export const UploadTab: React.FC<Props> = ({
                     </ul>
                     <div style={{ fontSize: '0.9rem', marginBottom: 4 }}>
                       <strong>Option 2 — Quick fix for this event:</strong> Create TenantClusterPool(s) now and enable them.
-                      Babylon will provision clusters automatically once the pool is enabled.
+                      Babylon will provision clusters automatically once the pool is enabled (allow ~4h before tenant start).
                     </div>
                     <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)' }}>
                       Make sure to set <strong>Enable pool</strong> in the creation dialog so Babylon starts provisioning immediately.
                     </div>
                   </Alert>
                 )}
-                {willFailNoPool.length > 0 && (
+                {willFailNoPoolUnique.length > 0 && (
                   <Alert
                     variant="danger"
                     isInline
-                    title={`${willFailNoPool.length} workshop(s) will fail — no TenantClusterPool and no cluster CI in CSV`}
+                    title={
+                      willFailNoPool.length === willFailNoPoolUnique.length
+                        ? `${willFailNoPoolUnique.length} catalog item(s) need a cluster — no TenantClusterPool and no cluster CI in CSV`
+                        : `${willFailNoPoolUnique.length} catalog item(s) need a cluster (${willFailNoPool.length} schedule rows) — no TenantClusterPool and no cluster CI in CSV`
+                    }
                     style={{ marginBottom: 12 }}
                     actionLinks={
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                         <Button
                           variant="danger"
                           size="sm"
+                          onClick={() => openPoolCreate(willFailNoPoolUnique)}
+                        >
+                          {`1. Create ${clusterCisFromTenantRefs(willFailNoPoolUnique).length} TenantClusterPool${clusterCisFromTenantRefs(willFailNoPoolUnique).length === 1 ? '' : 's'}`}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => shiftTenantsPlus4h(willFailNoPoolUnique)}
+                        >
+                          2. Move +4 hours
+                        </Button>
+                        <Button
+                          variant="tertiary"
+                          size="sm"
                           onClick={() => {
-                            const cis = [...new Set(willFailNoPool.map((r: any) => {
-                              if (r.cluster_ref) return r.cluster_ref;
-                              const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
-                              return derived !== r.ci ? derived : null;
-                            }).filter(Boolean))] as string[];
-                            setPoolCreateCIs(cis);
-                            setPoolCreateYaml('');
-                            setPoolCreateResults([]);
-                            setPoolCreateApplied(false);
-                            setShowPoolCreateModal(true);
+                            setIgnoreCapacityWarnings(true);
+                            showToast(
+                              'Ignore Cluster Capacity Warnings enabled — deploy may still fail if no pool/cluster exists',
+                              'info',
+                            );
                           }}
                         >
-                          {(() => {
-                            const cis = [...new Set(willFailNoPool.map((r: any) => {
-                              if (r.cluster_ref) return r.cluster_ref;
-                              const derived = (r.ci as string).replace(/-tenant\./, '-cluster.');
-                              return derived !== r.ci ? derived : null;
-                            }).filter(Boolean))];
-                            return `Create ${cis.length} TenantClusterPool${cis.length === 1 ? '' : 's'}`;
-                          })()}
+                          4. Continue anyway
                         </Button>
                         <Button
                           variant="link"
@@ -1750,28 +1804,50 @@ export const UploadTab: React.FC<Props> = ({
                             try { setMissingTenantRefs(await api.checkTenantClusterRefs(targetCluster)); } catch { /* ignore */ }
                           }}
                         >
-                          Re-check cluster refs
+                          Re-check
                         </Button>
                       </div>
                     }
                   >
                     <div style={{ marginBottom: 8 }}>
-                      These tenant workshops need a cluster to run on, but no <code>TenantClusterPool</code> exists
-                      in <code>shared-clusters</code> and no matching cluster CI is in this CSV:
+                      These tenants have nowhere to land yet. <strong>Deploy does not auto-create</strong> a
+                      {' '}<code>TenantClusterPool</code>. Creating a pool now registers the CRD; Babylon then
+                      provisions clusters (usually 30–60+ min). Prefer giving tenants ~4h head start so the pool is ready.
                     </div>
                     <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
-                      {willFailNoPool.slice(0, 5).map((ref: any, i: number) => (
-                        <li key={i}><strong>{ref.workshop_name}</strong></li>
-                      ))}
-                      {willFailNoPool.length > 5 && (
+                      {willFailNoPoolUnique.slice(0, 5).map((ref: any) => {
+                        const rowCount = willFailNoPool.filter((r: any) => r.ci === ref.ci).length;
+                        return (
+                          <li key={ref.ci}>
+                            <strong>{ref.workshop_name}</strong>
+                            {rowCount > 1 ? (
+                              <span style={{ color: 'var(--pf-v6-global--Color--200)', fontSize: '0.8rem' }}>
+                                {' '}({rowCount} schedule rows)
+                              </span>
+                            ) : null}
+                          </li>
+                        );
+                      })}
+                      {willFailNoPoolUnique.length > 5 && (
                         <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>
-                          ...and {willFailNoPool.length - 5} more
+                          ...and {willFailNoPoolUnique.length - 5} more
                         </li>
                       )}
                     </ul>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)' }}>
-                      Fix: click <strong>Create TenantClusterPools</strong> to create the shared pool,
-                      or add the matching <code>-cluster.*</code> CI row to your CSV to deploy a dedicated cluster alongside.
+                    <div style={{ fontSize: '0.85rem' }}>
+                      <div style={{ marginBottom: 4 }}>
+                        <strong>1. Pre-create TenantClusterPools (recommended)</strong> — creates/enables the pool;
+                        Flow also shifts affected workshops +4h when pools are newly created or enabled.
+                      </div>
+                      <div style={{ marginBottom: 4 }}>
+                        <strong>2. Move these items +4 hours</strong> — use if pools are already creating and you only need more runway.
+                      </div>
+                      <div style={{ marginBottom: 4 }}>
+                        <strong>3. Add matching <code>-cluster.*</code> CI rows to the CSV</strong> — dedicated cluster in this batch (also needs ~4h before the tenant).
+                      </div>
+                      <div style={{ color: 'var(--pf-v6-global--Color--200)' }}>
+                        <strong>4. Continue anyway</strong> — only if you know capacity already exists; otherwise deploy will still fail.
+                      </div>
                     </div>
                   </Alert>
                 )}
