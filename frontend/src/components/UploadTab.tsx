@@ -113,6 +113,7 @@ export const UploadTab: React.FC<Props> = ({
   // Look-ahead window for the Labagator event list (days; 0 = all upcoming).
   const [labagatorRangeDays, setLabagatorRangeDays] = useState(7);
   const [labagatorEventsLoading, setLabagatorEventsLoading] = useState(false);
+  const [labagatorEvents, setLabagatorEvents] = useState<LabagatorEventSummary[]>([]);
   // Session picker: sessions fetched for the selected event + which are checked.
   const [labagatorSessions, setLabagatorSessions] = useState<LabagatorSessionSummary[]>([]);
   const [labagatorSessionsLoading, setLabagatorSessionsLoading] = useState(false);
@@ -124,9 +125,12 @@ export const UploadTab: React.FC<Props> = ({
     api.listLabagatorEvents(days)
       .then((res) => {
         setLabagatorUnavailable(!!res.error);
-        setLabagatorEvents(res.events);
+        setLabagatorEvents(res.events ?? []);
       })
-      .catch(() => setLabagatorUnavailable(true))
+      .catch(() => {
+        setLabagatorUnavailable(true);
+        setLabagatorEvents([]);
+      })
       .finally(() => setLabagatorEventsLoading(false));
   }, []);
 
@@ -146,7 +150,6 @@ export const UploadTab: React.FC<Props> = ({
   const [passwordCount, setPasswordCount] = useState<number | null>(null);
 
   // Labagator import state (live API import)
-  const [labagatorEvents, setLabagatorEvents] = useState<LabagatorEventSummary[]>([]);
   const [labagatorUnavailable, setLabagatorUnavailable] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
   const [labagatorNamespace, setLabagatorNamespace] = useState('');
