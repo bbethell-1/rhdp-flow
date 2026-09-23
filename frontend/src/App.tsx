@@ -94,9 +94,11 @@ const App: React.FC = () => {
         api.deployResults(),
         api.qaResults(),
       ]);
-      setSchedules(sched);
-      setResults(res);
-      setQAResults(qa.results);
+      // Defensive: this now runs on every mount, so a malformed payload must not
+      // take the whole app down with it.
+      setSchedules(Array.isArray(sched) ? sched : []);
+      setResults(Array.isArray(res) ? res : []);
+      setQAResults(Array.isArray(qa?.results) ? qa.results : []);
     } catch (e) {
       console.warn('Failed to restore current session', e);
       setSchedules([]);
@@ -113,6 +115,14 @@ const App: React.FC = () => {
     setDeployLogFile(null);
     setViewingSession(false);
   }, []);
+
+  // Hydrate from the server's current session on mount. The backend holds the
+  // last-uploaded schedules and their deploy/QA results, so a page refresh — or
+  // an upload made through the API rather than the file picker — should show
+  // that state instead of an empty table.
+  useEffect(() => {
+    handleBackToCurrent();
+  }, [handleBackToCurrent]);
 
   const studentsCount = qaResults.filter(r => r.landing_page_url).length;
 
