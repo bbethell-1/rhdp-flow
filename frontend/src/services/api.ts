@@ -122,8 +122,8 @@ export function clearApiCache() {
 export const api = {
   health: () => cachedRequest<HealthResponse>('/health'),
 
-  /** Cluster catalog items (prod + event namespaces). */
-  listCatalogItems: () => request<CatalogItemEntry[]>('/catalog/items'),
+  /** Cluster catalog items (prod + event + dev). Cached 60s — dropdowns share one fetch. */
+  listCatalogItems: () => cachedRequest<CatalogItemEntry[]>('/catalog/items', 60_000),
 
   /** Lookup ResourcePool for a catalog item. */
   lookupPool: (catalogItem: string) =>
