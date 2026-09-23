@@ -199,7 +199,6 @@ export const UploadTab: React.FC<Props> = ({
   // Multi-cluster deploy target. Always default to Events (us-west-2) when configured.
   // Dropdown is shown whenever targets exist — Labagator embeds use API key only (no OAuth email).
   const DEFAULT_TARGET_CLUSTER = 'events';
-  const [pickerAllowed, setPickerAllowed] = useState(false);
   const [deployClusters, setDeployClusters] = useState<import('../types').ClusterTarget[]>([]);
   const [targetCluster, setTargetCluster] = useState<string>(getSelectedTarget);
 
@@ -209,7 +208,6 @@ export const UploadTab: React.FC<Props> = ({
       .then((resp) => {
         if (cancelled) return;
         const clusters = resp.clusters ?? [];
-        setPickerAllowed(resp.allowed);
         setDeployClusters(clusters);
         const defaultKey = resp.default || DEFAULT_TARGET_CLUSTER;
         const hasDefault = clusters.some((c) => c.key === defaultKey);
@@ -220,7 +218,6 @@ export const UploadTab: React.FC<Props> = ({
       })
       .catch(() => {
         if (cancelled) return;
-        setPickerAllowed(false);
         setDeployClusters([]);
       });
     return () => { cancelled = true; };

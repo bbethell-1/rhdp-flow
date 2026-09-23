@@ -60,7 +60,8 @@ def test_concurrent_targets_use_separate_credentials_and_cleanup(monkeypatch, tm
 
 
 def test_target_access_denied_before_credentials_are_resolved(monkeypatch):
-    """Non-default targets still require identity; Events is exempt as the default."""
+    """With a tight email allowlist, non-default targets deny before credentials."""
+    monkeypatch.setenv("DEPLOY_PICKER_ALLOWED_EMAILS", "jdisrael@redhat.com,bbethell@redhat.com")
     resolve = Mock(side_effect=AssertionError("must not read credentials"))
     monkeypatch.setattr(routes, "_get_config", resolve)
     with TestClient(app) as client:
