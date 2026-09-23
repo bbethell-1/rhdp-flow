@@ -214,7 +214,6 @@ export const UploadTab: React.FC<Props> = ({
   const [showroomNovnc, setShowroomNovnc] = useState(false);
   const [showroomZerotouch, setShowroomZerotouch] = useState(false);
   const [useCatalogLookup, setUseCatalogLookup] = useState(false);
-  const [ignoreCapacityWarnings, setIgnoreCapacityWarnings] = useState(false);
   // '' = auto pace by batch size (1s / 3s / 5s)
   const [deployDelaySeconds, setDeployDelaySeconds] = useState('');
 
@@ -916,7 +915,7 @@ export const UploadTab: React.FC<Props> = ({
     setLogLines([]);
 
     try {
-      const job = await api.deploy({ dry_run: dryRun, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect, showroom_novnc: showroomNovnc, showroom_zerotouch: showroomZerotouch, ignore_capacity_warnings: ignoreCapacityWarnings, deploy_delay_seconds: deployDelaySeconds === '' ? null : Number(deployDelaySeconds), target_cluster: targetCluster || null });
+      const job = await api.deploy({ dry_run: dryRun, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect, showroom_novnc: showroomNovnc, showroom_zerotouch: showroomZerotouch, deploy_delay_seconds: deployDelaySeconds === '' ? null : Number(deployDelaySeconds), target_cluster: targetCluster || null });
       jobIdRef.current = job.job_id;
       const ws = api.deployWebSocket(job.job_id);
       wsRef.current = ws;
@@ -1041,7 +1040,7 @@ export const UploadTab: React.FC<Props> = ({
     catalogNotFound.length > 0 ||
     numUsersViolations.length > 0 ||
     _tenantBlockDirect.length > 0;
-  const deployBlocked = hasBlockingIssues && !ignoreCapacityWarnings;
+  const deployBlocked = hasBlockingIssues;
 
   return (
     <PageSection>
@@ -1778,9 +1777,8 @@ export const UploadTab: React.FC<Props> = ({
                           variant="primary"
                           size="sm"
                           onClick={() => {
-                            setIgnoreCapacityWarnings(true);
                             showToast(
-                              'Proceeding — Babylon will manage TenantClusterPools; expect a longer deploy',
+                              'OK — deploy as usual; Babylon will manage TenantClusterPools (longer deploy)',
                               'info',
                             );
                           }}
@@ -2466,16 +2464,6 @@ export const UploadTab: React.FC<Props> = ({
                   </Tooltip>
                 </SplitItem>
                 <SplitItem>
-                  <Tooltip content="Skip tenant cluster capacity checks before deployment. Use when deploying to existing clusters with known availability.">
-                    <Switch
-                      id="ignore-capacity-warnings-switch"
-                      label="Ignore Cluster Capacity Warnings"
-                      isChecked={ignoreCapacityWarnings}
-                      onChange={(_e, checked) => setIgnoreCapacityWarnings(checked)}
-                    />
-                  </Tooltip>
-                </SplitItem>
-                <SplitItem>
                   <Tooltip content="Pause between workshops to ease API pressure on large batches. Auto: 1s (<10), 3s (10–24), 5s (25+).">
                     <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span style={{ fontSize: '0.875rem', whiteSpace: 'nowrap' }}>Deploy pace</span>
@@ -2678,7 +2666,7 @@ export const UploadTab: React.FC<Props> = ({
             </SplitItem>
             <SplitItem>
               <Tooltip
-                content={deployBlocked ? 'Fix blocking issues above or enable "Ignore Capacity Warnings" to override' : ''}
+                content={deployBlocked ? 'Fix blocking issues above before deploying' : ''}
                 trigger={deployBlocked ? 'mouseenter focus' : 'manual'}
               >
                 <Button variant="primary" onClick={handleDeploy} isDisabled={deploying || validating || yamlDownloading || deployBlocked} isDanger={!dryRun}>
