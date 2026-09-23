@@ -434,6 +434,23 @@ export const api = {
   getSession: (id: string) => request<SessionDetail>(`/sessions/${id}`),
   clearSession: () =>
     request<{ message: string; session_count: number }>('/sessions/clear', { method: 'POST', body: '{}' }),
+  getOperatorOverrides: () =>
+    request<import('../types').OperatorOverride[]>('/sessions/current/operator-overrides'),
+  addOperatorOverride: (body: {
+    action: string;
+    summary: string;
+    detail?: string;
+    affected_count?: number;
+    source?: string;
+  }) =>
+    request<import('../types').OperatorOverride>('/sessions/current/operator-overrides', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  clearOperatorOverrides: () =>
+    request<{ message: string; cleared: number }>('/sessions/current/operator-overrides', {
+      method: 'DELETE',
+    }),
 
   // Schedule Management
   updateSchedules: (schedules: WorkshopSchedule[]) =>

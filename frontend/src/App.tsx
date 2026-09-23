@@ -27,6 +27,7 @@ import type {
   WorkshopSchedule,
   DeploymentResult,
   QAResult,
+  OperatorOverride,
 } from './types';
 
 import { api, clearApiKey } from './services/api';
@@ -68,6 +69,7 @@ const App: React.FC = () => {
   const [qaResults, setQAResults] = useState<QAResult[]>([]);
   const [viewingSession, setViewingSession] = useState(false);
   const [deployLogFile, setDeployLogFile] = useState<string | null>(null);
+  const [operatorOverrides, setOperatorOverrides] = useState<OperatorOverride[]>([]);
   const [toast, setToast] = useState<{ msg: string; variant: 'success' | 'danger' | 'info' } | null>(null);
   const [showHelp, setShowHelp] = useState(false);
 
@@ -79,31 +81,35 @@ const App: React.FC = () => {
     toastTimer.current = setTimeout(() => setToast(null), TOAST_DURATION_MS);
   }, []);
 
-  const handleSessionView = useCallback((data: { schedules: WorkshopSchedule[]; results: DeploymentResult[]; qa_results: QAResult[] }) => {
+  const handleSessionView = useCallback((data: { schedules: WorkshopSchedule[]; results: DeploymentResult[]; qa_results: QAResult[]; operator_overrides?: OperatorOverride[] }) => {
     setSchedules(data.schedules);
     setResults(data.results);
     setQAResults(data.qa_results);
+    setOperatorOverrides(data.operator_overrides || []);
     setViewingSession(true);
     setActiveTab('deployments');
   }, []);
 
   const handleBackToCurrent = useCallback(async () => {
     try {
-      const [sched, res, qa] = await Promise.all([
+      const [sched, res, qa, overrides] = await Promise.all([
         api.getSchedules(),
         api.deployResults(),
         api.qaResults(),
+        api.getOperatorOverrides().catch(() => [] as OperatorOverride[]),
       ]);
       // Defensive: this now runs on every mount, so a malformed payload must not
       // take the whole app down with it.
       setSchedules(Array.isArray(sched) ? sched : []);
       setResults(Array.isArray(res) ? res : []);
       setQAResults(Array.isArray(qa?.results) ? qa.results : []);
+      setOperatorOverrides(Array.isArray(overrides) ? overrides : []);
     } catch (e) {
       console.warn('Failed to restore current session', e);
       setSchedules([]);
       setResults([]);
       setQAResults([]);
+      setOperatorOverrides([]);
     }
     setViewingSession(false);
   }, []);
@@ -113,6 +119,7 @@ const App: React.FC = () => {
     setResults([]);
     setQAResults([]);
     setDeployLogFile(null);
+    setOperatorOverrides([]);
     setViewingSession(false);
   }, []);
 
@@ -123,6 +130,15 @@ const App: React.FC = () => {
   useEffect(() => {
     handleBackToCurrent();
   }, [handleBackToCurrent]);
+
+  const refreshOverrides = useCallback(async () => {
+    try {
+      const list = await api.getOperatorOverrides();
+      setOperatorOverrides(Array.isArray(list) ? list : []);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const studentsCount = qaResults.filter(r => r.landing_page_url).length;
 
@@ -306,6 +322,7 @@ const App: React.FC = () => {
                   showToast={showToast}
                   onClear={handleClear}
                   setDeployLogFile={setDeployLogFile}
+                  onOperatorOverrideRecorded={refreshOverrides}
                 />
               </Suspense>
             </Tab>
@@ -319,6 +336,9 @@ const App: React.FC = () => {
                   setResults={setResults}
                   showToast={showToast}
                   deployLogFile={deployLogFile}
+                  operatorOverrides={operatorOverrides}
+                  onOverridesChange={setOperatorOverrides}
+                  viewingSession={viewingSession}
                 />
               </Suspense>
             </Tab>

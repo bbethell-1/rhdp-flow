@@ -433,11 +433,26 @@ class CatalogNamespaceMismatch(BaseModel):
     suggestion: str
 
 
+class CatalogNotFoundItem(BaseModel):
+    """CI not found under the exact schedule name."""
+
+    ci_name: str
+    ci: str
+    namespace: str
+    expected_catalog_namespace: str
+    message: str
+    # Only when exactly one env-suffixed alternate exists (.prod OR .event OR .dev).
+    # Never set when multiple suffixes exist — operator must choose.
+    suggested_ci: str | None = None
+
+
 class CatalogNamespaceValidationResponse(BaseModel):
     """Response for POST /schedules/validate-catalog-namespaces."""
 
     mismatches: list[CatalogNamespaceMismatch] = Field(default_factory=list)
-    not_found: list[dict] = Field(default_factory=list, description="CIs not found in any catalog namespace")
+    not_found: list[CatalogNotFoundItem] = Field(
+        default_factory=list, description="CIs not found in any catalog namespace"
+    )
     checked: int = 0
     skipped: int = 0
 
@@ -564,6 +579,25 @@ class QAResultItem(BaseModel):
     model_config = {"extra": "allow"}
 
 
+class OperatorOverride(BaseModel):
+    """Local Flow tweak an operator accepted (not Labagator master)."""
+
+    action: str
+    summary: str
+    detail: str = ""
+    affected_count: int = 0
+    timestamp: str = ""
+    source: str = "upload"  # upload | deploy | other
+
+
+class OperatorOverrideCreate(BaseModel):
+    action: str
+    summary: str
+    detail: str = ""
+    affected_count: int = 0
+    source: str = "upload"
+
+
 class SessionSummary(BaseModel):
     session_id: str
     filename: str
@@ -573,6 +607,7 @@ class SessionSummary(BaseModel):
     has_results: bool
     deploy_log_file: str | None = None
     qa_log_file: str | None = None
+    override_count: int = 0
 
 
 # ---------------------------------------------------------------------------

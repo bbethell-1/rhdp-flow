@@ -97,6 +97,29 @@ function clusterCisFromTenantRefs(refs: { ci: string; cluster_ref?: string }[]):
   )] as string[];
 }
 
+/** Client-side CSV download — additive confirmation export only. */
+function downloadCsv(filename: string, headers: string[], rows: Array<Array<string | number | boolean | null | undefined>>) {
+  const esc = (v: string | number | boolean | null | undefined) => {
+    const s = v === null || v === undefined ? '' : String(v);
+    if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+  const csv = [headers.map(esc).join(','), ...rows.map((r) => r.map(esc).join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function stampForFilename(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}-${p(d.getUTCHours())}${p(d.getUTCMinutes())}Z`;
+}
+
 interface Props {
   dryRun: boolean;
   schedules: WorkshopSchedule[];
@@ -106,10 +129,12 @@ interface Props {
   showToast: (msg: string, variant: 'success' | 'danger' | 'info') => void;
   onClear: () => void;
   setDeployLogFile?: (f: string | null) => void;
+  onOperatorOverrideRecorded?: () => void;
 }
 
 export const UploadTab: React.FC<Props> = ({
-  dryRun, schedules, setSchedules, setResults, showToast, onClear, setDeployLogFile,
+  dryRun, schedules, setSchedules, results, setResults, showToast, onClear, setDeployLogFile,
+  onOperatorOverrideRecorded,
 }) => {
   const logRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -254,7 +279,13 @@ export const UploadTab: React.FC<Props> = ({
 
   // Catalog namespace validation
   const [catalogNamespaceMismatches, setCatalogNamespaceMismatches] = useState<import('../types').CatalogNamespaceMismatch[]>([]);
-  const [catalogNotFound, setCatalogNotFound] = useState<Array<{ ci_name: string; ci: string; namespace: string; expected_catalog_namespace: string; message: string }>>([]);
+  const [catalogNotFound, setCatalogNotFound] = useState<import('../types').CatalogNotFoundItem[]>([]);
+  const [skippedCatalogSummary, setSkippedCatalogSummary] = useState<{
+    rows: number;
+    remaining: number;
+    items: Array<{ ci: string; ci_name: string; reason: string }>;
+    removedSchedules: WorkshopSchedule[];
+  } | null>(null);
 
   const [clusterNeeds, setClusterNeeds] = useState<any>(null);
   const [missingTenantRefs, setMissingTenantRefs] = useState<any>(null);
@@ -476,6 +507,7 @@ export const UploadTab: React.FC<Props> = ({
     setNumUsersLimits({});
     setCatalogNamespaceMismatches([]);
     setCatalogNotFound([]);
+    setSkippedCatalogSummary(null);
     setPoolCapacityWarnings([]);
     setPoolsNotFound([]);
     const [nsRes, nuRes, cnRes, pcRes] = await Promise.all([
@@ -915,6 +947,15 @@ export const UploadTab: React.FC<Props> = ({
     setLogLines([]);
 
     try {
+      try {
+        const overrides = await api.getOperatorOverrides();
+        if (overrides?.length) {
+          appendLog(`OPERATOR OVERRIDES: ${overrides.length} local tweak(s) — Labagator was not the sole source of truth`);
+          for (const o of overrides) {
+            appendLog(`  [${o.action}] ${o.summary}${o.affected_count ? ` (${o.affected_count} row(s))` : ''}`);
+          }
+        }
+      } catch { /* non-fatal */ }
       const job = await api.deploy({ dry_run: dryRun, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect, showroom_novnc: showroomNovnc, showroom_zerotouch: showroomZerotouch, deploy_delay_seconds: deployDelaySeconds === '' ? null : Number(deployDelaySeconds), target_cluster: targetCluster || null });
       jobIdRef.current = job.job_id;
       const ws = api.deployWebSocket(job.job_id);
@@ -1029,18 +1070,330 @@ export const UploadTab: React.FC<Props> = ({
 
   const columnCount = 14; // Updated for Item Type + Cluster Link columns
 
-  // Block deploy only for hard failures (missing catalog, num_users, direct-sandbox
-  // with no clusters). Missing TenantClusterPool alone is a warning — Babylon can
-  // create/manage the pool on provision (longer deploy).
+  // Block deploy only for hard failures (num_users, direct-sandbox with no
+  // clusters). Missing catalog items are a warning — skip them to deploy the rest.
   const _tenantBlockDirect = missingTenantRefs
     ? [...(missingTenantRefs.missing_refs || []), ...(missingTenantRefs.ref_no_pool || [])]
         .filter((r: any) => !r.pool_exists && !r.has_cluster_row && r.direct_sandbox)
     : [];
+  const catalogNotFoundUnique = uniqueByCi(catalogNotFound);
   const hasBlockingIssues =
-    catalogNotFound.length > 0 ||
     numUsersViolations.length > 0 ||
     _tenantBlockDirect.length > 0;
   const deployBlocked = hasBlockingIssues;
+
+  /** Persist an operator-accepted local tweak so Deployments/logs show it was not Labagator. */
+  const recordOperatorOverride = useCallback(async (body: {
+    action: string;
+    summary: string;
+    detail?: string;
+    affected_count?: number;
+  }) => {
+    try {
+      await api.addOperatorOverride({ ...body, source: 'upload' });
+      onOperatorOverrideRecorded?.();
+    } catch (e) {
+      console.warn('Failed to record operator override', e);
+    }
+  }, [onOperatorOverrideRecorded]);
+
+  const skipMissingCatalogItems = async () => {
+    const missing = new Set(catalogNotFound.map((n) => n.ci));
+    if (missing.size === 0) return;
+
+    const byCi = new Map(catalogNotFoundUnique.map((n) => [n.ci, n]));
+    const removedRows: typeof schedules = [];
+    const kept = schedules.filter((s) => {
+      if (missing.has(s.ci)) {
+        removedRows.push(s);
+        return false;
+      }
+      if (s.asset_cis) {
+        const assets = s.asset_cis.split(',').map((a) => a.trim()).filter(Boolean);
+        if (assets.some((a) => missing.has(a))) {
+          removedRows.push(s);
+          return false;
+        }
+      }
+      return true;
+    });
+
+    // One summary line per missing CI (workshop + why)
+    const itemSummary = [...byCi.values()].map((nf) => {
+      const rowsForCi = removedRows.filter(
+        (s) =>
+          s.ci === nf.ci ||
+          (s.asset_cis || '')
+            .split(',')
+            .map((a) => a.trim())
+            .includes(nf.ci),
+      );
+      const reason = nf.message.includes('Did you mean')
+        ? nf.message.replace(/^Item '[^']+' not found in [^.]+\.\s*/, '')
+        : 'not published on this cluster';
+      return {
+        ci: nf.ci,
+        ci_name: nf.ci_name || rowsForCi[0]?.ci_name || nf.ci,
+        reason,
+      };
+    });
+
+    setSchedules(kept);
+    setCatalogNotFound([]);
+    setSkippedCatalogSummary({
+      rows: removedRows.length,
+      remaining: kept.length,
+      items: itemSummary,
+      removedSchedules: removedRows,
+    });
+    try { await api.updateSchedules(kept); } catch { /* non-fatal */ }
+    await recordOperatorOverride({
+      action: 'skip_missing_catalog_items',
+      summary: `Skipped ${itemSummary.length} missing CI(s) / ${removedRows.length} row(s)`,
+      detail: itemSummary.map((i) => `${i.ci_name} (${i.ci})`).join('; '),
+      affected_count: removedRows.length,
+    });
+    showToast(
+      removedRows.length > 0
+        ? `Skipped ${itemSummary.length} missing CI(s) / ${removedRows.length} row(s) — ${kept.length} remain`
+        : 'No schedule rows removed',
+      removedRows.length > 0 ? 'info' : 'danger',
+    );
+  };
+
+  /**
+   * Apply only unambiguous env-suffix suggestions (exactly one of .prod/.event/.dev exists).
+   * Never guesses when both .prod and .event are published.
+   */
+  const applySuggestedCatalogSuffixes = async () => {
+    const mapping = new Map(
+      catalogNotFound
+        .filter((n) => n.suggested_ci && n.suggested_ci !== n.ci)
+        .map((n) => [n.ci, n.suggested_ci as string]),
+    );
+    if (mapping.size === 0) {
+      showToast('No unambiguous .prod/.event/.dev suggestions to apply', 'danger');
+      return;
+    }
+    let n = 0;
+    const updated = schedules.map((s) => {
+      let next = s;
+      const main = mapping.get(s.ci);
+      if (main) {
+        n += 1;
+        const suffix = main.includes('.event') ? 'event' : main.includes('.dev') ? 'dev' : 'prod';
+        next = {
+          ...next,
+          ci: main,
+          catalog_namespace:
+            suffix === 'event' ? 'babylon-catalog-event'
+              : suffix === 'dev' ? 'babylon-catalog-dev'
+                : 'babylon-catalog-prod',
+        };
+      }
+      if (next.asset_cis) {
+        const assets = next.asset_cis.split(',').map((a) => a.trim()).filter(Boolean);
+        let changed = false;
+        const rewritten = assets.map((a) => {
+          const alt = mapping.get(a);
+          if (alt) { changed = true; return alt; }
+          return a;
+        });
+        if (changed) {
+          if (!main) n += 1;
+          next = { ...next, asset_cis: rewritten.join(',') };
+        }
+      }
+      return next;
+    });
+    setSchedules(updated);
+    setCatalogNotFound([]);
+    try { await api.updateSchedules(updated); } catch { /* non-fatal */ }
+    await recordOperatorOverride({
+      action: 'apply_catalog_env_suffix',
+      summary: `Applied env suffix on ${mapping.size} CI(s) / ${n} row(s)`,
+      detail: [...mapping.entries()].map(([from, to]) => `${from} → ${to}`).join('; '),
+      affected_count: n,
+    });
+    try {
+      const cnRes = await api.validateCatalogNamespaces();
+      setCatalogNamespaceMismatches(cnRes.mismatches || []);
+      setCatalogNotFound(cnRes.not_found || []);
+    } catch { /* non-fatal */ }
+    showToast(
+      `Applied ${mapping.size} unambiguous CI suffix(es) locally (not Labagator)`,
+      'info',
+    );
+  };
+
+  /** Match schedule rows to a Users/num_users advisory (main CI or multi-asset child). */
+  const scheduleMatchesUsersAdvisory = (s: WorkshopSchedule, a: UsersNotInCatalogAdvisory) => {
+    if (s.ci_name !== a.ci_name || s.namespace !== a.namespace) return false;
+    if (s.ci === a.ci) return true;
+    if (s.asset_cis) {
+      return s.asset_cis.split(',').map((x) => x.trim()).includes(a.ci);
+    }
+    return false;
+  };
+
+  /**
+   * Local schedule tweaks for testing — Labagator master stays source of truth for the event;
+   * these only adjust the in-Flow table so one mismatch does not block a dry-run / partial deploy.
+   */
+  const applyUsersNotInCatalogFix = async (mode: 'move-to-instances' | 'clear-users') => {
+    if (usersNotInCatalog.length === 0) return;
+    const touched = new Set<string>();
+    const updated = schedules.map((s) => {
+      const hits = usersNotInCatalog.filter((a) => scheduleMatchesUsersAdvisory(s, a));
+      if (hits.length === 0) return s;
+      if (s.users == null || s.users <= 0) return s;
+      const key = `${s.ci_name}|${s.namespace}|${s.ci}`;
+      touched.add(key);
+      if (mode === 'move-to-instances') {
+        return { ...s, instances: s.users, users: null };
+      }
+      return { ...s, users: null };
+    });
+    if (touched.size === 0) {
+      showToast('No matching schedule rows to update', 'danger');
+      return;
+    }
+    setSchedules(updated);
+    setUsersNotInCatalog([]);
+    try { await api.updateSchedules(updated); } catch { /* non-fatal */ }
+    // Re-check so remaining real violations stay visible
+    try {
+      const nuRes = await api.validateNumUsers();
+      setNumUsersViolations(nuRes.violations || []);
+      setUsersNotInCatalog(nuRes.users_not_in_catalog || []);
+      if (Object.keys(nuRes.limits || {}).length) setNumUsersLimits(nuRes.limits);
+    } catch { /* non-fatal */ }
+    await recordOperatorOverride({
+      action: mode === 'move-to-instances' ? 'users_to_instances' : 'clear_users',
+      summary:
+        mode === 'move-to-instances'
+          ? `Moved Users → Instances on ${touched.size} row(s)`
+          : `Cleared Users on ${touched.size} row(s) (Instances unchanged)`,
+      detail: [...touched].join('; '),
+      affected_count: touched.size,
+    });
+    showToast(
+      mode === 'move-to-instances'
+        ? `Moved Users → Instances on ${touched.size} row(s) (local only — not Labagator)`
+        : `Cleared Users on ${touched.size} row(s); Instances unchanged (local only — not Labagator)`,
+      'info',
+    );
+  };
+
+  const capUsersToCatalogMax = async () => {
+    if (numUsersViolations.length === 0) return;
+    const byKey = new Map(
+      numUsersViolations.map((v) => [`${v.ci_name}|${v.namespace}|${v.ci}`, v]),
+    );
+    let n = 0;
+    const updated = schedules.map((s) => {
+      const direct = byKey.get(`${s.ci_name}|${s.namespace}|${s.ci}`);
+      let v = direct;
+      if (!v && s.asset_cis) {
+        for (const asset of s.asset_cis.split(',').map((a) => a.trim()).filter(Boolean)) {
+          const hit = byKey.get(`${s.ci_name}|${s.namespace}|${asset}`);
+          if (hit) { v = hit; break; }
+        }
+      }
+      if (!v || s.users == null || s.users <= v.maximum) return s;
+      n += 1;
+      return { ...s, users: v.maximum };
+    });
+    if (n === 0) {
+      showToast('No rows needed capping', 'danger');
+      return;
+    }
+    setSchedules(updated);
+    setNumUsersViolations([]);
+    try { await api.updateSchedules(updated); } catch { /* non-fatal */ }
+    try {
+      const nuRes = await api.validateNumUsers();
+      setNumUsersViolations(nuRes.violations || []);
+      setUsersNotInCatalog(nuRes.users_not_in_catalog || []);
+      if (Object.keys(nuRes.limits || {}).length) setNumUsersLimits(nuRes.limits);
+    } catch { /* non-fatal */ }
+    await recordOperatorOverride({
+      action: 'cap_users_to_catalog_max',
+      summary: `Capped Users to catalog max on ${n} row(s)`,
+      detail: numUsersViolations.map((v) => `${v.ci_name}: ${v.requested_users}→${v.maximum}`).join('; '),
+      affected_count: n,
+    });
+    showToast(`Capped Users to catalog max on ${n} row(s) (local only — not Labagator)`, 'info');
+  };
+
+  const exportSkippedCsv = () => {
+    if (!skippedCatalogSummary?.removedSchedules?.length) {
+      showToast('Nothing skipped to export', 'danger');
+      return;
+    }
+    const headers = [
+      'workshop_name', 'ci', 'ci_name', 'namespace', 'multi_workshop_name', 'asset_cis',
+      'provisioning_date', 'auto_stop', 'auto_destroy', 'skip_reason',
+    ];
+    const reasonByCi = new Map(skippedCatalogSummary.items.map((i) => [i.ci, i.reason]));
+    const rows = skippedCatalogSummary.removedSchedules.map((s) => {
+      const assetHit = (s.asset_cis || '')
+        .split(',')
+        .map((a) => a.trim())
+        .find((a) => reasonByCi.has(a));
+      const reason = reasonByCi.get(s.ci) || (assetHit ? reasonByCi.get(assetHit) : '') || 'not published on this cluster';
+      return [
+        s.workshop_name, s.ci, s.ci_name, s.namespace, s.multi_workshop_name, s.asset_cis,
+        s.provisioning_date, s.auto_stop, s.auto_destroy, reason,
+      ];
+    });
+    downloadCsv(`flow-skipped-missing-cis-${stampForFilename()}.csv`, headers, rows);
+    showToast(`Exported ${rows.length} skipped row(s)`, 'info');
+  };
+
+  const exportScheduleCsv = () => {
+    if (schedules.length === 0) {
+      showToast('No schedules to export', 'danger');
+      return;
+    }
+    const headers = [
+      'workshop_name', 'ci', 'ci_name', 'namespace', 'catalog_namespace', 'users', 'instances',
+      'concurrency', 'password', 'activity', 'purpose', 'provisioning_date', 'auto_stop', 'auto_destroy',
+      'enable_workshop_interface', 'is_multi_asset', 'multi_workshop_name', 'asset_cis',
+      'salesforce_ids', 'salesforce_type', 'aws_regions', 'white_glove', 'redirect',
+      'showroom_repo', 'showroom_ref', 'item_type', 'cluster_link', 'cluster_ci_override',
+      'is_cluster', 'is_tenant', 'detected_cluster_ci',
+    ];
+    const rows = schedules.map((s) => [
+      s.workshop_name, s.ci, s.ci_name, s.namespace, s.catalog_namespace, s.users, s.instances,
+      s.concurrency, s.password, s.activity, s.purpose, s.provisioning_date, s.auto_stop, s.auto_destroy,
+      s.enable_workshop_interface, s.is_multi_asset, s.multi_workshop_name, s.asset_cis,
+      s.salesforce_ids, s.salesforce_type, s.aws_regions, s.white_glove, s.redirect,
+      s.showroom_repo, s.showroom_ref, s.item_type ?? '', s.cluster_link ?? '', s.cluster_ci_override ?? '',
+      s.is_cluster ?? '', s.is_tenant ?? '', s.detected_cluster_ci ?? '',
+    ]);
+    downloadCsv(`flow-schedules-${stampForFilename()}.csv`, headers, rows);
+    showToast(`Exported ${rows.length} schedule row(s)`, 'info');
+  };
+
+  const exportDeployResultsCsv = () => {
+    if (!results?.length) {
+      showToast('No deploy results yet — run a deploy first', 'danger');
+      return;
+    }
+    const headers = [
+      'ci_name', 'ci', 'namespace', 'guid', 'url', 'status', 'error_message',
+      'provisioning_date', 'auto_stop', 'auto_destroy', 'timestamp', 'password',
+      'users', 'instances', 'showroom_url', 'showroom_status',
+    ];
+    const rows = results.map((r) => [
+      r.ci_name, r.ci, r.namespace, r.guid, r.url, r.status, r.error_message ?? '',
+      r.provisioning_date, r.auto_stop, r.auto_destroy, r.timestamp, r.password ?? '',
+      r.users ?? '', r.instances ?? '', r.showroom_url ?? '', r.showroom_status ?? '',
+    ]);
+    downloadCsv(`flow-deploy-results-${stampForFilename()}.csv`, headers, rows);
+    showToast(`Exported ${rows.length} deploy result(s)`, 'info');
+  };
 
   return (
     <PageSection>
@@ -1491,7 +1844,26 @@ export const UploadTab: React.FC<Props> = ({
 
           {/* num_users limit violations */}
           {numUsersViolations.length > 0 && (
-            <Alert variant="danger" isInline title={`${numUsersViolations.length} schedule(s) exceed num_users limit`} style={{ marginBottom: 12 }}>
+            <Alert
+              variant="danger"
+              isInline
+              title={`${numUsersViolations.length} schedule(s) exceed num_users limit`}
+              style={{ marginBottom: 12 }}
+              actionLinks={
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <Button variant="secondary" size="sm" onClick={() => capUsersToCatalogMax()}>
+                    Cap Users to catalog max
+                  </Button>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    onClick={() => setNumUsersViolations([])}
+                  >
+                    Dismiss
+                  </Button>
+                </div>
+              }
+            >
               <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
                 {numUsersViolations.map((v, i) => (
                   <li key={i}>
@@ -1499,7 +1871,7 @@ export const UploadTab: React.FC<Props> = ({
                   </li>
                 ))}
               </ul>
-              Deployment will be blocked until user counts are reduced below the catalog limit.
+              Deployment is blocked until counts are at or below the catalog max. Cap is a local Flow tweak for testing — Labagator remains the event source of truth.
             </Alert>
           )}
 
@@ -1553,12 +1925,36 @@ export const UploadTab: React.FC<Props> = ({
               isInline
               title={`${usersNotInCatalog.length} row(s): Users set but catalog item has no num_users`}
               style={{ marginBottom: 12 }}
+              actionLinks={
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <Tooltip content="Copy Users into Instances, then clear Users. Local schedule only — does not change Labagator.">
+                    <Button variant="secondary" size="sm" onClick={() => applyUsersNotInCatalogFix('move-to-instances')}>
+                      Move Users → Instances
+                    </Button>
+                  </Tooltip>
+                  <Tooltip content="Clear Users and keep the current Instances value (common when Instances is already correct). Local only.">
+                    <Button variant="secondary" size="sm" onClick={() => applyUsersNotInCatalogFix('clear-users')}>
+                      Clear Users (keep Instances)
+                    </Button>
+                  </Tooltip>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    onClick={() => setUsersNotInCatalog([])}
+                  >
+                    Dismiss
+                  </Button>
+                </div>
+              }
             >
               <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
                 {usersNotInCatalog.map((a, i) => (
                   <li key={i}>{a.message}</li>
                 ))}
               </ul>
+              <div style={{ marginTop: 8, fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)' }}>
+                Labagator is still the master plan for the event. Use the buttons above only to unblock testing / partial deploys in Flow.
+              </div>
             </Alert>
           )}
 
@@ -1586,23 +1982,114 @@ export const UploadTab: React.FC<Props> = ({
             </Alert>
           )}
 
-          {/* Catalog items not found — blocks deploy */}
-          {catalogNotFound.length > 0 && (
+          {/* Catalog items not found — warning; skip to deploy the rest */}
+          {catalogNotFoundUnique.length > 0 && (
             <Alert
-              variant="danger"
+              variant="warning"
               isInline
-              title={`Deploy blocked — ${catalogNotFound.length} catalog item(s) not found in any namespace`}
+              title={
+                catalogNotFound.length === catalogNotFoundUnique.length
+                  ? `${catalogNotFoundUnique.length} catalog item(s) not on this cluster`
+                  : `${catalogNotFoundUnique.length} catalog item(s) not on this cluster (${catalogNotFound.length} schedule rows)`
+              }
               style={{ marginBottom: 12 }}
+              actionLinks={
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {catalogNotFound.some((n) => n.suggested_ci) && (
+                    <Tooltip content="Only applies when exactly one of .prod / .event / .dev exists for that bare CI. If both exist, Flow will not guess — fix the CSV.">
+                      <Button variant="secondary" size="sm" onClick={() => applySuggestedCatalogSuffixes()}>
+                        Apply unambiguous .prod/.event/.dev
+                      </Button>
+                    </Tooltip>
+                  )}
+                  <Button variant="primary" size="sm" onClick={() => skipMissingCatalogItems()}>
+                    Skip missing &amp; keep deploying
+                  </Button>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    onClick={async () => {
+                      try {
+                        const cnRes = await api.validateCatalogNamespaces();
+                        setCatalogNotFound(cnRes.not_found || []);
+                      } catch { /* ignore */ }
+                    }}
+                  >
+                    Re-check
+                  </Button>
+                </div>
+              }
             >
-              <ul style={{ margin: '4px 0 8px', paddingLeft: 20, fontSize: '0.85rem' }}>
-                {catalogNotFound.map((nf, i) => (
-                  <li key={i}>
-                    <strong>{nf.ci_name}</strong> (<code>{nf.ci}</code>)<br />
-                    <span style={{ color: 'var(--pf-v6-global--danger-color--100)' }}>{nf.message}</span>
+              <div style={{ marginBottom: 8, fontSize: '0.9rem' }}>
+                These CIs are not published under the exact schedule name (often missing{' '}
+                <code>.prod</code> / <code>.event</code> / <code>.dev</code>).
+                Flow never auto-picks a suffix when more than one exists.
+              </div>
+              <ul style={{ margin: '0 0 8px 20px', fontSize: '0.85rem' }}>
+                {catalogNotFoundUnique.slice(0, 8).map((nf) => {
+                  const rowCount = catalogNotFound.filter((r) => r.ci === nf.ci).length;
+                  return (
+                    <li key={nf.ci}>
+                      <strong>{nf.ci_name}</strong>{' '}
+                      <code>{nf.ci}</code>
+                      {rowCount > 1 ? (
+                        <span style={{ color: 'var(--pf-v6-global--Color--200)' }}>
+                          {' '}({rowCount} rows)
+                        </span>
+                      ) : null}
+                      {nf.suggested_ci ? (
+                        <div style={{ color: 'var(--pf-v6-global--Color--200)', fontSize: '0.8rem' }}>
+                          Unambiguous match: <code>{nf.suggested_ci}</code>
+                        </div>
+                      ) : nf.message ? (
+                        <div style={{ color: 'var(--pf-v6-global--Color--200)', fontSize: '0.8rem' }}>
+                          {nf.message}
+                        </div>
+                      ) : null}
+                    </li>
+                  );
+                })}
+                {catalogNotFoundUnique.length > 8 && (
+                  <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>
+                    ...and {catalogNotFoundUnique.length - 8} more
+                  </li>
+                )}
+              </ul>
+            </Alert>
+          )}
+
+          {skippedCatalogSummary && skippedCatalogSummary.items.length > 0 && (
+            <Alert
+              variant="info"
+              isInline
+              title={`Skipped ${skippedCatalogSummary.items.length} missing catalog item(s) (${skippedCatalogSummary.rows} schedule row${skippedCatalogSummary.rows === 1 ? '' : 's'}) — ${skippedCatalogSummary.remaining} remain`}
+              style={{ marginBottom: 12 }}
+              actionLinks={
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <Button variant="secondary" size="sm" onClick={exportSkippedCsv}>
+                    Export skipped CSV
+                  </Button>
+                  <Button variant="link" size="sm" onClick={() => setSkippedCatalogSummary(null)}>
+                    Dismiss
+                  </Button>
+                </div>
+              }
+            >
+              <ul style={{ margin: '0 0 0 20px', fontSize: '0.85rem' }}>
+                {skippedCatalogSummary.items.slice(0, 12).map((item) => (
+                  <li key={item.ci}>
+                    <strong>{item.ci_name}</strong> <code>{item.ci}</code>
+                    {item.reason ? (
+                      <span style={{ color: 'var(--pf-v6-global--Color--200)' }}> — {item.reason}</span>
+                    ) : null}
                   </li>
                 ))}
+                {skippedCatalogSummary.items.length > 12 && (
+                  <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>
+                    ...and {skippedCatalogSummary.items.length - 12} more
+                  </li>
+                )}
               </ul>
-              <strong>These catalog items do not exist on this cluster. Remove them from your CSV or wait until they are published before deploying.</strong>
             </Alert>
           )}
 
@@ -1681,6 +2168,14 @@ export const UploadTab: React.FC<Props> = ({
               ).length;
               setSchedules(shifted);
               try { await api.updateSchedules(shifted); } catch { /* non-fatal */ }
+              if (shiftedCount > 0) {
+                await recordOperatorOverride({
+                  action: 'shift_minus_4h',
+                  summary: `−4h earlier on ${shiftedCount} workshop(s) vs Labagator/event`,
+                  detail: 'Extra cluster hours before students (cost). Operator accepted schedule drift.',
+                  affected_count: shiftedCount,
+                });
+              }
               showToast(
                 shiftedCount > 0
                   ? `Schedule drift: ${shiftedCount} workshop(s) −4h earlier than Labagator/event — extra cluster hours before students (cost)`
@@ -2501,6 +2996,7 @@ export const UploadTab: React.FC<Props> = ({
                             setNumUsersLimits({});
                             setCatalogNamespaceMismatches([]);
                             setCatalogNotFound([]);
+                            setSkippedCatalogSummary(null);
                             setPoolCapacityWarnings([]);
                             setPoolsNotFound([]);
                             setMissingTenantRefs(null);
@@ -2665,6 +3161,20 @@ export const UploadTab: React.FC<Props> = ({
               </Tooltip>
             </SplitItem>
             <SplitItem>
+              <Tooltip content="Download the current schedule table as CSV (confirmation copy — does not change deploy).">
+                <Button variant="secondary" onClick={exportScheduleCsv} isDisabled={schedules.length === 0 || deploying}>
+                  Export schedule CSV
+                </Button>
+              </Tooltip>
+            </SplitItem>
+            <SplitItem>
+              <Tooltip content="Download deploy results (GUID, URL, status, errors) after a run.">
+                <Button variant="secondary" onClick={exportDeployResultsCsv} isDisabled={!results?.length || deploying}>
+                  Export results CSV
+                </Button>
+              </Tooltip>
+            </SplitItem>
+            <SplitItem>
               <Tooltip
                 content={deployBlocked ? 'Fix blocking issues above before deploying' : ''}
                 trigger={deployBlocked ? 'mouseenter focus' : 'manual'}
@@ -2752,31 +3262,43 @@ export const UploadTab: React.FC<Props> = ({
           </p>
 
           {/* BLOCKING ISSUES */}
-          {(numUsersViolations.length > 0 || catalogNotFound.length > 0) && (
+          {numUsersViolations.length > 0 && (
             <Alert variant="danger" isInline title="Deployment blocked" style={{ margin: '12px 0' }}>
               <p style={{ marginBottom: 8 }}>The following issues must be resolved before deployment:</p>
-              {numUsersViolations.length > 0 && (
-                <div style={{ marginBottom: 8 }}>
-                  <strong>• num_users exceeds catalog maximum ({numUsersViolations.length}):</strong>
-                  <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
-                    {numUsersViolations.slice(0, 3).map((v, i) => (
-                      <li key={i}>{v.ci_name}: {v.requested_users} users requested, max is {v.maximum}</li>
-                    ))}
-                    {numUsersViolations.length > 3 && <li>... and {numUsersViolations.length - 3} more</li>}
-                  </ul>
-                </div>
-              )}
-              {catalogNotFound.length > 0 && (
-                <div>
-                  <strong>• Catalog items not found ({catalogNotFound.length}):</strong>
-                  <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
-                    {catalogNotFound.slice(0, 3).map((nf, i) => (
-                      <li key={i}>{nf.ci_name} ({nf.ci})</li>
-                    ))}
-                    {catalogNotFound.length > 3 && <li>... and {catalogNotFound.length - 3} more</li>}
-                  </ul>
-                </div>
-              )}
+              <div style={{ marginBottom: 8 }}>
+                <strong>• num_users exceeds catalog maximum ({numUsersViolations.length}):</strong>
+                <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+                  {numUsersViolations.slice(0, 3).map((v, i) => (
+                    <li key={i}>{v.ci_name}: {v.requested_users} users requested, max is {v.maximum}</li>
+                  ))}
+                  {numUsersViolations.length > 3 && <li>... and {numUsersViolations.length - 3} more</li>}
+                </ul>
+              </div>
+            </Alert>
+          )}
+
+          {catalogNotFoundUnique.length > 0 && (
+            <Alert variant="warning" isInline title="Missing catalog items will be skipped if you deploy" style={{ margin: '12px 0' }}>
+              <p style={{ marginBottom: 6, fontSize: '0.9rem' }}>
+                Prefer <strong>Skip missing &amp; keep deploying</strong> on the upload page first so the schedule is cleaned up.
+              </p>
+              <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+                {catalogNotFoundUnique.slice(0, 5).map((nf) => (
+                  <li key={nf.ci}>{nf.ci_name} (<code>{nf.ci}</code>)</li>
+                ))}
+                {catalogNotFoundUnique.length > 5 && <li>... and {catalogNotFoundUnique.length - 5} more</li>}
+              </ul>
+            </Alert>
+          )}
+
+          {skippedCatalogSummary && skippedCatalogSummary.items.length > 0 && (
+            <Alert variant="info" isInline title={`Will deploy ${skippedCatalogSummary.remaining} row(s) — already skipped ${skippedCatalogSummary.items.length} missing CI(s)`} style={{ margin: '12px 0' }}>
+              <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+                {skippedCatalogSummary.items.slice(0, 5).map((item) => (
+                  <li key={item.ci}>{item.ci_name} (<code>{item.ci}</code>)</li>
+                ))}
+                {skippedCatalogSummary.items.length > 5 && <li>... and {skippedCatalogSummary.items.length - 5} more</li>}
+              </ul>
             </Alert>
           )}
 

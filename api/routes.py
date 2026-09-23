@@ -33,6 +33,7 @@ from api.models import (
     CatalogItemParameter,
     CatalogNamespaceMismatch,
     CatalogNamespaceValidationResponse,
+    CatalogNotFoundItem,
     ClusterNeedsResponse,
     ClusterTenantValidationError,
     ClusterTenantValidationResponse,
@@ -62,6 +63,8 @@ from api.models import (
     NumUsersValidationResponse,
     NumUsersViolation,
     OperationResponse,
+    OperatorOverride,
+    OperatorOverrideCreate,
     PoolCapacityValidationResponse,
     PoolCapacityWarning,
     PoolInfo,
@@ -137,6 +140,9 @@ _asset_passwords: dict[str, str] | None = None
 _deploy_log_path: str | None = None
 _qa_log_path: str | None = None
 _destroy_check_results: list[dict] = []
+# Operator-accepted local tweaks (Users→Instances, skip CIs, −4h, etc.).
+# Kept so Deployments / logs can show "human overrode Labagator" — not Flow inventing values.
+_operator_overrides: list[OperatorOverride] = []
 
 # ---------------------------------------------------------------------------
 # Result persistence — survives server restarts
@@ -607,6 +613,7 @@ def _archive_current_session():
         "deployment_results": list(_deployment_results),
         "qa_results": list(_qa_results),
         "destroy_check_results": list(_destroy_check_results),
+        "operator_overrides": [o.model_dump() for o in _operator_overrides],
         "csv_filepath": _csv_filepath,
         "schedule_count": len(_schedules),
         "result_count": len(_deployment_results),
@@ -619,6 +626,29 @@ def _archive_current_session():
         _sessions[:] = _sessions[-MAX_SESSIONS:]
 
 
+def _log_operator_overrides(prefix: str = "OPERATOR OVERRIDE") -> None:
+    """Write accepted local overrides into the active deploy log (accountability)."""
+    if not _operator_overrides:
+        return
+    logger.warning(
+        "%s: %d local tweak(s) accepted this session — Labagator was not the sole source of truth",
+        prefix,
+        len(_operator_overrides),
+    )
+    for o in _operator_overrides:
+        logger.warning(
+            "%s [%s] %s — %s (affected=%s, at=%s, source=%s)%s",
+            prefix,
+            o.action,
+            o.summary,
+            "operator accepted; do not blame Flow defaults if outcomes differ from Labagator",
+            o.affected_count,
+            o.timestamp or "?",
+            o.source,
+            f" detail={o.detail}" if o.detail else "",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Sessions
 # ---------------------------------------------------------------------------
@@ -626,13 +656,14 @@ def _archive_current_session():
 @router.post("/sessions/clear")
 def clear_session(_key=Depends(verify_api_key)):
     """Archive current session and reset state for a new upload."""
-    global _schedules, _deployment_results, _qa_results, _csv_filepath, _current_filename, _asset_passwords, _deploy_log_path, _qa_log_path, _destroy_check_results
+    global _schedules, _deployment_results, _qa_results, _csv_filepath, _current_filename, _asset_passwords, _deploy_log_path, _qa_log_path, _destroy_check_results, _operator_overrides
     with _state_lock:
         _archive_current_session()
         _schedules = []
         _deployment_results = []
         _qa_results = []
         _destroy_check_results = []
+        _operator_overrides = []
         _csv_filepath = None
         _current_filename = ""
         _asset_passwords = None
@@ -654,6 +685,7 @@ def list_sessions():
             has_results=s["result_count"] > 0,
             deploy_log_file=s.get("deploy_log_file"),
             qa_log_file=s.get("qa_log_file"),
+            override_count=len(s.get("operator_overrides") or []),
         )
         for s in _sessions
     ]
@@ -672,8 +704,51 @@ def get_session(session_id: str):
                 "results": [_result_to_response(r) for r in s["deployment_results"]],
                 "qa_results": s["qa_results"],
                 "destroy_check_results": s.get("destroy_check_results", []),
+                "operator_overrides": s.get("operator_overrides", []),
+                "deploy_log_file": s.get("deploy_log_file"),
+                "qa_log_file": s.get("qa_log_file"),
             }
     raise HTTPException(404, "Session not found")
+
+
+@router.get("/sessions/current/operator-overrides", response_model=list[OperatorOverride])
+def list_operator_overrides(_key=Depends(verify_api_key)):
+    """List operator-accepted local tweaks for the current session."""
+    return list(_operator_overrides)
+
+
+@router.post("/sessions/current/operator-overrides", response_model=OperatorOverride)
+def add_operator_override(body: OperatorOverrideCreate, _key=Depends(verify_api_key)):
+    """Record that an operator accepted a local schedule tweak (not Labagator)."""
+    entry = OperatorOverride(
+        action=body.action.strip(),
+        summary=body.summary.strip(),
+        detail=(body.detail or "").strip(),
+        affected_count=max(0, body.affected_count),
+        timestamp=utc_timestamp_str(),
+        source=(body.source or "upload").strip() or "upload",
+    )
+    if not entry.action or not entry.summary:
+        raise HTTPException(400, "action and summary are required")
+    with _state_lock:
+        _operator_overrides.append(entry)
+    logger.info(
+        "Operator override recorded: [%s] %s (affected=%s)",
+        entry.action,
+        entry.summary,
+        entry.affected_count,
+    )
+    return entry
+
+
+@router.delete("/sessions/current/operator-overrides")
+def clear_operator_overrides(_key=Depends(verify_api_key)):
+    """Clear override audit entries without clearing schedules/results."""
+    global _operator_overrides
+    with _state_lock:
+        n = len(_operator_overrides)
+        _operator_overrides = []
+    return {"message": f"Cleared {n} override(s)", "cleared": n}
 
 
 # ---------------------------------------------------------------------------
@@ -1309,7 +1384,7 @@ def validate_catalog_namespaces(_key=Depends(verify_api_key), config=Depends(_re
             f.result()  # raise any exception
 
     mismatches: list[CatalogNamespaceMismatch] = []
-    not_found: list[dict] = []
+    not_found: list[CatalogNotFoundItem] = []
     checked = 0
 
     for s in _schedules:
@@ -1318,9 +1393,12 @@ def validate_catalog_namespaces(_key=Depends(verify_api_key), config=Depends(_re
             cis += [c.strip() for c in s.asset_cis.split(",") if c.strip()]
         for ci in cis:
             expected_ns = get_catalog_namespace(ci, s.catalog_namespace or None)
-            exists, found_ns, suggestion = ci_results.get(ci, (True, expected_ns, None))
+            exists, found_ns, suggestion, suggested_ci = ci_results.get(
+                ci, (True, expected_ns, None, None)
+            )
             checked += 1
             if not exists and found_ns is not None:
+                # Exact CI name found in another catalog namespace — safe redirect
                 mismatches.append(CatalogNamespaceMismatch(
                     ci_name=s.ci_name,
                     ci=ci,
@@ -1330,13 +1408,15 @@ def validate_catalog_namespaces(_key=Depends(verify_api_key), config=Depends(_re
                     suggestion=suggestion or f"Found in {found_ns} instead of {expected_ns}",
                 ))
             elif not exists and found_ns is None:
-                not_found.append({
-                    "ci_name": s.ci_name,
-                    "ci": ci,
-                    "namespace": s.namespace,
-                    "expected_catalog_namespace": expected_ns,
-                    "message": suggestion or "Not found in any catalog namespace",
-                })
+                # Missing / ambiguous — never auto-rewrite CI (.prod vs .event)
+                not_found.append(CatalogNotFoundItem(
+                    ci_name=s.ci_name,
+                    ci=ci,
+                    namespace=s.namespace,
+                    expected_catalog_namespace=expected_ns,
+                    message=suggestion or "Not found in any catalog namespace",
+                    suggested_ci=suggested_ci,
+                ))
 
     return CatalogNamespaceValidationResponse(
         mismatches=mismatches,
@@ -1604,11 +1684,12 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                 expected_ns = get_catalog_namespace(s.ci, s.catalog_namespace or None)
                 if s.ci not in ns_cache:
                     ns_cache[s.ci] = validate_catalog_item_exists(s.ci, expected_ns, config_check)
-                exists, found_ns, suggestion = ns_cache[s.ci]
+                exists, found_ns, suggestion, _suggested_ci = ns_cache[s.ci]
                 if not exists and found_ns is not None and found_ns != expected_ns:
-                    # Item in a different namespace — redirect silently
+                    # Exact CI in a different namespace — redirect catalog_namespace only
                     s.catalog_namespace = found_ns
                 elif not exists and found_ns is None:
+                    # Do NOT auto-apply suggested_ci (.prod vs .event) — operator must choose
                     not_found_errors.append(f"{s.ci_name} ({s.ci}): {suggestion}")
         finally:
             cluster_targets.cleanup_kubeconfig(config_check.kubeconfig_path if body.target_cluster else None)
@@ -1666,6 +1747,7 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                 message=f"Starting deployment ({pace:g}s between workshops)",
                 progress=1,
             )
+            _log_operator_overrides()
             results = await _run_deploy_over(
                 schedules, config, job.job_id, _asset_passwords, pace_seconds=pace
             )
@@ -1788,6 +1870,7 @@ async def deploy_session(
                 message=f"Starting deployment ({pace:g}s between workshops)",
                 progress=1,
             )
+            _log_operator_overrides()
             results = await _run_deploy_over(
                 schedules, config, job.job_id, asset_passwords={}, pace_seconds=pace
             )

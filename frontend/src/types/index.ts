@@ -324,15 +324,19 @@ export interface CatalogNamespaceMismatch {
   suggestion: string;
 }
 
+export interface CatalogNotFoundItem {
+  ci_name: string;
+  ci: string;
+  namespace: string;
+  expected_catalog_namespace: string;
+  message: string;
+  /** Exactly one env-suffix alternate (.prod OR .event OR .dev). Null if ambiguous. */
+  suggested_ci?: string | null;
+}
+
 export interface CatalogNamespaceValidationResponse {
   mismatches: CatalogNamespaceMismatch[];
-  not_found: Array<{
-    ci_name: string;
-    ci: string;
-    namespace: string;
-    expected_catalog_namespace: string;
-    message: string;
-  }>;
+  not_found: CatalogNotFoundItem[];
   checked: number;
   skipped: number;
 }
@@ -372,6 +376,16 @@ export interface SessionSummary {
   has_results: boolean;
   deploy_log_file: string | null;
   qa_log_file: string | null;
+  override_count?: number;
+}
+
+export interface OperatorOverride {
+  action: string;
+  summary: string;
+  detail: string;
+  affected_count: number;
+  timestamp: string;
+  source: string;
 }
 
 export interface SessionDetail {
@@ -383,6 +397,7 @@ export interface SessionDetail {
   qa_results: QAResult[];
   deploy_log_file: string | null;
   qa_log_file: string | null;
+  operator_overrides?: OperatorOverride[];
 }
 
 export interface RegionPlan {
