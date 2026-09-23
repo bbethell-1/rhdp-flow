@@ -6,7 +6,9 @@ This overlay adds two things to the infra01 `rhdp-flow` instance:
    restricted to an email allowlist (Josh + Billy).
 2. **Deploy-target picker** — an operator-only dropdown in Deploy Settings that
    deploys the loaded schedule (CSV upload *or* Labagator import) to one of
-   several physical clusters instead of the app's own cluster.
+   several physical clusters. Defaults to **Events (us-west-2)** when that
+   target Secret exists; operators can still choose this cluster (infra01),
+   integration, or prod.
 
 Everything committed to git is non-secret. The two live credentials — the
 oauth cookie secret and the per-target-cluster ServiceAccount tokens — are

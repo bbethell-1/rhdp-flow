@@ -192,7 +192,9 @@ export const UploadTab: React.FC<Props> = ({
   const [useCatalogLookup, setUseCatalogLookup] = useState(false);
   const [ignoreCapacityWarnings, setIgnoreCapacityWarnings] = useState(false);
 
-  // Multi-cluster deploy target picker (Feature 2 — identity-gated to approved operators)
+  // Multi-cluster deploy target picker (Feature 2 — identity-gated to approved operators).
+  // Default target is Events (us-west-2) when that cluster is configured; operators can still pick another.
+  const DEFAULT_TARGET_CLUSTER = 'events';
   const [pickerAllowed, setPickerAllowed] = useState(false);
   const [deployClusters, setDeployClusters] = useState<import('../types').ClusterTarget[]>([]);
   const [targetCluster, setTargetCluster] = useState<string>(getSelectedTarget);
@@ -202,8 +204,14 @@ export const UploadTab: React.FC<Props> = ({
     api.getClusters()
       .then((resp) => {
         if (cancelled) return;
+        const clusters = resp.clusters ?? [];
         setPickerAllowed(resp.allowed);
-        setDeployClusters(resp.clusters ?? []);
+        setDeployClusters(clusters);
+        const hasEvents = clusters.some((c) => c.key === DEFAULT_TARGET_CLUSTER);
+        if (resp.allowed && hasEvents && !getSelectedTarget()) {
+          selectTargetCluster(DEFAULT_TARGET_CLUSTER);
+          setTargetCluster(DEFAULT_TARGET_CLUSTER);
+        }
       })
       .catch(() => {
         if (cancelled) return;
@@ -284,15 +292,27 @@ export const UploadTab: React.FC<Props> = ({
     const warns: ScheduleWarning[] = [];
     const now = new Date();
 
-    // Detect duplicate rows (same CI + Namespace)
-    const seen = new Map<string, number>();
+    // Same CI + Namespace is fine on different days; warn only when provision→destroy windows overlap.
+    type WindowEntry = { index: number; start: Date | null; end: Date | null };
+    const byCiNs = new Map<string, WindowEntry[]>();
     schedules.forEach((s, i) => {
+      if (s.multi_workshop_name) return;
       const key = `${s.ci}||${s.namespace}`;
-      if (seen.has(key) && !s.multi_workshop_name) {
-        warns.push({ index: i, field: 'ci', message: `"${s.ci_name}" appears to be a duplicate (same CI + Namespace as row ${(seen.get(key) ?? 0) + 1})` });
-      } else {
-        seen.set(key, i);
+      const start = parseScheduleDate(s.provisioning_date);
+      const end = parseScheduleDate(s.auto_destroy) || parseScheduleDate(s.auto_stop);
+      const prev = byCiNs.get(key) ?? [];
+      for (const p of prev) {
+        const canCompare = !!(start && end && p.start && p.end);
+        if (canCompare && start < p.end! && end! > p.start!) {
+          warns.push({
+            index: i,
+            field: 'ci',
+            message: `"${s.ci_name}" overlaps row ${p.index + 1} (same CI + Namespace with overlapping provision→destroy windows)`,
+          });
+        }
       }
+      prev.push({ index: i, start, end });
+      byCiNs.set(key, prev);
     });
 
     schedules.forEach((s, i) => {
@@ -2352,7 +2372,7 @@ export const UploadTab: React.FC<Props> = ({
                 </SplitItem>
                 {pickerAllowed && deployClusters.length > 0 && (
                   <SplitItem>
-                    <Tooltip content="Choose which physical cluster to deploy to. Restricted to approved operators. Defaults to this app's own cluster.">
+                    <Tooltip content="Choose which physical cluster to deploy to. Restricted to approved operators. Defaults to Events (us-west-2).">
                       <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <span style={{ fontSize: '0.875rem', whiteSpace: 'nowrap' }}>Deploy to</span>
                         <FormSelect
@@ -2379,9 +2399,13 @@ export const UploadTab: React.FC<Props> = ({
                           }}
                           style={{ width: 'auto', minWidth: 180 }}
                         >
-                          <FormSelectOption value="" label="This cluster (default)" />
+                          <FormSelectOption value="" label="This cluster (infra01)" />
                           {deployClusters.map((c) => (
-                            <FormSelectOption key={c.key} value={c.key} label={c.display_name} />
+                            <FormSelectOption
+                              key={c.key}
+                              value={c.key}
+                              label={c.key === DEFAULT_TARGET_CLUSTER ? `${c.display_name} (default)` : c.display_name}
+                            />
                           ))}
                         </FormSelect>
                       </span>
