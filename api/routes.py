@@ -82,6 +82,7 @@ from api.models import (
 )
 from api.services import labagator_client
 from api.services.labagator_import import transform_labagator_to_flow
+from lib.deploy_pace import deploy_pace_seconds
 from rhdp_flow import (
     DeploymentResult,
     RHDPConfig,
@@ -1489,6 +1490,7 @@ async def _run_deploy_over(
     config: RHDPConfig,
     job_id: str,
     asset_passwords: dict[str, str] | None,
+    pace_seconds: float = 1.0,
 ) -> list[DeploymentResult]:
     """Run the deploy loop over an explicit, LOCAL ``schedules`` list.
 
@@ -1542,6 +1544,8 @@ async def _run_deploy_over(
         done += 1
         pct = int(done / total * 100) if total else 100
         jobs.update_job(job_id, progress=pct, message=f"Processed group: {group_name}")
+        if not config.dry_run and total > 1 and done < total:
+            await asyncio.sleep(pace_seconds)
 
     for s in regular_schedules:
         await jobs.wait_if_paused(job_id)
@@ -1557,8 +1561,8 @@ async def _run_deploy_over(
             job_id, progress=pct,
             message=f"Deployed {result.ci_name}: {result.status}",
         )
-        if not config.dry_run and len(regular_schedules) > 1:
-            await asyncio.sleep(1)
+        if not config.dry_run and total > 1 and done < total:
+            await asyncio.sleep(pace_seconds)
 
     return results
 
@@ -1642,12 +1646,6 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                 if s.showroom_repo:
                     s.showroom_novnc = body.showroom_novnc
                     s.showroom_zerotouch = body.showroom_zerotouch
-            jobs.update_job(
-                job.job_id,
-                status=jobs.Status.running,
-                message="Starting deployment",
-                progress=1,
-            )
 
             # Replicate main() deploy loop logic (shared with /deploy/session)
             # Planned unit count (grouped multi-asset workshops + regular schedules)
@@ -1661,8 +1659,15 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                 1 for s in schedules
                 if not (s.multi_workshop_name and s.is_multi_asset)
             )
+            pace = deploy_pace_seconds(total, body.deploy_delay_seconds)
+            jobs.update_job(
+                job.job_id,
+                status=jobs.Status.running,
+                message=f"Starting deployment ({pace:g}s between workshops)",
+                progress=1,
+            )
             results = await _run_deploy_over(
-                schedules, config, job.job_id, _asset_passwords
+                schedules, config, job.job_id, _asset_passwords, pace_seconds=pace
             )
 
             global _deployment_results
@@ -1776,14 +1781,15 @@ async def deploy_session(
 
     async def _run():
         try:
+            pace = deploy_pace_seconds(len(schedules), None)
             jobs.update_job(
                 job.job_id,
                 status=jobs.Status.running,
-                message="Starting deployment",
+                message=f"Starting deployment ({pace:g}s between workshops)",
                 progress=1,
             )
             results = await _run_deploy_over(
-                schedules, config, job.job_id, asset_passwords={}
+                schedules, config, job.job_id, asset_passwords={}, pace_seconds=pace
             )
             # Mirror results into Flow's global state + persist, so this deploy
             # shows in the Flow dashboard (Deployments tab). ACCUMULATE rather
@@ -2250,6 +2256,7 @@ async def deploy_retry(request: Request, body: RetryRequest, _key=Depends(verify
             )
             jobs.update_job(job.job_id, status=jobs.Status.running, message=f"Retrying {len(matching)} deployment(s)")
 
+            pace = deploy_pace_seconds(len(matching), body.deploy_delay_seconds)
             results = []
             for i, s in enumerate(matching):
                 result = await asyncio.to_thread(
@@ -2261,8 +2268,8 @@ async def deploy_retry(request: Request, body: RetryRequest, _key=Depends(verify
                     job.job_id, progress=pct,
                     message=f"Retried {result.ci_name}: {result.status}",
                 )
-                if not config.dry_run and len(matching) > 1:
-                    await asyncio.sleep(1)
+                if not config.dry_run and len(matching) > 1 and i + 1 < len(matching):
+                    await asyncio.sleep(pace)
 
             # Update global results: replace matching entries, keep the rest
             global _deployment_results

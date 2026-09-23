@@ -215,6 +215,8 @@ export const UploadTab: React.FC<Props> = ({
   const [showroomZerotouch, setShowroomZerotouch] = useState(false);
   const [useCatalogLookup, setUseCatalogLookup] = useState(false);
   const [ignoreCapacityWarnings, setIgnoreCapacityWarnings] = useState(false);
+  // '' = auto pace by batch size (1s / 3s / 5s)
+  const [deployDelaySeconds, setDeployDelaySeconds] = useState('');
 
   // Multi-cluster deploy target. Always default to Events (us-west-2) when configured.
   // Dropdown is shown whenever targets exist — Labagator embeds use API key only (no OAuth email).
@@ -914,7 +916,7 @@ export const UploadTab: React.FC<Props> = ({
     setLogLines([]);
 
     try {
-      const job = await api.deploy({ dry_run: dryRun, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect, showroom_novnc: showroomNovnc, showroom_zerotouch: showroomZerotouch, ignore_capacity_warnings: ignoreCapacityWarnings, target_cluster: targetCluster || null });
+      const job = await api.deploy({ dry_run: dryRun, resource_lock: resourceLock, enable_resource_pools: enableResourcePools, white_glove: whiteGlove, redirect, showroom_novnc: showroomNovnc, showroom_zerotouch: showroomZerotouch, ignore_capacity_warnings: ignoreCapacityWarnings, deploy_delay_seconds: deployDelaySeconds === '' ? null : Number(deployDelaySeconds), target_cluster: targetCluster || null });
       jobIdRef.current = job.job_id;
       const ws = api.deployWebSocket(job.job_id);
       wsRef.current = ws;
@@ -2471,6 +2473,26 @@ export const UploadTab: React.FC<Props> = ({
                       isChecked={ignoreCapacityWarnings}
                       onChange={(_e, checked) => setIgnoreCapacityWarnings(checked)}
                     />
+                  </Tooltip>
+                </SplitItem>
+                <SplitItem>
+                  <Tooltip content="Pause between workshops to ease API pressure on large batches. Auto: 1s (<10), 3s (10–24), 5s (25+).">
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: '0.875rem', whiteSpace: 'nowrap' }}>Deploy pace</span>
+                      <FormSelect
+                        id="deploy-pace-select"
+                        aria-label="Deploy pace between workshops"
+                        value={deployDelaySeconds}
+                        onChange={(_e, value) => setDeployDelaySeconds(value)}
+                        style={{ width: 'auto', minWidth: 140 }}
+                      >
+                        <FormSelectOption value="" label="Auto (by batch size)" />
+                        <FormSelectOption value="1" label="1s (fast)" />
+                        <FormSelectOption value="3" label="3s" />
+                        <FormSelectOption value="5" label="5s (large)" />
+                        <FormSelectOption value="10" label="10s (gentle)" />
+                      </FormSelect>
+                    </span>
                   </Tooltip>
                 </SplitItem>
                 {deployClusters.length > 0 && (

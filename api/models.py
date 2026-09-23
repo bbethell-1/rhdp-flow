@@ -123,6 +123,15 @@ class DeployRequest(BaseModel):
     showroom_novnc: bool = Field(False, description="Enable noVNC remote desktop in Showroom")
     showroom_zerotouch: bool = Field(False, description="Use zerotouch Showroom chart with setup/runtime automation")
     ignore_capacity_warnings: bool = Field(False, description="Skip tenant cluster capacity checks before deployment")
+    deploy_delay_seconds: float | None = Field(
+        None,
+        ge=0,
+        le=60,
+        description=(
+            "Pause between workshops during deploy. "
+            "Omit for auto pace: 1s (<10), 3s (10–24), 5s (25+)."
+        ),
+    )
     export_yaml_dir: str | None = Field(
         None,
         description="If set on dry-run deploy, write ResourceClaim / Workshop / WorkshopProvision YAMLs to this directory on the API host",
