@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo, Fragment } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo, Fragment, type ReactNode } from 'react';
 import {
   Alert,
   Button,
@@ -85,6 +85,56 @@ function uniqueByCi<T extends { ci: string }>(refs: T[]): T[] {
     seen.add(r.ci);
     return true;
   });
+}
+
+/** Sort alert rows by CI id, then display name. */
+function sortByCiName<T extends { ci?: string; ci_name?: string; workshop_name?: string }>(items: T[]): T[] {
+  return [...items].sort((a, b) => {
+    const ac = (a.ci || '').localeCompare(b.ci || '');
+    if (ac !== 0) return ac;
+    return (a.ci_name || a.workshop_name || '').localeCompare(b.ci_name || b.workshop_name || '');
+  });
+}
+
+/** Compact “Affects N” + expand — no partial lists / “…and N more”. */
+function AffectsItemsList({
+  count,
+  expanded,
+  onToggle,
+  children,
+  noun = 'item',
+}: {
+  count: number;
+  expanded: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+  noun?: string;
+}) {
+  if (count <= 0) return null;
+  const label = count === 1 ? noun : `${noun}s`;
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ fontSize: '0.9rem' }}>
+        Affects <strong>{count}</strong> {label}.{' '}
+        <Button variant="link" isInline size="sm" onClick={onToggle}>
+          {expanded ? 'Hide items' : 'Show items'}
+        </Button>
+      </div>
+      {expanded && (
+        <ul
+          style={{
+            margin: '6px 0 0 20px',
+            paddingLeft: 0,
+            fontSize: '0.85rem',
+            maxHeight: 240,
+            overflowY: 'auto',
+          }}
+        >
+          {children}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 function clusterCisFromTenantRefs(refs: { ci: string; cluster_ref?: string }[]): string[] {
@@ -318,6 +368,10 @@ export const UploadTab: React.FC<Props> = ({
   const [tenantNoPoolExpanded, setTenantNoPoolExpanded] = useState(false);
   const [viaFreshExpanded, setViaFreshExpanded] = useState(false);
   const [modalListsExpanded, setModalListsExpanded] = useState(false);
+  const [usersAdvisoryExpanded, setUsersAdvisoryExpanded] = useState(false);
+  const [numUsersExpanded, setNumUsersExpanded] = useState(false);
+  const [skippedItemsExpanded, setSkippedItemsExpanded] = useState(false);
+  const [poolWarnExpanded, setPoolWarnExpanded] = useState(false);
 
   // Expandable rows state
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
@@ -2029,13 +2083,18 @@ export const UploadTab: React.FC<Props> = ({
                 </div>
               }
             >
-              <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
-                {numUsersViolations.map((v, i) => (
+              <AffectsItemsList
+                count={numUsersViolations.length}
+                expanded={numUsersExpanded}
+                onToggle={() => setNumUsersExpanded((v) => !v)}
+                noun="schedule"
+              >
+                {sortByCiName(numUsersViolations).map((v, i) => (
                   <li key={i}>
                     <strong>{v.ci_name}</strong> ({v.ci}): {v.requested_users} users requested, catalog max is {v.maximum}
                   </li>
                 ))}
-              </ul>
+              </AffectsItemsList>
               Deployment is blocked until counts are at or below the catalog max. Cap is a local Flow tweak for testing — Labagator remains the event source of truth.
             </Alert>
           )}
@@ -2051,31 +2110,39 @@ export const UploadTab: React.FC<Props> = ({
             >
               {poolCapacityWarnings.length > 0 && (
                 <>
-                  <div style={{ marginBottom: 8, fontWeight: 600 }}>Capacity warnings:</div>
-                  <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
-                    {poolCapacityWarnings.map((w, i) => (
+                  <div style={{ marginBottom: 4, fontWeight: 600 }}>Capacity warnings</div>
+                  <AffectsItemsList
+                    count={poolCapacityWarnings.length}
+                    expanded={poolWarnExpanded}
+                    onToggle={() => setPoolWarnExpanded((v) => !v)}
+                  >
+                    {sortByCiName(poolCapacityWarnings).map((w, i) => (
                       <li key={i} style={{ color: w.severity === 'critical' ? 'var(--pf-v6-global--danger-color--100)' : undefined }}>
                         <strong>{w.ci_name}</strong> ({w.pool_name}):
                         Pool {w.pool_saturation_percent}% saturated, {w.placement_capacity_percent}% utilized
                         {w.severity === 'critical' && ' — CRITICAL: at capacity!'}
                       </li>
                     ))}
-                  </ul>
+                  </AffectsItemsList>
                 </>
               )}
               {poolsNotFound.length > 0 && (
                 <>
-                  <div style={{ marginTop: poolCapacityWarnings.length > 0 ? 12 : 0, marginBottom: 8, fontWeight: 600 }}>
-                    Pools not found:
+                  <div style={{ marginTop: poolCapacityWarnings.length > 0 ? 8 : 0, marginBottom: 4, fontWeight: 600 }}>
+                    Pools not found
                   </div>
-                  <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
-                    {poolsNotFound.map((p, i) => (
+                  <AffectsItemsList
+                    count={poolsNotFound.length}
+                    expanded={poolWarnExpanded}
+                    onToggle={() => setPoolWarnExpanded((v) => !v)}
+                  >
+                    {sortByCiName(poolsNotFound).map((p, i) => (
                       <li key={i}>
                         <strong>{p.ci_name}</strong>
                       </li>
                     ))}
-                  </ul>
-                  <div style={{ marginTop: 8, fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--pf-v6-global--Color--200)' }}>
+                  </AffectsItemsList>
+                  <div style={{ marginTop: 4, fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--pf-v6-global--Color--200)' }}>
                     These workshops can deploy using fresh cluster instances if needed (slower provisioning).
                   </div>
                 </>
@@ -2112,12 +2179,17 @@ export const UploadTab: React.FC<Props> = ({
                 </div>
               }
             >
-              <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
-                {usersNotInCatalog.map((a, i) => (
+              <AffectsItemsList
+                count={usersNotInCatalog.length}
+                expanded={usersAdvisoryExpanded}
+                onToggle={() => setUsersAdvisoryExpanded((v) => !v)}
+                noun="row"
+              >
+                {sortByCiName(usersNotInCatalog).map((a, i) => (
                   <li key={i}>{a.message}</li>
                 ))}
-              </ul>
-              <div style={{ marginTop: 8, fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)' }}>
+              </AffectsItemsList>
+              <div style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)' }}>
                 Labagator is still the master plan for the event. Use the buttons above only to unblock testing / partial deploys in Flow.
               </div>
             </Alert>
@@ -2132,28 +2204,20 @@ export const UploadTab: React.FC<Props> = ({
               style={{ marginBottom: 12 }}
             >
               <div style={{ fontSize: '0.9rem', marginBottom: 8 }}>
-                These CIs already exist — the schedule pointed at the wrong catalog namespace (e.g. expected{' '}
-                <code>babylon-catalog-event</code>, live item is in <code>babylon-catalog-prod</code>).
+                These CIs already exist — the schedule pointed at the wrong catalog namespace.
                 {' '}<strong>Local Flow only</strong> — diverges from Labagator if the plan still lists the other namespace.
               </div>
-              <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
-                {catalogNamespaceMismatches.slice(0, catalogNsExpanded ? 200 : 5).map((m, i) => (
+              <AffectsItemsList
+                count={catalogNamespaceMismatches.length}
+                expanded={catalogNsExpanded}
+                onToggle={() => setCatalogNsExpanded((v) => !v)}
+              >
+                {sortByCiName(catalogNamespaceMismatches).map((m, i) => (
                   <li key={i}>
                     <strong>{m.ci_name}</strong>: not in <code>{m.expected_catalog_namespace}</code>, found in <code>{m.found_catalog_namespace}</code> — deploy will use {m.found_catalog_namespace}
                   </li>
                 ))}
-              </ul>
-              {catalogNamespaceMismatches.length > 5 && (
-                <Button
-                  variant="link"
-                  isInline
-                  size="sm"
-                  onClick={() => setCatalogNsExpanded((v) => !v)}
-                  style={{ marginBottom: 8 }}
-                >
-                  {catalogNsExpanded ? 'Show less' : `Show all ${catalogNamespaceMismatches.length}…`}
-                </Button>
-              )}
+              </AffectsItemsList>
               <div style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)' }}>
                 Namespace column updated — no action needed.
               </div>
@@ -2176,8 +2240,7 @@ export const UploadTab: React.FC<Props> = ({
               <div style={{ fontSize: '0.9rem', marginBottom: 8 }}>
                 Schedule CI was bare. Flow looked for a published env suffix:{' '}
                 <code>.event</code> if it exists, otherwise <code>.prod</code>.
-                {' '}<strong>Local Flow only</strong> — this diverges from Labagator whenever the master plan
-                still has the bare name, <code>.prod</code>, <code>.event</code>, or a different catalog namespace.
+                {' '}<strong>Local Flow only</strong> — diverges from Labagator when the master plan differs.
               </div>
               {catalogSuffixCorrections.some((c) => c.corrected_ci.endsWith('.prod')) && (
                 <>
@@ -2206,23 +2269,17 @@ export const UploadTab: React.FC<Props> = ({
                   Rows auto-set to <code>.event</code> — preferred for big events. Still a Flow override if Labagator said otherwise.
                 </div>
               )}
-              <ul style={{ margin: '0 0 0 20px', fontSize: '0.85rem' }}>
-                {catalogSuffixCorrections.slice(0, catalogSuffixExpanded ? 200 : 8).map((c) => (
+              <AffectsItemsList
+                count={catalogSuffixCorrections.length}
+                expanded={catalogSuffixExpanded}
+                onToggle={() => setCatalogSuffixExpanded((v) => !v)}
+              >
+                {sortByCiName(catalogSuffixCorrections).map((c) => (
                   <li key={c.ci}>
                     <code>{c.ci}</code> → <code>{c.corrected_ci}</code>
                   </li>
                 ))}
-              </ul>
-              {catalogSuffixCorrections.length > 8 && (
-                <Button
-                  variant="link"
-                  isInline
-                  size="sm"
-                  onClick={() => setCatalogSuffixExpanded((v) => !v)}
-                >
-                  {catalogSuffixExpanded ? 'Show less' : `Show all ${catalogSuffixCorrections.length}…`}
-                </Button>
-              )}
+              </AffectsItemsList>
             </Alert>
           )}
 
@@ -2265,8 +2322,12 @@ export const UploadTab: React.FC<Props> = ({
               <div style={{ fontSize: '0.9rem', marginBottom: 8 }}>
                 Exact CI name not published and Flow could not auto-pick. Any manual pick here also diverges from Labagator.
               </div>
-              <ul style={{ margin: '0 0 0 20px', fontSize: '0.85rem' }}>
-                {catalogNotFoundUnique.slice(0, catalogNotFoundExpanded ? 50 : 5).map((nf) => (
+              <AffectsItemsList
+                count={catalogNotFoundUnique.length}
+                expanded={catalogNotFoundExpanded}
+                onToggle={() => setCatalogNotFoundExpanded((v) => !v)}
+              >
+                {sortByCiName(catalogNotFoundUnique).map((nf) => (
                   <li key={nf.ci}>
                     <code>{nf.ci}</code>
                     {catalogSuffixOpts(nf).length > 0 ? (
@@ -2276,17 +2337,7 @@ export const UploadTab: React.FC<Props> = ({
                     ) : null}
                   </li>
                 ))}
-              </ul>
-              {catalogNotFoundUnique.length > 5 && (
-                <Button
-                  variant="link"
-                  isInline
-                  size="sm"
-                  onClick={() => setCatalogNotFoundExpanded((v) => !v)}
-                >
-                  {catalogNotFoundExpanded ? 'Show less' : `Show all ${catalogNotFoundUnique.length}…`}
-                </Button>
-              )}
+              </AffectsItemsList>
             </Alert>
           )}
 
@@ -2307,8 +2358,12 @@ export const UploadTab: React.FC<Props> = ({
                 </div>
               }
             >
-              <ul style={{ margin: '0 0 0 20px', fontSize: '0.85rem' }}>
-                {skippedCatalogSummary.items.slice(0, 12).map((item) => (
+              <AffectsItemsList
+                count={skippedCatalogSummary.items.length}
+                expanded={skippedItemsExpanded}
+                onToggle={() => setSkippedItemsExpanded((v) => !v)}
+              >
+                {sortByCiName(skippedCatalogSummary.items).map((item) => (
                   <li key={item.ci}>
                     <strong>{item.ci_name}</strong> <code>{item.ci}</code>
                     {item.reason ? (
@@ -2316,12 +2371,7 @@ export const UploadTab: React.FC<Props> = ({
                     ) : null}
                   </li>
                 ))}
-                {skippedCatalogSummary.items.length > 12 && (
-                  <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>
-                    ...and {skippedCatalogSummary.items.length - 12} more
-                  </li>
-                )}
-              </ul>
+              </AffectsItemsList>
             </Alert>
           )}
 
@@ -2543,8 +2593,13 @@ export const UploadTab: React.FC<Props> = ({
                       {' '}<code>TenantClusterPool</code> when tenants provision. This is safe to ignore —
                       expect a <strong>longer deploy</strong> while clusters fill (often 30–60+ min).
                     </div>
-                    <ul style={{ margin: '0 0 10px 20px', fontSize: '0.9rem' }}>
-                      {willFailNoPoolUnique.slice(0, tenantNoPoolExpanded ? 200 : 5).map((ref: any) => {
+                    <AffectsItemsList
+                      count={willFailNoPoolUnique.length}
+                      expanded={tenantNoPoolExpanded}
+                      onToggle={() => setTenantNoPoolExpanded((v) => !v)}
+                      noun="catalog item"
+                    >
+                      {sortByCiName(willFailNoPoolUnique).map((ref: any) => {
                         const rowCount = willFailNoPool.filter((r: any) => r.ci === ref.ci).length;
                         return (
                           <li key={ref.ci}>
@@ -2557,18 +2612,7 @@ export const UploadTab: React.FC<Props> = ({
                           </li>
                         );
                       })}
-                    </ul>
-                    {willFailNoPoolUnique.length > 5 && (
-                      <Button
-                        variant="link"
-                        isInline
-                        size="sm"
-                        onClick={() => setTenantNoPoolExpanded((v) => !v)}
-                        style={{ marginBottom: 8 }}
-                      >
-                        {tenantNoPoolExpanded ? 'Show less' : `Show all ${willFailNoPoolUnique.length}…`}
-                      </Button>
-                    )}
+                    </AffectsItemsList>
                     <div style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)' }}>
                       Optional only (not applied automatically):{' '}
                       <strong>pre-create pools</strong> or <strong>−4h earlier</strong> starts capacity before
@@ -2587,24 +2631,18 @@ export const UploadTab: React.FC<Props> = ({
                     <div style={{ marginBottom: 6 }}>
                       No shared pool exists yet, but each of these tenant workshops has a matching
                       <code> -cluster.*</code> CI row in this CSV and the same namespace.
-                      Babylon will route the tenant onto that dedicated cluster:
+                      Babylon will route the tenant onto that dedicated cluster.
                     </div>
-                    <ul style={{ margin: '0 0 6px 20px', fontSize: '0.9rem' }}>
-                      {viaFreshCluster.slice(0, viaFreshExpanded ? 200 : 5).map((ref: any, i: number) => (
+                    <AffectsItemsList
+                      count={viaFreshCluster.length}
+                      expanded={viaFreshExpanded}
+                      onToggle={() => setViaFreshExpanded((v) => !v)}
+                      noun="workshop"
+                    >
+                      {sortByCiName(viaFreshCluster).map((ref: any, i: number) => (
                         <li key={i}><strong>{ref.workshop_name}</strong></li>
                       ))}
-                    </ul>
-                    {viaFreshCluster.length > 5 && (
-                      <Button
-                        variant="link"
-                        isInline
-                        size="sm"
-                        onClick={() => setViaFreshExpanded((v) => !v)}
-                        style={{ marginBottom: 6 }}
-                      >
-                        {viaFreshExpanded ? 'Show less' : `Show all ${viaFreshCluster.length}…`}
-                      </Button>
-                    )}
+                    </AffectsItemsList>
                     <div style={{ fontSize: '0.8rem', color: 'var(--pf-v6-global--Color--200)' }}>
                       Dedicated clusters provision from scratch (~2–4 h). A <code>TenantClusterPool</code> is faster
                       for future events since Babylon keeps clusters warm in advance.
@@ -3509,19 +3547,17 @@ export const UploadTab: React.FC<Props> = ({
           {numUsersViolations.length > 0 && (
             <Alert variant="danger" isInline title="Deployment blocked" style={{ margin: '12px 0' }}>
               <p style={{ marginBottom: 8 }}>The following issues must be resolved before deployment:</p>
-              <div style={{ marginBottom: 8 }}>
-                <strong>• num_users exceeds catalog maximum ({numUsersViolations.length}):</strong>
-                <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
-                  {numUsersViolations.slice(0, modalListsExpanded ? 200 : 3).map((v, i) => (
-                    <li key={i}>{v.ci_name}: {v.requested_users} users requested, max is {v.maximum}</li>
-                  ))}
-                </ul>
-                {numUsersViolations.length > 3 && (
-                  <Button variant="link" isInline size="sm" onClick={() => setModalListsExpanded((v) => !v)}>
-                    {modalListsExpanded ? 'Show less' : `Show all ${numUsersViolations.length}…`}
-                  </Button>
-                )}
-              </div>
+              <strong>• num_users exceeds catalog maximum</strong>
+              <AffectsItemsList
+                count={numUsersViolations.length}
+                expanded={modalListsExpanded}
+                onToggle={() => setModalListsExpanded((v) => !v)}
+                noun="schedule"
+              >
+                {sortByCiName(numUsersViolations).map((v, i) => (
+                  <li key={i}>{v.ci_name}: {v.requested_users} users requested, max is {v.maximum}</li>
+                ))}
+              </AffectsItemsList>
             </Alert>
           )}
 
@@ -3531,31 +3567,29 @@ export const UploadTab: React.FC<Props> = ({
                 Prefer <strong>Skip these items</strong> on the upload page first. Deploy auto-applies suggested
                 <code> .event</code>/<code>.prod</code> suffixes when known; truly missing CIs still block.
               </p>
-              <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
-                {catalogNotFoundUnique.slice(0, modalListsExpanded ? 200 : 5).map((nf) => (
+              <AffectsItemsList
+                count={catalogNotFoundUnique.length}
+                expanded={modalListsExpanded}
+                onToggle={() => setModalListsExpanded((v) => !v)}
+              >
+                {sortByCiName(catalogNotFoundUnique).map((nf) => (
                   <li key={nf.ci}>{nf.ci_name} (<code>{nf.ci}</code>)</li>
                 ))}
-              </ul>
-              {catalogNotFoundUnique.length > 5 && (
-                <Button variant="link" isInline size="sm" onClick={() => setModalListsExpanded((v) => !v)}>
-                  {modalListsExpanded ? 'Show less' : `Show all ${catalogNotFoundUnique.length}…`}
-                </Button>
-              )}
+              </AffectsItemsList>
             </Alert>
           )}
 
           {skippedCatalogSummary && skippedCatalogSummary.items.length > 0 && (
             <Alert variant="info" isInline title={`Will deploy ${skippedCatalogSummary.remaining} row(s) — already skipped ${skippedCatalogSummary.items.length} missing CI(s)`} style={{ margin: '12px 0' }}>
-              <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
-                {skippedCatalogSummary.items.slice(0, modalListsExpanded ? 200 : 5).map((item) => (
+              <AffectsItemsList
+                count={skippedCatalogSummary.items.length}
+                expanded={modalListsExpanded}
+                onToggle={() => setModalListsExpanded((v) => !v)}
+              >
+                {sortByCiName(skippedCatalogSummary.items).map((item) => (
                   <li key={item.ci}>{item.ci_name} (<code>{item.ci}</code>)</li>
                 ))}
-              </ul>
-              {skippedCatalogSummary.items.length > 5 && (
-                <Button variant="link" isInline size="sm" onClick={() => setModalListsExpanded((v) => !v)}>
-                  {modalListsExpanded ? 'Show less' : `Show all ${skippedCatalogSummary.items.length}…`}
-                </Button>
-              )}
+              </AffectsItemsList>
             </Alert>
           )}
 
@@ -3565,32 +3599,31 @@ export const UploadTab: React.FC<Props> = ({
               <p style={{ marginBottom: 8 }}>Review these issues before deploying:</p>
               {catalogNamespaceMismatches.length > 0 && (
                 <div style={{ marginBottom: 8 }}>
-                  <strong>• Catalog namespace mismatches ({catalogNamespaceMismatches.length}):</strong>
-                  <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
-                    {catalogNamespaceMismatches.slice(0, modalListsExpanded ? 200 : 2).map((m, i) => (
+                  <strong>• Catalog namespace mismatches</strong>
+                  <AffectsItemsList
+                    count={catalogNamespaceMismatches.length}
+                    expanded={modalListsExpanded}
+                    onToggle={() => setModalListsExpanded((v) => !v)}
+                  >
+                    {sortByCiName(catalogNamespaceMismatches).map((m, i) => (
                       <li key={i}>{m.ci_name}: expected {m.expected_catalog_namespace}, found in {m.found_catalog_namespace}</li>
                     ))}
-                  </ul>
-                  {catalogNamespaceMismatches.length > 2 && (
-                    <Button variant="link" isInline size="sm" onClick={() => setModalListsExpanded((v) => !v)}>
-                      {modalListsExpanded ? 'Show less' : `Show all ${catalogNamespaceMismatches.length}…`}
-                    </Button>
-                  )}
+                  </AffectsItemsList>
                 </div>
               )}
               {usersNotInCatalog.filter(a => a.severity === 'high').length > 0 && (
                 <div style={{ marginBottom: 8 }}>
-                  <strong>• High-severity Users/Instances issues ({usersNotInCatalog.filter(a => a.severity === 'high').length}):</strong>
-                  <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
-                    {usersNotInCatalog.filter(a => a.severity === 'high').slice(0, modalListsExpanded ? 200 : 2).map((a, i) => (
+                  <strong>• High-severity Users/Instances issues</strong>
+                  <AffectsItemsList
+                    count={usersNotInCatalog.filter(a => a.severity === 'high').length}
+                    expanded={modalListsExpanded}
+                    onToggle={() => setModalListsExpanded((v) => !v)}
+                    noun="row"
+                  >
+                    {sortByCiName(usersNotInCatalog.filter(a => a.severity === 'high')).map((a, i) => (
                       <li key={i}>{a.ci_name}: {a.message}</li>
                     ))}
-                  </ul>
-                  {usersNotInCatalog.filter(a => a.severity === 'high').length > 2 && (
-                    <Button variant="link" isInline size="sm" onClick={() => setModalListsExpanded((v) => !v)}>
-                      {modalListsExpanded ? 'Show less' : `Show all ${usersNotInCatalog.filter(a => a.severity === 'high').length}…`}
-                    </Button>
-                  )}
+                  </AffectsItemsList>
                 </div>
               )}
               {warnings.length > 0 && (
