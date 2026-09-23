@@ -2885,9 +2885,19 @@ def validate_catalog_item_exists(ci: str, expected_namespace: str, config: RHDPC
     similar = find_similar_catalog_items(ci, expected_namespace, config, limit=3)
     if similar:
         suggestions_text = ", ".join(f"'{s}'" for s in similar)
-        suggestion = f"Item '{ci}' not found in {expected_namespace}. Did you mean: {suggestions_text}?"
+        suggestion = (
+            f"Item '{ci}' not found in {expected_namespace}. "
+            f"Did you mean: {suggestions_text}?"
+        )
     else:
-        suggestion = f"Item '{ci}' not found in any catalog namespace ({expected_namespace}, babylon-catalog-event, babylon-catalog-prod, babylon-catalog-dev). Verify the CI name is correct."
+        searched = []
+        for ns in (expected_namespace, "babylon-catalog-event", "babylon-catalog-prod", "babylon-catalog-dev"):
+            if ns and ns not in searched:
+                searched.append(ns)
+        suggestion = (
+            f"Item '{ci}' not found (searched: {', '.join(searched)}). "
+            f"Check the CI name — many items need a .prod or .event suffix."
+        )
 
     return _cache_and_return((False, None, suggestion))
 

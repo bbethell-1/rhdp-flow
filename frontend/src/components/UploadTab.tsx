@@ -255,6 +255,11 @@ export const UploadTab: React.FC<Props> = ({
   // Catalog namespace validation
   const [catalogNamespaceMismatches, setCatalogNamespaceMismatches] = useState<import('../types').CatalogNamespaceMismatch[]>([]);
   const [catalogNotFound, setCatalogNotFound] = useState<Array<{ ci_name: string; ci: string; namespace: string; expected_catalog_namespace: string; message: string }>>([]);
+  const [skippedCatalogSummary, setSkippedCatalogSummary] = useState<{
+    rows: number;
+    remaining: number;
+    items: Array<{ ci: string; ci_name: string; reason: string }>;
+  } | null>(null);
 
   const [clusterNeeds, setClusterNeeds] = useState<any>(null);
   const [missingTenantRefs, setMissingTenantRefs] = useState<any>(null);
@@ -476,6 +481,7 @@ export const UploadTab: React.FC<Props> = ({
     setNumUsersLimits({});
     setCatalogNamespaceMismatches([]);
     setCatalogNotFound([]);
+    setSkippedCatalogSummary(null);
     setPoolCapacityWarnings([]);
     setPoolsNotFound([]);
     const [nsRes, nuRes, cnRes, pcRes] = await Promise.all([
@@ -1029,18 +1035,74 @@ export const UploadTab: React.FC<Props> = ({
 
   const columnCount = 14; // Updated for Item Type + Cluster Link columns
 
-  // Block deploy only for hard failures (missing catalog, num_users, direct-sandbox
-  // with no clusters). Missing TenantClusterPool alone is a warning — Babylon can
-  // create/manage the pool on provision (longer deploy).
+  // Block deploy only for hard failures (num_users, direct-sandbox with no
+  // clusters). Missing catalog items are a warning — skip them to deploy the rest.
   const _tenantBlockDirect = missingTenantRefs
     ? [...(missingTenantRefs.missing_refs || []), ...(missingTenantRefs.ref_no_pool || [])]
         .filter((r: any) => !r.pool_exists && !r.has_cluster_row && r.direct_sandbox)
     : [];
+  const catalogNotFoundUnique = uniqueByCi(catalogNotFound);
   const hasBlockingIssues =
-    catalogNotFound.length > 0 ||
     numUsersViolations.length > 0 ||
     _tenantBlockDirect.length > 0;
   const deployBlocked = hasBlockingIssues;
+
+  const skipMissingCatalogItems = async () => {
+    const missing = new Set(catalogNotFound.map((n) => n.ci));
+    if (missing.size === 0) return;
+
+    const byCi = new Map(catalogNotFoundUnique.map((n) => [n.ci, n]));
+    const removedRows: typeof schedules = [];
+    const kept = schedules.filter((s) => {
+      if (missing.has(s.ci)) {
+        removedRows.push(s);
+        return false;
+      }
+      if (s.asset_cis) {
+        const assets = s.asset_cis.split(',').map((a) => a.trim()).filter(Boolean);
+        if (assets.some((a) => missing.has(a))) {
+          removedRows.push(s);
+          return false;
+        }
+      }
+      return true;
+    });
+
+    // One summary line per missing CI (workshop + why)
+    const itemSummary = [...byCi.values()].map((nf) => {
+      const rowsForCi = removedRows.filter(
+        (s) =>
+          s.ci === nf.ci ||
+          (s.asset_cis || '')
+            .split(',')
+            .map((a) => a.trim())
+            .includes(nf.ci),
+      );
+      const reason = nf.message.includes('Did you mean')
+        ? nf.message.replace(/^Item '[^']+' not found in [^.]+\.\s*/, '')
+        : 'not published on this cluster';
+      return {
+        ci: nf.ci,
+        ci_name: nf.ci_name || rowsForCi[0]?.ci_name || nf.ci,
+        reason,
+      };
+    });
+
+    setSchedules(kept);
+    setCatalogNotFound([]);
+    setSkippedCatalogSummary({
+      rows: removedRows.length,
+      remaining: kept.length,
+      items: itemSummary,
+    });
+    try { await api.updateSchedules(kept); } catch { /* non-fatal */ }
+    showToast(
+      removedRows.length > 0
+        ? `Skipped ${itemSummary.length} missing CI(s) / ${removedRows.length} row(s) — ${kept.length} remain`
+        : 'No schedule rows removed',
+      removedRows.length > 0 ? 'info' : 'danger',
+    );
+  };
 
   return (
     <PageSection>
@@ -1586,23 +1648,101 @@ export const UploadTab: React.FC<Props> = ({
             </Alert>
           )}
 
-          {/* Catalog items not found — blocks deploy */}
-          {catalogNotFound.length > 0 && (
+          {/* Catalog items not found — warning; skip to deploy the rest */}
+          {catalogNotFoundUnique.length > 0 && (
             <Alert
-              variant="danger"
+              variant="warning"
               isInline
-              title={`Deploy blocked — ${catalogNotFound.length} catalog item(s) not found in any namespace`}
+              title={
+                catalogNotFound.length === catalogNotFoundUnique.length
+                  ? `${catalogNotFoundUnique.length} catalog item(s) not on this cluster`
+                  : `${catalogNotFoundUnique.length} catalog item(s) not on this cluster (${catalogNotFound.length} schedule rows)`
+              }
               style={{ marginBottom: 12 }}
+              actionLinks={
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <Button variant="primary" size="sm" onClick={() => skipMissingCatalogItems()}>
+                    Skip missing &amp; keep deploying
+                  </Button>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    onClick={async () => {
+                      try {
+                        const cnRes = await api.validateCatalogNamespaces();
+                        setCatalogNotFound(cnRes.not_found || []);
+                      } catch { /* ignore */ }
+                    }}
+                  >
+                    Re-check
+                  </Button>
+                </div>
+              }
             >
-              <ul style={{ margin: '4px 0 8px', paddingLeft: 20, fontSize: '0.85rem' }}>
-                {catalogNotFound.map((nf, i) => (
-                  <li key={i}>
-                    <strong>{nf.ci_name}</strong> (<code>{nf.ci}</code>)<br />
-                    <span style={{ color: 'var(--pf-v6-global--danger-color--100)' }}>{nf.message}</span>
+              <div style={{ marginBottom: 8, fontSize: '0.9rem' }}>
+                These CIs are not published on the target cluster (often missing a{' '}
+                <code>.prod</code> / <code>.event</code> suffix, or Summit vs zerotouch name).
+                Skip them to deploy everything else, or fix the CSV.
+              </div>
+              <ul style={{ margin: '0 0 8px 20px', fontSize: '0.85rem' }}>
+                {catalogNotFoundUnique.slice(0, 8).map((nf) => {
+                  const rowCount = catalogNotFound.filter((r) => r.ci === nf.ci).length;
+                  const hint = nf.message.includes('Did you mean')
+                    ? nf.message.replace(/^Item '[^']+' not found in [^.]+\.\s*/, '')
+                    : null;
+                  return (
+                    <li key={nf.ci}>
+                      <strong>{nf.ci_name}</strong>{' '}
+                      <code>{nf.ci}</code>
+                      {rowCount > 1 ? (
+                        <span style={{ color: 'var(--pf-v6-global--Color--200)' }}>
+                          {' '}({rowCount} rows)
+                        </span>
+                      ) : null}
+                      {hint ? (
+                        <div style={{ color: 'var(--pf-v6-global--Color--200)', fontSize: '0.8rem' }}>
+                          {hint}
+                        </div>
+                      ) : null}
+                    </li>
+                  );
+                })}
+                {catalogNotFoundUnique.length > 8 && (
+                  <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>
+                    ...and {catalogNotFoundUnique.length - 8} more
+                  </li>
+                )}
+              </ul>
+            </Alert>
+          )}
+
+          {skippedCatalogSummary && skippedCatalogSummary.items.length > 0 && (
+            <Alert
+              variant="info"
+              isInline
+              title={`Skipped ${skippedCatalogSummary.items.length} missing catalog item(s) (${skippedCatalogSummary.rows} schedule row${skippedCatalogSummary.rows === 1 ? '' : 's'}) — ${skippedCatalogSummary.remaining} remain`}
+              style={{ marginBottom: 12 }}
+              actionLinks={
+                <Button variant="link" size="sm" onClick={() => setSkippedCatalogSummary(null)}>
+                  Dismiss
+                </Button>
+              }
+            >
+              <ul style={{ margin: '0 0 0 20px', fontSize: '0.85rem' }}>
+                {skippedCatalogSummary.items.slice(0, 12).map((item) => (
+                  <li key={item.ci}>
+                    <strong>{item.ci_name}</strong> <code>{item.ci}</code>
+                    {item.reason ? (
+                      <span style={{ color: 'var(--pf-v6-global--Color--200)' }}> — {item.reason}</span>
+                    ) : null}
                   </li>
                 ))}
+                {skippedCatalogSummary.items.length > 12 && (
+                  <li style={{ color: 'var(--pf-v6-global--Color--200)' }}>
+                    ...and {skippedCatalogSummary.items.length - 12} more
+                  </li>
+                )}
               </ul>
-              <strong>These catalog items do not exist on this cluster. Remove them from your CSV or wait until they are published before deploying.</strong>
             </Alert>
           )}
 
@@ -2501,6 +2641,7 @@ export const UploadTab: React.FC<Props> = ({
                             setNumUsersLimits({});
                             setCatalogNamespaceMismatches([]);
                             setCatalogNotFound([]);
+                            setSkippedCatalogSummary(null);
                             setPoolCapacityWarnings([]);
                             setPoolsNotFound([]);
                             setMissingTenantRefs(null);
@@ -2752,31 +2893,43 @@ export const UploadTab: React.FC<Props> = ({
           </p>
 
           {/* BLOCKING ISSUES */}
-          {(numUsersViolations.length > 0 || catalogNotFound.length > 0) && (
+          {numUsersViolations.length > 0 && (
             <Alert variant="danger" isInline title="Deployment blocked" style={{ margin: '12px 0' }}>
               <p style={{ marginBottom: 8 }}>The following issues must be resolved before deployment:</p>
-              {numUsersViolations.length > 0 && (
-                <div style={{ marginBottom: 8 }}>
-                  <strong>• num_users exceeds catalog maximum ({numUsersViolations.length}):</strong>
-                  <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
-                    {numUsersViolations.slice(0, 3).map((v, i) => (
-                      <li key={i}>{v.ci_name}: {v.requested_users} users requested, max is {v.maximum}</li>
-                    ))}
-                    {numUsersViolations.length > 3 && <li>... and {numUsersViolations.length - 3} more</li>}
-                  </ul>
-                </div>
-              )}
-              {catalogNotFound.length > 0 && (
-                <div>
-                  <strong>• Catalog items not found ({catalogNotFound.length}):</strong>
-                  <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
-                    {catalogNotFound.slice(0, 3).map((nf, i) => (
-                      <li key={i}>{nf.ci_name} ({nf.ci})</li>
-                    ))}
-                    {catalogNotFound.length > 3 && <li>... and {catalogNotFound.length - 3} more</li>}
-                  </ul>
-                </div>
-              )}
+              <div style={{ marginBottom: 8 }}>
+                <strong>• num_users exceeds catalog maximum ({numUsersViolations.length}):</strong>
+                <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+                  {numUsersViolations.slice(0, 3).map((v, i) => (
+                    <li key={i}>{v.ci_name}: {v.requested_users} users requested, max is {v.maximum}</li>
+                  ))}
+                  {numUsersViolations.length > 3 && <li>... and {numUsersViolations.length - 3} more</li>}
+                </ul>
+              </div>
+            </Alert>
+          )}
+
+          {catalogNotFoundUnique.length > 0 && (
+            <Alert variant="warning" isInline title="Missing catalog items will be skipped if you deploy" style={{ margin: '12px 0' }}>
+              <p style={{ marginBottom: 6, fontSize: '0.9rem' }}>
+                Prefer <strong>Skip missing &amp; keep deploying</strong> on the upload page first so the schedule is cleaned up.
+              </p>
+              <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+                {catalogNotFoundUnique.slice(0, 5).map((nf) => (
+                  <li key={nf.ci}>{nf.ci_name} (<code>{nf.ci}</code>)</li>
+                ))}
+                {catalogNotFoundUnique.length > 5 && <li>... and {catalogNotFoundUnique.length - 5} more</li>}
+              </ul>
+            </Alert>
+          )}
+
+          {skippedCatalogSummary && skippedCatalogSummary.items.length > 0 && (
+            <Alert variant="info" isInline title={`Will deploy ${skippedCatalogSummary.remaining} row(s) — already skipped ${skippedCatalogSummary.items.length} missing CI(s)`} style={{ margin: '12px 0' }}>
+              <ul style={{ margin: '4px 0 0', paddingLeft: 20, fontSize: '0.85rem' }}>
+                {skippedCatalogSummary.items.slice(0, 5).map((item) => (
+                  <li key={item.ci}>{item.ci_name} (<code>{item.ci}</code>)</li>
+                ))}
+                {skippedCatalogSummary.items.length > 5 && <li>... and {skippedCatalogSummary.items.length - 5} more</li>}
+              </ul>
             </Alert>
           )}
 
