@@ -316,6 +316,27 @@ class LabagatorEventsResponse(BaseModel):
     error: str | None = None
 
 
+class LabagatorSessionSummary(BaseModel):
+    """One selectable room session from a Labagator event's deploy handoff."""
+
+    room_session_id: int
+    date: str = ""
+    title: str = ""
+    ci_name: str = ""
+    deploy_on: str = ""
+    users: str = ""
+    item_type: str = ""
+
+
+class LabagatorSessionsResponse(BaseModel):
+    """Response for GET /api/schedules/labagator-sessions."""
+
+    event_id: int
+    event_name: str = ""
+    sessions: list[LabagatorSessionSummary]
+    error: str | None = None
+
+
 class LabagatorPreviewResponse(BaseModel):
     """Response for GET /api/schedules/labagator-preview."""
 

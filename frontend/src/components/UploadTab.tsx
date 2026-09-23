@@ -5,6 +5,7 @@ import {
   Card,
   CardBody,
   CardTitle,
+  Checkbox,
   FormSelect,
   FormSelectOption,
   HelperText,
@@ -40,7 +41,7 @@ import InfoCircleIcon from '@patternfly/react-icons/dist/esm/icons/info-circle-i
 import { api, getSelectedTarget, selectTargetCluster } from '../services/api';
 import { DiffView } from './DiffView';
 import { CatalogItemSelect } from './CatalogItemSelect';
-import type { WorkshopSchedule, DeploymentResult, NumUsersViolation, UsersNotInCatalogAdvisory, ScheduleExampleMeta, LabagatorEventSummary, LabagatorPreviewResponse } from '../types';
+import type { WorkshopSchedule, DeploymentResult, NumUsersViolation, UsersNotInCatalogAdvisory, ScheduleExampleMeta, LabagatorEventSummary, LabagatorPreviewResponse, LabagatorSessionSummary } from '../types';
 
 /* ── Schedule date validation helpers ── */
 
@@ -109,14 +110,35 @@ export const UploadTab: React.FC<Props> = ({
       .catch(() => setScheduleExamples([]));
   }, []);
 
-  useEffect(() => {
-    api.listLabagatorEvents()
+  // Look-ahead window for the Labagator event list (days; 0 = all upcoming).
+  const [labagatorRangeDays, setLabagatorRangeDays] = useState(7);
+  const [labagatorEventsLoading, setLabagatorEventsLoading] = useState(false);
+  const [labagatorEvents, setLabagatorEvents] = useState<LabagatorEventSummary[]>([]);
+  // Session picker: sessions fetched for the selected event + which are checked.
+  const [labagatorSessions, setLabagatorSessions] = useState<LabagatorSessionSummary[]>([]);
+  const [labagatorSessionsLoading, setLabagatorSessionsLoading] = useState(false);
+  const [labagatorSessionsFetched, setLabagatorSessionsFetched] = useState(false);
+  const [selectedSessionIds, setSelectedSessionIds] = useState<Set<number>>(new Set());
+
+  const loadLabagatorEvents = useCallback((days: number) => {
+    setLabagatorEventsLoading(true);
+    api.listLabagatorEvents(days)
       .then((res) => {
         setLabagatorUnavailable(!!res.error);
-        setLabagatorEvents(res.events);
+        setLabagatorEvents(res.events ?? []);
       })
-      .catch(() => setLabagatorUnavailable(true));
+      .catch(() => {
+        setLabagatorUnavailable(true);
+        setLabagatorEvents([]);
+      })
+      .finally(() => setLabagatorEventsLoading(false));
   }, []);
+
+  useEffect(() => {
+    loadLabagatorEvents(labagatorRangeDays);
+    // Refetch whenever the look-ahead range changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [labagatorRangeDays]);
 
   const [deploying, setDeploying] = useState(false);
   const [deployPaused, setDeployPaused] = useState(false);
@@ -128,7 +150,6 @@ export const UploadTab: React.FC<Props> = ({
   const [passwordCount, setPasswordCount] = useState<number | null>(null);
 
   // Labagator import state (live API import)
-  const [labagatorEvents, setLabagatorEvents] = useState<LabagatorEventSummary[]>([]);
   const [labagatorUnavailable, setLabagatorUnavailable] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
   const [labagatorNamespace, setLabagatorNamespace] = useState('');
@@ -622,6 +643,49 @@ export const UploadTab: React.FC<Props> = ({
 
   const NAMESPACE_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
+  // Reset the session picker whenever the chosen event changes — the previously
+  // fetched sessions belong to a different event.
+  useEffect(() => {
+    setLabagatorSessions([]);
+    setLabagatorSessionsFetched(false);
+    setSelectedSessionIds(new Set());
+  }, [selectedEventId]);
+
+  const handleFetchLabagatorSessions = async () => {
+    if (selectedEventId === null) { showToast('Please select an event', 'danger'); return; }
+    const event = labagatorEvents.find((e) => e.id === selectedEventId);
+    setLabagatorSessionsLoading(true);
+    try {
+      const res = await api.listLabagatorSessions({ event_id: selectedEventId, event_name: event?.name });
+      setLabagatorSessions(res.sessions);
+      setLabagatorSessionsFetched(true);
+      // Default to all selected — the common case is "deploy everything".
+      setSelectedSessionIds(new Set(res.sessions.map((s) => s.room_session_id)));
+      if (res.sessions.length === 0) {
+        showToast('No deployable sessions found for this event.', 'info');
+      }
+    } catch (e) {
+      showToast(`Fetch sessions failed: ${e}`, 'danger');
+    } finally {
+      setLabagatorSessionsLoading(false);
+    }
+  };
+
+  const toggleSession = (id: number, checked: boolean) => {
+    setSelectedSessionIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id); else next.delete(id);
+      return next;
+    });
+  };
+
+  const allSessionsSelected =
+    labagatorSessions.length > 0 && selectedSessionIds.size === labagatorSessions.length;
+
+  const toggleSelectAllSessions = (checked: boolean) => {
+    setSelectedSessionIds(checked ? new Set(labagatorSessions.map((s) => s.room_session_id)) : new Set());
+  };
+
   const handleLabagatorPreview = async () => {
     if (labagatorPreviewing) return;
     if (selectedEventId === null) { showToast('Please select an event', 'danger'); return; }
@@ -632,6 +696,17 @@ export const UploadTab: React.FC<Props> = ({
     setLabagatorNamespaceError('');
     const event = labagatorEvents.find((e) => e.id === selectedEventId);
     if (!event) { showToast('Selected event not found', 'danger'); return; }
+
+    // When the session picker has been used, import only the checked sessions.
+    // With no fetch (picker untouched), import the whole event as before.
+    let roomSessionIds: number[] | undefined;
+    if (labagatorSessionsFetched) {
+      if (selectedSessionIds.size === 0) {
+        showToast('Select at least one session to import', 'danger');
+        return;
+      }
+      roomSessionIds = Array.from(selectedSessionIds);
+    }
 
     setLabagatorPreviewing(true);
     try {
@@ -644,9 +719,10 @@ export const UploadTab: React.FC<Props> = ({
         white_glove: whiteGlove,
         auto_stop_days: labagatorAutoStopDays,
         auto_destroy_days: labagatorAutoDestroyDays,
+        room_session_ids: roomSessionIds,
       });
       if (preview.session_count === 0) {
-        showToast('No sessions found for this event this week.', 'info');
+        showToast('No sessions found for the current selection.', 'info');
         return;
       }
       setLabagatorPreview(preview);
@@ -1037,18 +1113,40 @@ export const UploadTab: React.FC<Props> = ({
         <CardBody>
           {labagatorUnavailable ? (
             <Alert variant="warning" isInline title="Labagator is unavailable — use manual CSV export instead" />
-          ) : labagatorEvents.length === 0 ? (
-            <Alert variant="info" isInline title="No Labagator events this week" />
           ) : (
             <>
               <Split hasGutter style={{ marginBottom: 12, alignItems: 'flex-end' }}>
+                <SplitItem>
+                  <FormSelect
+                    aria-label="Event look-ahead window"
+                    value={labagatorRangeDays}
+                    onChange={(_e, v) => setLabagatorRangeDays(Number(v))}
+                    style={{ minWidth: 160 }}
+                  >
+                    <FormSelectOption value={7} label="Next 7 days" />
+                    <FormSelectOption value={30} label="Next 30 days" />
+                    <FormSelectOption value={90} label="Next 90 days" />
+                    <FormSelectOption value={0} label="All upcoming" />
+                  </FormSelect>
+                </SplitItem>
                 <SplitItem isFilled>
                   <FormSelect
                     aria-label="Labagator event"
                     value={selectedEventId ?? ''}
                     onChange={(_e, v) => setSelectedEventId(v ? Number(v) : null)}
+                    isDisabled={labagatorEventsLoading || labagatorEvents.length === 0}
                   >
-                    <FormSelectOption key="" value="" label="Select an event…" />
+                    <FormSelectOption
+                      key=""
+                      value=""
+                      label={
+                        labagatorEventsLoading
+                          ? 'Loading events…'
+                          : labagatorEvents.length === 0
+                            ? 'No events in this range'
+                            : 'Select an event…'
+                      }
+                    />
                     {labagatorEvents.map((ev) => (
                       <FormSelectOption key={ev.id} value={ev.id} label={`${ev.name} (${ev.start_date} – ${ev.end_date})`} />
                     ))}
@@ -1066,8 +1164,18 @@ export const UploadTab: React.FC<Props> = ({
                 </SplitItem>
                 <SplitItem>
                   <Button
+                    variant="secondary"
+                    isDisabled={selectedEventId === null || labagatorSessionsLoading}
+                    isLoading={labagatorSessionsLoading}
+                    onClick={handleFetchLabagatorSessions}
+                  >
+                    Fetch sessions
+                  </Button>
+                </SplitItem>
+                <SplitItem>
+                  <Button
                     variant="primary"
-                    isDisabled={!labagatorNamespace || labagatorPreviewing}
+                    isDisabled={!labagatorNamespace || labagatorPreviewing || labagatorEvents.length === 0}
                     isLoading={labagatorPreviewing}
                     onClick={handleLabagatorPreview}
                   >
@@ -1077,6 +1185,35 @@ export const UploadTab: React.FC<Props> = ({
               </Split>
               {labagatorNamespaceError && (
                 <Alert variant="danger" isInline title={labagatorNamespaceError} style={{ marginBottom: 12 }} />
+              )}
+
+              {labagatorSessionsFetched && (
+                <div style={{ marginBottom: 12, maxHeight: 240, overflowY: 'auto', border: '1px solid var(--pf-t--global--border--color--default)', padding: 8 }}>
+                  {labagatorSessions.length === 0 ? (
+                    <Alert variant="info" isInline title="No deployable sessions for this event" />
+                  ) : (
+                    <>
+                      <Checkbox
+                        id="labagator-select-all-sessions"
+                        label={`Select all (${selectedSessionIds.size} of ${labagatorSessions.length})`}
+                        isChecked={allSessionsSelected}
+                        onChange={(_e, checked) => toggleSelectAllSessions(checked)}
+                        style={{ marginBottom: 8 }}
+                      />
+                      {labagatorSessions.map((s) => (
+                        <Checkbox
+                          key={s.room_session_id}
+                          id={`labagator-session-${s.room_session_id}`}
+                          isChecked={selectedSessionIds.has(s.room_session_id)}
+                          onChange={(_e, checked) => toggleSession(s.room_session_id, checked)}
+                          label={`${s.date} · ${s.title || s.ci_name || `session ${s.room_session_id}`}${s.users ? ` · ${s.users} users` : ''}${s.deploy_on ? ` · deploy ${s.deploy_on}` : ''}`}
+                          description={s.ci_name && s.title ? s.ci_name : undefined}
+                          style={{ marginBottom: 4 }}
+                        />
+                      ))}
+                    </>
+                  )}
+                </div>
               )}
 
               <ExpandableSection
