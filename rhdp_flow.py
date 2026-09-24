@@ -5080,39 +5080,112 @@ def qa2_verify_deployment_status(
     logger.info(f"  ❌ Not Deployed: {total_scheduled - total_deployed}")
     logger.info("=" * 70)
 
-    # Enrich with Showroom health when the schedule has a Showroom repo
-    # (moved from the old Operations tab — QA is the right place for checks)
-    sched_by_key = {(s.ci, s.namespace or namespace): s for s in scheduled_items}
-    for r in results:
-        key = (r.get("ci"), r.get("namespace") or namespace)
-        schedule = sched_by_key.get(key)
-        if schedule:
-            _enrich_qa_result_with_showroom(r, schedule, config)
+    # Showroom / deep health via Soundcheck (replaces oc-based showroom probes).
+    # One batched lookup (+ optional kickoff) — not N per-row Soundcheck runs.
+    _enrich_qa2_results_with_soundcheck(results, scheduled_items, namespace, config)
 
     return results
 
 
-def _enrich_qa_result_with_showroom(result: dict, schedule, config) -> None:
-    """Attach showroom_status / showroom_url onto a QA result dict (in place)."""
-    if not getattr(schedule, "showroom_repo", ""):
-        result.setdefault("showroom_status", "")
-        result.setdefault("showroom_url", "")
+def _enrich_qa2_results_with_soundcheck(
+    results: list[dict],
+    scheduled_items: list,
+    namespace: str,
+    config: "RHDPConfig",
+) -> None:
+    """Attach last Soundcheck status onto QA2 rows (lookup only — no kickoff).
+
+    Keeps Flow QA simple/fast: one batched POST /api/workshops/check-status.
+    Starting deep checks belongs in Babylon Admin Ops (or Soundcheck UI), not QA.
+    Populates showroom_status / showroom_url for the existing column.
+    """
+    if not results:
         return
+
+    pairs = _collect_workshop_ids_for_schedules(scheduled_items, namespace, config)
+    if not pairs:
+        for r in results:
+            r.setdefault("showroom_status", "")
+            r.setdefault("showroom_url", "")
+        return
+
+    ci_to_ids: dict[str, list[str]] = {}
+    for sched, _wname, wid in pairs:
+        ci_to_ids.setdefault(sched.ci, []).append(wid)
+
+    all_ids = list(dict.fromkeys(wid for _, _, wid in pairs))[:40]
+    base = _soundcheck_base_url()
+    statuses: dict = {}
+
     try:
-        health = check_showroom_health(schedule, config)
+        body = _http_json(
+            "POST",
+            f"{base}/api/workshops/check-status",
+            body={"workshop_ids": all_ids},
+            timeout=20.0,
+        )
+        statuses = body.get("statuses") or {}
     except Exception as exc:
-        logger.warning("Showroom health enrich failed for %s: %s", schedule.ci_name, exc)
-        result["showroom_status"] = "error"
-        result["showroom_url"] = ""
+        logger.warning("QA2 Soundcheck status lookup failed: %s", exc)
+        for r in results:
+            r.setdefault("showroom_status", "")
+            r.setdefault("showroom_url", "")
         return
-    status = health.get("status") or ""
-    url = health.get("url") or ""
-    result["showroom_status"] = status
-    result["showroom_url"] = url
-    if status in ("unhealthy", "error"):
-        note = f"Showroom {status}"
-        issues = (result.get("issues") or "").strip()
-        result["issues"] = f"{issues}; {note}" if issues else note
+
+    sched_by_ci = {s.ci: s for s in scheduled_items}
+    rank = {"failed": 4, "running": 3, "pending": 2, "completed": 1}
+
+    for r in results:
+        ci = r.get("ci") or ""
+        schedule = sched_by_ci.get(ci)
+        ids = ci_to_ids.get(ci) or []
+        has_showroom = bool(getattr(schedule, "showroom_repo", "") if schedule else "")
+        if not ids:
+            r.setdefault("showroom_status", "")
+            r.setdefault("showroom_url", "")
+            continue
+
+        worst = None
+        worst_rank = 0
+        worst_sid = ""
+        for wid in ids:
+            entry = statuses.get(wid) if isinstance(statuses.get(wid), dict) else None
+            if not entry:
+                continue
+            st = entry.get("status") or ""
+            rnk = rank.get(st, 0)
+            if rnk >= worst_rank:
+                worst_rank = rnk
+                worst = st
+                worst_sid = entry.get("session_id") or worst_sid
+
+        if not worst:
+            if has_showroom:
+                r["showroom_status"] = "unchecked"
+                r["showroom_url"] = f"{base}/check?workshop={','.join(ids[:6])}"
+            else:
+                r.setdefault("showroom_status", "")
+                r.setdefault("showroom_url", "")
+            continue
+
+        mapped = {
+            "completed": "healthy",
+            "failed": "unhealthy",
+            "running": "pending",
+            "pending": "pending",
+        }.get(worst, worst)
+        r["showroom_status"] = mapped
+        r["showroom_url"] = f"{base}/session/{worst_sid}" if worst_sid else base
+        if mapped == "unhealthy":
+            note = f"Soundcheck {worst}"
+            issues = (r.get("issues") or "").strip()
+            r["issues"] = f"{issues}; {note}" if issues else note
+
+
+def _enrich_qa_result_with_showroom(result: dict, schedule, config) -> None:
+    """Deprecated path — QA2 uses Soundcheck batch enrich instead of oc probes."""
+    result.setdefault("showroom_status", "")
+    result.setdefault("showroom_url", "")
 
 
 def qa3_verify_catalog_items_exist(
@@ -5229,6 +5302,239 @@ def qa3_verify_catalog_items_exist(
 
     logger.info("=" * 70)
 
+    return results
+
+
+def _soundcheck_base_url() -> str:
+    return os.environ.get(
+        "SOUNDCHECK_URL",
+        "https://showroom-soundcheck-dev.apps.ocpv-infra01.dal12.infra.demo.redhat.com",
+    ).rstrip("/")
+
+
+def resolve_admin_ops_url(namespace: str | None = None) -> str:
+    """Deep-link into Babylon Admin Ops (ad-hoc lock/extend/scale/Soundcheck).
+
+    Override with ADMIN_OPS_URL. Default matches Labagator's babylon_url setting.
+    """
+    base = os.environ.get(
+        "ADMIN_OPS_URL",
+        "https://babylon-catalog.apps.ocp-us-west-2.infra.open.redhat.com/admin/ops",
+    ).rstrip("/")
+    ns = (namespace or "").strip()
+    if ns and "{namespace}" not in base and base.endswith("/admin/ops"):
+        return f"{base}/{ns}"
+    if "{namespace}" in base and ns:
+        return base.replace("{namespace}", ns)
+    return base
+
+
+def _http_json(method: str, url: str, body: dict | None = None, timeout: float = 30.0) -> dict:
+    """Minimal JSON HTTP helper (stdlib only)."""
+    import urllib.error
+    import urllib.request
+
+    data = None
+    headers = {"Accept": "application/json"}
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:300]
+        raise RuntimeError(f"HTTP {exc.code} {url}: {detail}") from exc
+    except Exception as exc:
+        raise RuntimeError(f"{method} {url} failed: {exc}") from exc
+
+
+def _collect_workshop_ids_for_schedules(
+    scheduled_items: list,
+    namespace: str,
+    config: "RHDPConfig",
+) -> list[tuple[object, str, str]]:
+    """Return list of (schedule, workshop_name, workshop_id) for Soundcheck."""
+    out: list[tuple[object, str, str]] = []
+    cis = {s.ci for s in scheduled_items if getattr(s, "ci", None)}
+    if not cis:
+        return out
+    try:
+        cmd = [
+            config.oc_command,
+            "get",
+            "workshops.babylon.gpte.redhat.com",
+            "-n",
+            namespace,
+            "-o",
+            "json",
+        ]
+        env = os.environ.copy()
+        if config.kubeconfig_path:
+            env["KUBECONFIG"] = config.kubeconfig_path
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, env=env)
+        if result.returncode != 0:
+            logger.warning("Soundcheck QA: failed to list workshops: %s", result.stderr[:200])
+            return out
+        items = json.loads(result.stdout or "{}").get("items") or []
+    except Exception as exc:
+        logger.warning("Soundcheck QA: workshop list error: %s", exc)
+        return out
+
+    by_ci: dict[str, list] = {}
+    for ws in items:
+        labels = (ws.get("metadata") or {}).get("labels") or {}
+        ci = labels.get("babylon.gpte.redhat.com/catalogItemName") or ""
+        if ci:
+            by_ci.setdefault(ci, []).append(ws)
+
+    for schedule in scheduled_items:
+        matches = by_ci.get(schedule.ci) or []
+        for ws in matches:
+            meta = ws.get("metadata") or {}
+            labels = meta.get("labels") or {}
+            wid = labels.get("babylon.gpte.redhat.com/workshop-id") or meta.get("name") or ""
+            name = meta.get("name") or ""
+            if wid:
+                out.append((schedule, name, wid))
+    return out
+
+
+def qa_soundcheck(
+    csv_file: str,
+    namespace: str,
+    config: "RHDPConfig",
+    *,
+    max_workshops: int = 40,
+    poll_attempts: int = 12,
+    poll_interval_s: float = 5.0,
+) -> list[dict]:
+    """Standalone Showroom Soundcheck QA (deep checks — intentionally not in All).
+
+    Starts one batched Soundcheck session for workshop-ids in scope, light-polls
+    the shared session, then maps last status per workshop. Failures here are
+    expected more often than QA1/QA2 — keep this type separate.
+    """
+    import urllib.parse
+
+    logger.info("=" * 70)
+    logger.info("Soundcheck QA: deep showroom / workshop checks (standalone)")
+    logger.info("=" * 70)
+
+    scheduled_items = read_csv_input(csv_file)
+    if namespace:
+        scheduled_items = [s for s in scheduled_items if (s.namespace or namespace) == namespace]
+
+    pairs = _collect_workshop_ids_for_schedules(scheduled_items, namespace, config)
+    if not pairs:
+        logger.warning("Soundcheck QA: no workshop-ids found in namespace %s", namespace)
+        return [
+            {
+                "ci_name": "(none)",
+                "ci": "",
+                "namespace": namespace,
+                "scheduled": "Yes",
+                "deployed": "No",
+                "status": "⚠️ NO WORKSHOPS",
+                "issues": "No workshop-id labels found for schedules in this namespace",
+                "landing_page_url": _soundcheck_base_url(),
+            }
+        ]
+
+    seen: set[str] = set()
+    selected: list[tuple[object, str, str]] = []
+    for sched, wname, wid in pairs:
+        if wid in seen:
+            continue
+        seen.add(wid)
+        selected.append((sched, wname, wid))
+        if len(selected) >= max_workshops:
+            break
+
+    ids = [wid for _, _, wid in selected]
+    base = _soundcheck_base_url()
+    session_id = ""
+    session_url = f"{base}/check?workshop={','.join(ids)}"
+    session_status = "unknown"
+
+    try:
+        kick = _http_json(
+            "GET",
+            f"{base}/api/check?workshop={urllib.parse.quote(','.join(ids))}"
+            f"&name={urllib.parse.quote(f'Flow Soundcheck QA — {len(ids)} workshop(s)')}",
+            timeout=60.0,
+        )
+        session_id = str(kick.get("session_id") or "")
+        if session_id:
+            session_url = f"{base}/session/{session_id}"
+            for _ in range(poll_attempts):
+                detail = _http_json("GET", f"{base}/api/sessions/{session_id}", timeout=30.0)
+                session_status = str((detail.get("session") or {}).get("status") or "pending")
+                if session_status in ("completed", "failed"):
+                    break
+                time.sleep(poll_interval_s)
+    except Exception as exc:
+        logger.warning("Soundcheck kickoff/poll failed (%s) — falling back to status lookup / deep-link", exc)
+
+    statuses: dict = {}
+    try:
+        body = _http_json(
+            "POST",
+            f"{base}/api/workshops/check-status",
+            body={"workshop_ids": ids},
+            timeout=30.0,
+        )
+        statuses = body.get("statuses") or {}
+    except Exception as exc:
+        logger.warning("Soundcheck check-status failed: %s", exc)
+
+    results: list[dict] = []
+    for schedule, wname, wid in selected:
+        entry = statuses.get(wid) if isinstance(statuses.get(wid), dict) else None
+        st = (entry or {}).get("status") if entry else session_status
+        sid = (entry or {}).get("session_id") if entry else session_id
+        link = f"{base}/session/{sid}" if sid else session_url
+        if st == "completed":
+            status = "✅ SOUNDCHECK OK"
+            issues = ""
+        elif st == "failed":
+            status = "❌ SOUNDCHECK FAILED"
+            issues = f"Soundcheck failed for workshop-id {wid}"
+        elif st in ("running", "pending"):
+            status = "⚠️ SOUNDCHECK RUNNING"
+            issues = f"Session still {st} — open {link}"
+        else:
+            status = "⚠️ SOUNDCHECK UNKNOWN"
+            issues = f"No Soundcheck result yet — open {link}"
+        results.append(
+            {
+                "ci_name": schedule.ci_name,
+                "ci": schedule.ci,
+                "namespace": namespace,
+                "scheduled": "Yes",
+                "deployed": "Yes",
+                "status": status,
+                "healthy": st == "completed",
+                "ready": st == "completed",
+                "issues": issues,
+                "resourceclaim_name": wname,
+                "landing_page_url": link,
+                "link_to_service": link,
+            }
+        )
+
+    ok = sum(1 for r in results if "OK" in r["status"])
+    bad = sum(1 for r in results if "FAILED" in r["status"])
+    logger.info(
+        "Soundcheck QA summary: %d ok, %d failed, %d total (session=%s)",
+        ok,
+        bad,
+        len(results),
+        session_id or "n/a",
+    )
+    logger.info("=" * 70)
     return results
 
 
