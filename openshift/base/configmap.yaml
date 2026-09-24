@@ -6,6 +6,9 @@ data:
   LOG_FORMAT: "json"
   LOG_LEVEL: "INFO"
   RHDP_LOG_DIR: "/app/logs"
+  # Writable PVC mount — schedules + deploy results survive rollouts
+  RHDP_FLOW_DATA_DIR: "/app/data"
+
   # Space-separated list of origins allowed to frame Flow (CSP frame-ancestors).
   # Both the prod and dev Labagator routes embed this single Flow instance, so
   # both must be whitelisted or the dev embed is blocked by the browser.
