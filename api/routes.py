@@ -93,6 +93,7 @@ from rhdp_flow import (
     WorkshopSchedule,
     _dedup_qa_results,
     _merge_qa1_qa2,
+    _soundcheck_base_url,
     analyze_cluster_tenant_relationships,
     check_showroom_health,
     create_multi_workshop_from_group,
@@ -125,7 +126,6 @@ from rhdp_flow import (
     utc_timestamp_str,
     validate_catalog_item_exists,
     validate_cluster_before_tenant,
-    _soundcheck_base_url,
 )
 
 logger = logging.getLogger("rhdp_flow.api")
