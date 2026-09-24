@@ -7,9 +7,10 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "list"]
-  # Manage Babylon workshop resources (deploy creates, operations patch, cleanup deletes)
+  # Manage Babylon workshop resources (deploy creates, operations patch, cleanup deletes).
+  # multiworkshops required for multi-asset / Asset_CIs rows (Roadshow, LB1577, etc.).
   - apiGroups: ["babylon.gpte.redhat.com"]
-    resources: ["workshops", "workshopprovisions", "resourceclaims"]
+    resources: ["workshops", "workshopprovisions", "resourceclaims", "multiworkshops"]
     verbs: ["get", "list", "create", "update", "patch", "delete"]
   # Read catalog items for num_users validation
   - apiGroups: ["babylon.gpte.redhat.com"]
