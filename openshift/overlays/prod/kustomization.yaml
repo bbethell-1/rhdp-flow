@@ -8,7 +8,7 @@ resources:
   - pdb.yaml
 
 patches:
-  # 1 replica (job state is in-memory, not shared across pods), higher resources, build from main branch
+  # 1 replica (deploy jobs still in-memory; schedules/results persist on PVC)
   - target:
       kind: Deployment
       name: rhdp-scheduler

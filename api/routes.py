@@ -131,8 +131,10 @@ logger = logging.getLogger("rhdp_flow.api")
 router = APIRouter()
 
 # ---------------------------------------------------------------------------
-# In-memory state
+# In-memory state (+ disk restore — PVC at RHDP_FLOW_DATA_DIR survives rollouts)
 # ---------------------------------------------------------------------------
+from lib import flow_state as _flow_state
+
 _schedules: list[WorkshopSchedule] = []
 _qa_results: list[QAResultItem] = []
 _csv_filepath: str | None = None  # stashed for QA functions that need a path
@@ -144,42 +146,35 @@ _destroy_check_results: list[dict] = []
 # Operator-accepted local tweaks (Users→Instances, skip CIs, −4h, etc.).
 # Kept so Deployments / logs can show "human overrode Labagator" — not Flow inventing values.
 _operator_overrides: list[OperatorOverride] = []
-
-# ---------------------------------------------------------------------------
-# Result persistence — survives server restarts
-# ---------------------------------------------------------------------------
-
-_RESULTS_PERSIST_FILE = Path(
-    os.environ.get(
-        "RHDP_RESULTS_FILE",
-        str(Path.home() / ".rhdp-flow" / "last_results.json"),
-    )
-)
+_deployment_results: list[DeploymentResult] = []
 
 
 def _save_results(results: list[DeploymentResult]) -> None:
-    try:
-        _RESULTS_PERSIST_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _RESULTS_PERSIST_FILE.write_text(
-            json.dumps([asdict(r) for r in results], indent=2)
+    _flow_state.save_results(results)
+
+
+def _save_schedules() -> None:
+    _flow_state.save_schedules(_schedules, filename=_current_filename)
+
+
+def _restore_persisted_state() -> None:
+    global _schedules, _current_filename, _deployment_results
+    restored_schedules, filename = _flow_state.load_schedules(WorkshopSchedule)
+    restored_results = _flow_state.load_results(DeploymentResult)
+    if restored_schedules:
+        _schedules = restored_schedules
+        _current_filename = filename
+        logger.info(
+            "Restored %d schedule(s) from disk%s",
+            len(_schedules),
+            f" ({filename})" if filename else "",
         )
-    except OSError as exc:
-        logger.warning("Could not persist results: %s", exc)
+    if restored_results:
+        _deployment_results = restored_results
+        logger.info("Restored %d deployment result(s) from disk", len(_deployment_results))
 
 
-def _load_results() -> list[DeploymentResult]:
-    try:
-        if _RESULTS_PERSIST_FILE.exists():
-            data = json.loads(_RESULTS_PERSIST_FILE.read_text())
-            return [DeploymentResult(**r) for r in data]
-    except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
-        logger.warning("Could not load persisted results: %s", exc)
-    return []
-
-
-_deployment_results: list[DeploymentResult] = _load_results()
-if _deployment_results:
-    logger.info("Restored %d deployment result(s) from previous session", len(_deployment_results))
+_restore_persisted_state()
 
 # Session history — each completed upload+deploy cycle gets archived here
 _sessions: list[dict] = []
@@ -583,6 +578,7 @@ def _ingest_schedule_csv_text(text: str, filename: str) -> UploadResponse:
         _schedules = schedules
         _current_filename = filename
         _csv_filepath = tmp.name
+        _save_schedules()
     skipped = total_rows - len(schedules)
     return UploadResponse(
         count=len(schedules),
@@ -670,6 +666,7 @@ def clear_session(_key=Depends(verify_api_key)):
         _asset_passwords = None
         _deploy_log_path = None
         _qa_log_path = None
+        _flow_state.clear_persisted_state()
         return {"message": "Session cleared", "session_count": len(_sessions)}
 
 
@@ -765,6 +762,7 @@ def update_schedules(schedules_data: list[WorkshopScheduleResponse], _key=Depend
     ]
     with _state_lock:
         _schedules = new_schedules
+        _save_schedules()
     return {"message": f"Updated {len(new_schedules)} schedules"}
 
 
@@ -776,6 +774,7 @@ def delete_schedule(index: int, _key=Depends(verify_api_key)):
         if index < 0 or index >= len(_schedules):
             raise HTTPException(404, f"Schedule index {index} not found")
         deleted_schedule = _schedules.pop(index)
+        _save_schedules()
         return {"message": f"Deleted schedule: {deleted_schedule.ci_name}"}
 
 
@@ -807,6 +806,8 @@ def fill_missing_dates(request: FillMissingDatesRequest, _key=Depends(verify_api
                 schedule_had_updates = True
             if schedule_had_updates:
                 schedules_updated += 1
+        if schedules_updated:
+            _save_schedules()
 
     return {
         "message": f"Filled {fields_updated} field(s) in {schedules_updated} schedule(s)",
@@ -1524,6 +1525,7 @@ def auto_fix_cluster_tenant_timing(buffer_hours: float = 4.0, _key=Depends(verif
     buffer_minutes = int(buffer_hours * 60)
     result = auto_fix_cluster_tenant_timing(_schedules, buffer_minutes=buffer_minutes)
     _schedules = result["schedules"]
+    _save_schedules()
 
     return {
         "fixed_count": result["fixed_count"],
@@ -1920,6 +1922,7 @@ async def deploy_session(
     global _schedules
     with _state_lock:
         _schedules = schedules
+        _save_schedules()
 
     try:
         config = await asyncio.to_thread(_get_config,
