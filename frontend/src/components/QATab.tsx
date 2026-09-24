@@ -530,7 +530,7 @@ export const QATab: React.FC<Props> = ({
               <>Compares live workshops to your schedule — dates, seats, and config.</>
             )}
             {!noSchedules && qaType === '2' && (
-              <>Health, seats, URLs. Showroom column = last Soundcheck result (lookup only — run deep checks in Admin Ops).</>
+              <>Health, seats, URLs. Showroom column = full batched Soundcheck from QA2 (status + deep-link).</>
             )}
             {!noSchedules && qaType === '3' && (
               <>Catalog CIs in the CSV exist on the cluster (typo catch).</>
@@ -784,7 +784,7 @@ export const QATab: React.FC<Props> = ({
               <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
                 <li>Health and provisioned seat counts</li>
                 <li>Student landing page URLs (Students tab)</li>
-                <li>Showroom column: last Soundcheck status (no deep kick from QA)</li>
+                <li>Showroom column: full Soundcheck run from QA2 (status + deep-link)</li>
               </ul>
             </CardBody>
           </Card>

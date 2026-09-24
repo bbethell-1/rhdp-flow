@@ -5081,7 +5081,7 @@ def qa2_verify_deployment_status(
     logger.info("=" * 70)
 
     # Showroom / deep health via Soundcheck (replaces oc-based showroom probes).
-    # One batched lookup (+ optional kickoff) — not N per-row Soundcheck runs.
+    # One batched full kickoff + status map — not N per-row Soundcheck runs.
     _enrich_qa2_results_with_soundcheck(results, scheduled_items, namespace, config)
 
     return results
@@ -5093,12 +5093,17 @@ def _enrich_qa2_results_with_soundcheck(
     namespace: str,
     config: "RHDPConfig",
 ) -> None:
-    """Attach last Soundcheck status onto QA2 rows (lookup only — no kickoff).
+    """Run a full batched Soundcheck for QA2 workshops, then map status onto rows.
 
-    Keeps Flow QA simple/fast: one batched POST /api/workshops/check-status.
-    Starting deep checks belongs in Babylon Admin Ops (or Soundcheck UI), not QA.
-    Populates showroom_status / showroom_url for the existing column.
+    Flow QA owns deep showroom checks so operators are not forced into Admin Ops
+    for a pass/fail. Admin Ops still keeps its own full Run Soundcheck button for
+    ad-hoc batches; status badges there are glance-only.
+
+    Kickoff: GET /api/check?workshop=id1,id2 (≤40). Then light-poll + check-status.
+    Populates showroom_status / showroom_url on each result row.
     """
+    import urllib.parse
+
     if not results:
         return
 
@@ -5115,21 +5120,52 @@ def _enrich_qa2_results_with_soundcheck(
 
     all_ids = list(dict.fromkeys(wid for _, _, wid in pairs))[:40]
     base = _soundcheck_base_url()
-    statuses: dict = {}
+    session_id = ""
+    session_url = f"{base}/check?workshop={','.join(all_ids)}"
+    session_status = "unknown"
 
+    # Full kickoff — same contract as qa_soundcheck / Admin Ops batch.
+    try:
+        kick = _http_json(
+            "GET",
+            f"{base}/api/check?workshop={urllib.parse.quote(','.join(all_ids))}"
+            f"&name={urllib.parse.quote(f'Flow QA2 Soundcheck — {len(all_ids)} workshop(s)')}",
+            timeout=60.0,
+        )
+        session_id = str(kick.get("session_id") or "")
+        if session_id:
+            session_url = f"{base}/session/{session_id}"
+            for _ in range(12):
+                detail = _http_json("GET", f"{base}/api/sessions/{session_id}", timeout=30.0)
+                session_status = str((detail.get("session") or {}).get("status") or "pending")
+                if session_status in ("completed", "failed"):
+                    break
+                time.sleep(5.0)
+            logger.info(
+                "QA2 Soundcheck session %s ended/poll-stop with status=%s",
+                session_id,
+                session_status,
+            )
+    except Exception as exc:
+        logger.warning(
+            "QA2 Soundcheck kickoff/poll failed (%s) — falling back to check-status / deep-link",
+            exc,
+        )
+
+    statuses: dict = {}
     try:
         body = _http_json(
             "POST",
             f"{base}/api/workshops/check-status",
             body={"workshop_ids": all_ids},
-            timeout=20.0,
+            timeout=30.0,
         )
         statuses = body.get("statuses") or {}
     except Exception as exc:
-        logger.warning("QA2 Soundcheck status lookup failed: %s", exc)
+        logger.warning("QA2 Soundcheck check-status failed: %s", exc)
         for r in results:
-            r.setdefault("showroom_status", "")
-            r.setdefault("showroom_url", "")
+            r.setdefault("showroom_status", session_status if session_id else "")
+            r.setdefault("showroom_url", session_url if session_id else "")
         return
 
     sched_by_ci = {s.ci: s for s in scheduled_items}
@@ -5147,7 +5183,7 @@ def _enrich_qa2_results_with_soundcheck(
 
         worst = None
         worst_rank = 0
-        worst_sid = ""
+        worst_sid = session_id
         for wid in ids:
             entry = statuses.get(wid) if isinstance(statuses.get(wid), dict) else None
             if not entry:
@@ -5160,13 +5196,16 @@ def _enrich_qa2_results_with_soundcheck(
                 worst_sid = entry.get("session_id") or worst_sid
 
         if not worst:
-            if has_showroom:
-                r["showroom_status"] = "unchecked"
-                r["showroom_url"] = f"{base}/check?workshop={','.join(ids[:6])}"
+            if session_status and session_status != "unknown":
+                worst = session_status
+            elif has_showroom:
+                r["showroom_status"] = "pending"
+                r["showroom_url"] = session_url
+                continue
             else:
                 r.setdefault("showroom_status", "")
                 r.setdefault("showroom_url", "")
-            continue
+                continue
 
         mapped = {
             "completed": "healthy",
@@ -5175,7 +5214,7 @@ def _enrich_qa2_results_with_soundcheck(
             "pending": "pending",
         }.get(worst, worst)
         r["showroom_status"] = mapped
-        r["showroom_url"] = f"{base}/session/{worst_sid}" if worst_sid else base
+        r["showroom_url"] = f"{base}/session/{worst_sid}" if worst_sid else session_url
         if mapped == "unhealthy":
             note = f"Soundcheck {worst}"
             issues = (r.get("issues") or "").strip()
