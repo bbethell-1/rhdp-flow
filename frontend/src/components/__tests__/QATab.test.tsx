@@ -17,7 +17,7 @@ describe('QATab', () => {
 
   it('renders guidance alert', () => {
     render(<QATab qaResults={[]} setQAResults={noop} showToast={noop} />);
-    expect(screen.getByText('When to use QA')).toBeInTheDocument();
+    expect(screen.getByText('Keep it simple')).toBeInTheDocument();
   });
 
   it('renders results table with QA data', () => {
