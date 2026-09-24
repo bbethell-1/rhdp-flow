@@ -32,7 +32,7 @@ import CubesIcon from '@patternfly/react-icons/dist/esm/icons/cubes-icon';
 import ExternalLinkAltIcon from '@patternfly/react-icons/dist/esm/icons/external-link-alt-icon';
 import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
-import { api, getSelectedTarget } from '../services/api';
+import { api } from '../services/api';
 import { AUTO_REFRESH_INTERVAL_MS, DEFAULT_PER_PAGE } from '../constants';
 import type { QAResult, WorkshopSchedule } from '../types';
 import { QAResultsTable } from './QAResultsTable';
@@ -136,7 +136,6 @@ export const QATab: React.FC<Props> = ({
   const [qaSearch, setQaSearch] = useState('');
   const [qaStatusFilter, setQaStatusFilter] = useState<QAStatusFilter>('all');
   const [viewNamespace, setViewNamespace] = useState<string>(ALL_NAMESPACES);
-  const [targetCluster, setTargetCluster] = useState(() => getSelectedTarget());
   const isEmbedded =
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('embedded') === 'true';
@@ -174,11 +173,6 @@ export const QATab: React.FC<Props> = ({
     }
   }, [scheduleNamespaces]);
 
-  useEffect(() => {
-    const sync = () => setTargetCluster(getSelectedTarget());
-    window.addEventListener('rhdp-target-change', sync);
-    return () => window.removeEventListener('rhdp-target-change', sync);
-  }, []);
 
   const refreshQA = useCallback(async () => {
     try {
