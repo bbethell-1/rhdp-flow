@@ -53,12 +53,15 @@ Current targets:
 ### On each target cluster — create the scheduler ServiceAccount + long-lived token
 
 Replicate the `rhdp-scheduler` ClusterRole (see `openshift/base/clusterrole.yaml`)
-on the target, then:
+on the target — it **must** include `multiworkshops` (multi-asset / Asset_CIs
+deploys fail with Forbidden without it). Then bind whichever SA the target
+kubeconfig uses (`rhdp-flow-deployer` on Events today, or `rhdp-scheduler`):
 
 ```sh
 # --- run against each TARGET cluster ---
-oc create sa rhdp-scheduler -n rhdp-flow
-oc adm policy add-cluster-role-to-user rhdp-scheduler -z rhdp-scheduler -n rhdp-flow
+oc apply -f openshift/base/clusterrole.yaml
+oc create sa rhdp-flow-deployer -n rhdp-flow   # or rhdp-scheduler — match the token Secret
+oc adm policy add-cluster-role-to-user rhdp-scheduler -z rhdp-flow-deployer -n rhdp-flow
 
 # Long-lived token (does not expire like `oc create token`):
 cat <<'EOF' | oc apply -f -
