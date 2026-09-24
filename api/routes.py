@@ -806,6 +806,8 @@ def fill_missing_dates(request: FillMissingDatesRequest, _key=Depends(verify_api
                 schedule_had_updates = True
             if schedule_had_updates:
                 schedules_updated += 1
+        if schedules_updated:
+            _save_schedules()
 
     return {
         "message": f"Filled {fields_updated} field(s) in {schedules_updated} schedule(s)",
