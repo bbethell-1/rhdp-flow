@@ -226,7 +226,7 @@ export const QAResultsTable: React.FC<{
       </Th>
       <Th info={{ tooltip: 'Mismatch details when status is failed' }}>Issues</Th>
       {showShowroomCol && (
-        <Th info={{ tooltip: 'Showroom lab health (from QA2 when Showroom_Repo is set)' }}>
+        <Th info={{ tooltip: 'Last Soundcheck result (QA2 lookup only). Run deep checks in Admin Ops.' }}>
           Showroom
         </Th>
       )}

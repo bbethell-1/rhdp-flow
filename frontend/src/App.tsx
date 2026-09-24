@@ -88,7 +88,7 @@ const App: React.FC = () => {
     if (!initialHash.fromOps) return;
     window.history.replaceState(null, '', '#qa');
     showToast(
-      'Day-2 actions (lock, extend, scale) live in Babylon Admin Ops — embedded in Labagator. QA is here for verification.',
+      'Ad-hoc ops (lock/extend/scale) → Babylon Admin Ops. QA verifies only. QA3 = catalog item check (in QA type dropdown).',
       'info',
     );
   }, [initialHash.fromOps, showToast]);
@@ -205,7 +205,7 @@ const App: React.FC = () => {
         setActiveTab('qa');
         window.history.replaceState(null, '', '#qa');
         showToast(
-          'Day-2 actions live in Babylon Admin Ops (Labagator). Use QA here to verify deploys.',
+          'Ad-hoc ops → Babylon Admin Ops (Labagator). Great power, great responsibility — scope your selections. QA verifies only.',
           'info',
         );
         return;

@@ -115,6 +115,7 @@ from rhdp_flow import (
     qa3_verify_catalog_items_exist,
     qa_destroy_check,
     read_csv_input,
+    resolve_admin_ops_url,
     run_demolition_preflight,
     scale_workshops,
     teardown_showroom,
@@ -124,6 +125,7 @@ from rhdp_flow import (
     utc_timestamp_str,
     validate_catalog_item_exists,
     validate_cluster_before_tenant,
+    _soundcheck_base_url,
 )
 
 logger = logging.getLogger("rhdp_flow.api")
@@ -876,6 +878,9 @@ async def health(config=Depends(_request_config)):
             status="error",
             oc_installed=False,
             message="oc command not found or not working",
+            admin_ops_url=resolve_admin_ops_url(),
+            labagator_babylon_path=os.environ.get("LABAGATOR_BABYLON_PATH", "/babylon"),
+            soundcheck_url=_soundcheck_base_url(),
         )
 
     # 2. Check cluster connectivity — run blocking subprocess calls off the
@@ -914,6 +919,9 @@ async def health(config=Depends(_request_config)):
                 user=r_user.stdout.strip(),
                 base_domain=derive_base_domain(cluster_url),
                 rhdp_api_reachable=rhdp_ok,
+                admin_ops_url=resolve_admin_ops_url(),
+                labagator_babylon_path=os.environ.get("LABAGATOR_BABYLON_PATH", "/babylon"),
+                soundcheck_url=_soundcheck_base_url(),
             )
         else:
             msg_parts = []

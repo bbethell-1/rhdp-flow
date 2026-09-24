@@ -301,6 +301,12 @@ class HealthResponse(BaseModel):
     message: str = ""
     base_domain: str = ""
     rhdp_api_reachable: bool = False
+    # Babylon Admin Ops deep-link (standalone / outside Labagator)
+    admin_ops_url: str = ""
+    # Path inside Labagator for the embedded Babylon Admin Ops pane
+    labagator_babylon_path: str = "/babylon"
+    # Showroom Soundcheck base URL (QA2 enrich + Admin Ops)
+    soundcheck_url: str = ""
 
 
 class UploadResponse(BaseModel):

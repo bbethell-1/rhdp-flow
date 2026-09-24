@@ -137,6 +137,27 @@ export const QATab: React.FC<Props> = ({
   const [qaStatusFilter, setQaStatusFilter] = useState<QAStatusFilter>('all');
   const [viewNamespace, setViewNamespace] = useState<string>(ALL_NAMESPACES);
   const [targetCluster, setTargetCluster] = useState(() => getSelectedTarget());
+  const isEmbedded =
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('embedded') === 'true';
+  const [adminOpsUrl, setAdminOpsUrl] = useState(
+    'https://babylon-catalog.apps.ocp-us-west-2.infra.open.redhat.com/admin/ops',
+  );
+  const [labagatorBabylonPath, setLabagatorBabylonPath] = useState('/babylon');
+  const adminOpsHref = isEmbedded ? labagatorBabylonPath : adminOpsUrl;
+  const adminOpsTarget = isEmbedded ? '_parent' : '_blank';
+
+  useEffect(() => {
+    api
+      .health()
+      .then((h) => {
+        if (h.admin_ops_url) setAdminOpsUrl(h.admin_ops_url);
+        if (h.labagator_babylon_path) setLabagatorBabylonPath(h.labagator_babylon_path);
+      })
+      .catch(() => {
+        /* keep defaults */
+      });
+  }, []);
 
   // Keep run scope in sync when schedules load / change (prefer single NS)
   useEffect(() => {
@@ -388,18 +409,24 @@ export const QATab: React.FC<Props> = ({
 
   return (
     <PageSection>
-      <Alert variant="info" isInline isPlain title="When to use QA" style={{ marginBottom: 16 }}>
-        Run after deploy to verify workshops in your namespace.
-        <strong> QA1</strong> right after deploy (config match).
-        <strong> QA2</strong> after provision (~10–30 min) for health, student URLs, and Showroom (when a repo is configured).
-        {' '}Uses the Upload &amp; Deploy target
-        {targetCluster ? (
-          <> (<code>{targetCluster}</code>).</>
-        ) : (
-          <> (whichever cluster is selected there).</>
-        )}
-        {' '}Day-2 actions (lock, extend, scale, Showroom cleanup) →{' '}
-        <strong>Babylon Admin Ops</strong> in Labagator — not duplicated here.
+      <Alert variant="info" isInline isPlain title="Keep it simple" style={{ marginBottom: 16 }}>
+        <strong>QA</strong> = verify the plan matches reality (QA1 setup · QA2 health · QA3 catalog CIs).
+        {' '}
+        <strong>Admin Ops</strong> = live workshops + ad-hoc lock/extend/scale (can diverge from Labagator).
+        {' '}
+        <Button
+          component="a"
+          variant="link"
+          isInline
+          icon={<ExternalLinkAltIcon />}
+          iconPosition="end"
+          href={adminOpsHref}
+          target={adminOpsTarget}
+          rel="noopener noreferrer"
+          style={{ paddingInline: 0, fontWeight: 600 }}
+        >
+          {isEmbedded ? 'Admin Ops (Labagator)' : 'Admin Ops'}
+        </Button>
       </Alert>
 
       {/* Scope + type + run */}
@@ -503,10 +530,10 @@ export const QATab: React.FC<Props> = ({
               <>Compares live workshops to your schedule — dates, seats, and config.</>
             )}
             {!noSchedules && qaType === '2' && (
-              <>Checks provisioned health, seat counts, student landing URLs, and Showroom (if configured).</>
+              <>Health, seats, URLs. Showroom column = last Soundcheck result (lookup only — run deep checks in Admin Ops).</>
             )}
             {!noSchedules && qaType === '3' && (
-              <>Validates catalog items in the CSV exist on the cluster.</>
+              <>Catalog CIs in the CSV exist on the cluster (typo catch).</>
             )}
             {!noSchedules && qaType === 'both' && (
               <>Setup verification + deployment checks (one row per workshop).</>
@@ -757,7 +784,26 @@ export const QATab: React.FC<Props> = ({
               <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
                 <li>Health and provisioned seat counts</li>
                 <li>Student landing page URLs (Students tab)</li>
+                <li>Showroom column: last Soundcheck status (no deep kick from QA)</li>
               </ul>
+            </CardBody>
+          </Card>
+          <Card isCompact>
+            <CardTitle>QA3 — Verify Catalog Items</CardTitle>
+            <CardBody style={{ fontSize: '0.85rem' }}>
+              <p>
+                <strong>When:</strong> Before or after deploy — CSV hygiene.
+              </p>
+              <p>
+                <strong>What it checks:</strong>
+              </p>
+              <ul style={{ margin: '4px 0 0', paddingLeft: 20 }}>
+                <li>Every CI in the schedule exists in babylon-catalog-*</li>
+                <li>Catches typos / wrong suffixes before provision fails</li>
+              </ul>
+              <p style={{ marginTop: 8, marginBottom: 0, color: 'var(--pf-t--global--text--color--subtle)' }}>
+                Select <strong>QA3</strong> or <strong>All</strong> in the QA type dropdown above.
+              </p>
             </CardBody>
           </Card>
         </div>

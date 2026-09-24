@@ -7,6 +7,9 @@ export interface HealthResponse {
   message: string;
   base_domain: string;
   rhdp_api_reachable: boolean;
+  admin_ops_url?: string;
+  labagator_babylon_path?: string;
+  soundcheck_url?: string;
 }
 
 export interface WorkshopSchedule {
