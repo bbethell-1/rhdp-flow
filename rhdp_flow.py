@@ -3085,6 +3085,164 @@ def get_catalog_item_info(ci: str, config: RHDPConfig) -> dict[str, str]:
             'displayName': ci
         }
 
+def _oc_env(config: RHDPConfig) -> dict:
+    """Copy environ and inject KUBECONFIG when configured."""
+    env = os.environ.copy()
+    if config.kubeconfig_path:
+        env["KUBECONFIG"] = config.kubeconfig_path
+    return env
+
+
+def _delete_workshop_resource(workshop_name: str, namespace: str, config: RHDPConfig) -> bool:
+    """Best-effort delete of a Workshop. Returns True if oc delete succeeded."""
+    if config.dry_run or not workshop_name:
+        return False
+    try:
+        result = subprocess.run(
+            [
+                config.oc_command,
+                "delete",
+                "workshop",
+                workshop_name,
+                "-n",
+                namespace,
+                "--ignore-not-found=true",
+                "--wait=false",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=_oc_env(config),
+        )
+        if result.returncode == 0:
+            logger.info(f"Deleted Workshop shell: {workshop_name}")
+            return True
+        logger.warning(f"Could not delete Workshop {workshop_name}: {result.stderr.strip()}")
+        return False
+    except Exception as e:
+        logger.warning(f"Error deleting Workshop {workshop_name}: {e}")
+        return False
+
+
+def _multiworkshop_asset_names(mw_name: str, namespace: str, config: RHDPConfig) -> set[str]:
+    """Return Workshop names currently listed on MultiWorkshop.spec.assets."""
+    try:
+        result = subprocess.run(
+            [
+                config.oc_command,
+                "get",
+                "multiworkshop",
+                mw_name,
+                "-n",
+                namespace,
+                "-o",
+                "json",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=_oc_env(config),
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return set()
+        data = json.loads(result.stdout)
+        names: set[str] = set()
+        for asset in data.get("spec", {}).get("assets") or []:
+            name = (asset or {}).get("name")
+            if name:
+                names.add(name)
+        return names
+    except Exception as e:
+        logger.debug(f"Could not read MultiWorkshop {mw_name} assets: {e}")
+        return set()
+
+
+def _workshop_protected_by_multiworkshop(
+    workshop_name: str,
+    mw_name: str,
+    namespace: str,
+    config: RHDPConfig,
+) -> bool:
+    """True if Workshop is owned/labeled by the MultiWorkshop (never delete)."""
+    try:
+        result = subprocess.run(
+            [
+                config.oc_command,
+                "get",
+                "workshop",
+                workshop_name,
+                "-n",
+                namespace,
+                "-o",
+                "json",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=_oc_env(config),
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            # Already gone — treat as protected so we do not retry-spam delete
+            return True
+        data = json.loads(result.stdout)
+        labels = (data.get("metadata") or {}).get("labels") or {}
+        if labels.get("babylon.gpte.redhat.com/multiworkshop") == mw_name:
+            return True
+        for ref in (data.get("metadata") or {}).get("ownerReferences") or []:
+            if ref.get("kind") == "MultiWorkshop" and ref.get("name") == mw_name:
+                return True
+        return False
+    except Exception as e:
+        logger.debug(f"Could not inspect Workshop {workshop_name}: {e}")
+        # Fail closed — do not delete if we cannot verify
+        return True
+
+
+def cleanup_multi_asset_shell_workshops(
+    created_workshop_names: list[str],
+    multi_workshop_name: str,
+    namespace: str,
+    config: RHDPConfig,
+    *,
+    only_if_replaced: bool = True,
+) -> list[str]:
+    """Delete Flow-precreated Workshop shells the MultiWorkshop controller did not keep.
+
+    The Babylon MultiWorkshop controller creates its own owned Workshops and rewrites
+    ``spec.assets``. Flow's pre-create shells then show as Pending orphans in the UI.
+
+    Safety rules (never break a live MW):
+    - Only consider names in ``created_workshop_names`` from this deploy attempt
+    - Never delete a Workshop labeled/owned by this MultiWorkshop
+    - When ``only_if_replaced``: only delete shells no longer listed on MW.spec.assets
+      (if the controller has not rewritten assets yet, leave shells alone)
+    """
+    if config.dry_run or not created_workshop_names:
+        return []
+
+    asset_names = _multiworkshop_asset_names(multi_workshop_name, namespace, config)
+    deleted: list[str] = []
+    for name in created_workshop_names:
+        if not name:
+            continue
+        if only_if_replaced and name in asset_names:
+            # Still referenced by the MultiWorkshop — keep it
+            continue
+        if _workshop_protected_by_multiworkshop(name, multi_workshop_name, namespace, config):
+            continue
+        if _delete_workshop_resource(name, namespace, config):
+            deleted.append(name)
+    if deleted:
+        logger.info(
+            f"Cleaned up {len(deleted)} multi-asset Workshop shell(s) for {multi_workshop_name}"
+        )
+    return deleted
+
+
+# (attempts, sleep_seconds) — patched to (1, 0) in unit tests
+_MULTI_ASSET_SHELL_CLEANUP_POLLS = (6, 5)
+
+
 def create_multi_workshop_from_group(
     group_schedules: list[WorkshopSchedule],
     config: RHDPConfig,
@@ -3263,7 +3421,8 @@ def create_multi_workshop(
         # Step 1: Create individual Workshops for each asset
         assets = []
         created_workshops = []
-        
+        created_workshop_names: list[str] = []
+
         for asset_ci in asset_ci_list:
             logger.info(f"Creating Workshop for asset: {asset_ci}")
             
@@ -3317,21 +3476,26 @@ def create_multi_workshop(
                 logger.warning(f"Failed to create Workshop for asset {asset_ci}, continuing...")
                 continue
 
-            # NOTE: For multi-asset workshops, we do NOT create individual WorkshopProvisions
-            # The MultiWorkshop controller will handle all provisioning when we create the MultiWorkshop resource below
+            # NOTE: For multi-asset workshops, we do NOT create individual WorkshopProvisions.
+            # The MultiWorkshop controller handles provisioning — and typically creates its own
+            # owned Workshops, leaving these Flow shells as Pending orphans unless cleaned up.
 
             created_workshops.append((asset_ci, asset_workshop_name, catalog_namespace, display_name))
-            logger.info(f"✅ Created Workshop '{asset_workshop_name}' for asset {asset_ci} (MultiWorkshop will handle provisioning)")
-        
+            created_workshop_names.append(asset_workshop_name)
+            logger.info(
+                f"✅ Created Workshop '{asset_workshop_name}' for asset {asset_ci} "
+                f"(MultiWorkshop will handle provisioning)"
+            )
+
         if not created_workshops:
             logger.error("No workshops were created for multi-asset workshop")
             return None
-        
+
         # Step 2: Wait for all workshops to get IDs
         logger.info("Waiting for all asset workshops to be ready...")
         for asset_ci, workshop_name, catalog_ns, display_name in created_workshops:
             workshop_id = wait_for_workshop_id(workshop_name, schedule.namespace, config, max_wait=120)
-            
+
             if workshop_id:
                 assets.append({
                     'displayName': display_name,
@@ -3344,14 +3508,16 @@ def create_multi_workshop(
                 logger.info(f"✅ Asset {asset_ci} ready with ID: {workshop_id}")
             else:
                 logger.warning(f"⚠️  Asset {asset_ci} (Workshop {workshop_name}) did not get an ID, skipping...")
-        
+
         if not assets:
             logger.error("No assets with valid workshopIds for multi-asset workshop")
+            for name in created_workshop_names:
+                _delete_workshop_resource(name, schedule.namespace, config)
             return None
-        
+
         # Step 3: Create MultiWorkshop resource
         logger.info(f"Creating MultiWorkshop '{multi_workshop_name}' with {len(assets)} assets...")
-        
+
         multi_workshop = {
             "apiVersion": "babylon.gpte.redhat.com/v1",
             "kind": "MultiWorkshop",
@@ -3377,13 +3543,13 @@ def create_multi_workshop(
             multi_workshop["spec"]["numberSeats"] = schedule.users
         elif getattr(schedule, 'instances', None) is not None and schedule.instances > 0:
             multi_workshop["spec"]["numberSeats"] = schedule.instances
-        
+
         # Create MultiWorkshop
         import tempfile
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp_file:
             json.dump(multi_workshop, tmp_file, indent=2)
             tmp_file_path = tmp_file.name
-        
+
         try:
             cmd = [
                 config.oc_command,
@@ -3391,30 +3557,46 @@ def create_multi_workshop(
                 "-f", tmp_file_path,
                 "-n", schedule.namespace
             ]
-            
-            env = os.environ.copy()
-            if config.kubeconfig_path:
-                env['KUBECONFIG'] = config.kubeconfig_path
-            
+
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 timeout=config.timeout,
-                env=env
+                env=_oc_env(config),
             )
-            
-            if result.returncode == 0:
-                logger.info(f"✅ Successfully created MultiWorkshop: {multi_workshop_name}")
-                return multi_workshop_name
-            else:
-                if "already exists" in result.stderr:
-                    logger.info(f"MultiWorkshop {multi_workshop_name} already exists")
-                    return multi_workshop_name
+
+            if result.returncode == 0 or "already exists" in (result.stderr or ""):
+                if result.returncode == 0:
+                    logger.info(f"✅ Successfully created MultiWorkshop: {multi_workshop_name}")
                 else:
-                    logger.warning(f"Could not create MultiWorkshop: {result.stderr}")
-                    return None
-        
+                    logger.info(f"MultiWorkshop {multi_workshop_name} already exists")
+
+                # Controller rewrites assets to owned Workshops; wait briefly then drop
+                # Flow shells that are no longer referenced (never touch adopted ones).
+                poll_attempts, poll_sleep = _MULTI_ASSET_SHELL_CLEANUP_POLLS
+                for _ in range(max(1, int(poll_attempts))):
+                    if poll_sleep:
+                        time.sleep(poll_sleep)
+                    current_assets = _multiworkshop_asset_names(
+                        multi_workshop_name, schedule.namespace, config
+                    )
+                    if current_assets and not set(created_workshop_names).issubset(current_assets):
+                        break
+                cleanup_multi_asset_shell_workshops(
+                    created_workshop_names,
+                    multi_workshop_name,
+                    schedule.namespace,
+                    config,
+                    only_if_replaced=True,
+                )
+                return multi_workshop_name
+
+            logger.warning(f"Could not create MultiWorkshop: {result.stderr}")
+            for name in created_workshop_names:
+                _delete_workshop_resource(name, schedule.namespace, config)
+            return None
+
         finally:
             try:
                 os.unlink(tmp_file_path)
