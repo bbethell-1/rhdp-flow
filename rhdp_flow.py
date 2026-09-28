@@ -2829,6 +2829,53 @@ _CATALOG_CACHE_TTL = 300  # 5 minutes — catalog items don't change often
 # Bulk name→namespaces index (3 oc list calls total) — used by validate_catalog_item_exists
 _catalog_name_index_cache: dict[str, tuple[float, dict[str, list[str]]]] = {}
 
+_catalog_item_aliases_cache: dict[str, str] | None = None
+
+
+def _load_catalog_item_aliases() -> dict[str, str]:
+    """Rename/typo map from ``lib/catalog_item_aliases.json`` (exact keys)."""
+    global _catalog_item_aliases_cache
+    if _catalog_item_aliases_cache is not None:
+        return _catalog_item_aliases_cache
+    aliases: dict[str, str] = {}
+    path = Path(__file__).resolve().parent / "lib" / "catalog_item_aliases.json"
+    try:
+        if path.is_file():
+            data = json.loads(path.read_text())
+            raw = data.get("aliases") if isinstance(data, dict) else None
+            if isinstance(raw, dict):
+                aliases = {
+                    str(k).strip(): str(v).strip()
+                    for k, v in raw.items()
+                    if str(k).strip() and str(v).strip() and not str(k).startswith("_")
+                }
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("catalog_item_aliases load failed: %s", exc)
+        aliases = {}
+    _catalog_item_aliases_cache = aliases
+    return aliases
+
+
+def _alias_catalog_ci(ci: str) -> str | None:
+    """Return alias target for ``ci`` when present in the rename map."""
+    raw = (ci or "").strip()
+    if not raw:
+        return None
+    aliases = _load_catalog_item_aliases()
+    if not aliases:
+        return None
+    if raw in aliases:
+        return aliases[raw]
+    base = raw
+    for sfx in (".event", ".prod", ".dev"):
+        if raw.endswith(sfx):
+            base = raw[: -len(sfx)]
+            break
+    for cand in (f"{base}.event", f"{base}.prod", f"{base}.dev", base):
+        if cand in aliases:
+            return aliases[cand]
+    return None
+
 
 def _catalog_name_index(config: RHDPConfig) -> dict[str, list[str]]:
     """
@@ -2895,6 +2942,22 @@ def validate_catalog_item_exists(
         _catalog_exists_cache[cache_key] = (_time.monotonic(), val)
         return val
 
+    original_ci = ci
+    alias_target = _alias_catalog_ci(ci)
+    if alias_target and alias_target != ci:
+        # Force the same auto-correct path as suffix remap so upload/deploy apply it.
+        index = _catalog_name_index(config)
+        ns_list = index.get(alias_target) or []
+        suggestion = (
+            f"Catalog alias '{original_ci}' → '{alias_target}'. Auto-correcting. "
+            f"Local Flow only — diverges from Labagator if the plan still has the old name."
+        )
+        if ns_list:
+            return _cache_and_return((False, None, suggestion, alias_target, [alias_target]))
+        # Target not in index yet — continue resolve against the aliased name
+        # (suffix / namespace redirect may still find a published form).
+        ci = alias_target
+
     index = _catalog_name_index(config)
 
     def _ns_for(name: str) -> list[str]:
@@ -2902,6 +2965,12 @@ def validate_catalog_item_exists(
 
     # Exact name in expected namespace
     if expected_namespace in _ns_for(ci):
+        if alias_target and alias_target != original_ci:
+            suggestion = (
+                f"Catalog alias '{original_ci}' → '{ci}'. Auto-correcting. "
+                f"Local Flow only — diverges from Labagator if the plan still has the old name."
+            )
+            return _cache_and_return((False, None, suggestion, ci, [ci]))
         return _cache_and_return((True, expected_namespace, None, None, []))
 
     # Exact name in other catalog namespaces (same CI string — namespace redirect only)

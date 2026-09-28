@@ -62,3 +62,28 @@ def test_bare_ci_defaults_to_prod_when_no_event():
     assert suggested_ci == "zt-ansiblebu.zt-ans-bu-roadshow01.prod"
     assert options == ["zt-ansiblebu.zt-ans-bu-roadshow01.prod"]
     assert suggestion and "auto-correcting" in suggestion.lower()
+
+
+def test_catalog_item_alias_auto_corrects():
+    """lib/catalog_item_aliases.json remaps must surface as suggested_ci."""
+    _clear_cache()
+    cfg = make_config()
+    index = {
+        "ai-quickstarts.ai-qs-rag-tenant.event": ["babylon-catalog-event"],
+    }
+    aliases = {
+        "summit-2026.lb4003-ai-rag-tenant.event": "ai-quickstarts.ai-qs-rag-tenant.event",
+    }
+    with (
+        patch("rhdp_flow._catalog_name_index", return_value=index),
+        patch("rhdp_flow._load_catalog_item_aliases", return_value=aliases),
+    ):
+        exists, _ns, suggestion, suggested_ci, options = validate_catalog_item_exists(
+            "summit-2026.lb4003-ai-rag-tenant.event",
+            "babylon-catalog-event",
+            cfg,
+        )
+    assert exists is False
+    assert suggested_ci == "ai-quickstarts.ai-qs-rag-tenant.event"
+    assert suggested_ci in options
+    assert suggestion and "alias" in suggestion.lower()
