@@ -1386,6 +1386,31 @@ def test_validate_num_users_advisory_medium_when_instances_set(mock_limit, clien
     assert adv[0]["instances"] == 2
 
 
+BLANK_USERS_MULTIUSER_CSV = """\
+CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Multi_Asset,Asset_CIs,Multi_Workshop_Name,Concurrency,Instances,Salesforce IDs
+Code Red,summit-2026.lb1088-code-red-breach-challenge-cnv.event,user-bbethell-redhat-com,,True,Pass1,Admin,QA,Code Red,15/02/2026 11:00,15/02/2026 19:00,17/02/2026 11:00,,,,,1,
+"""
+
+
+@patch("api.routes.get_catalog_item_num_users_limit")
+def test_validate_num_users_blank_users_catalog_default_advisory(mock_limit, client):
+    """Users blank + catalog has num_users → non-blocking advisory (catalog default seats)."""
+    mock_limit.return_value = {"has_num_users": True, "maximum": 65, "minimum": 2, "default": 2}
+    assert client.post(
+        "/api/schedules/upload",
+        files={"file": ("codered.csv", BLANK_USERS_MULTIUSER_CSV.encode(), "text/csv")},
+    ).status_code == 200
+    resp = client.post("/api/schedules/validate-num-users")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["violations"] == []
+    blank = data.get("users_blank_catalog_default") or []
+    assert len(blank) == 1
+    assert blank[0]["severity"] == "medium"
+    assert blank[0]["catalog_default"] == 2
+    assert "2 seats" in blank[0]["message"].lower()
+
+
 @patch("api.routes.get_catalog_item_num_users_limit")
 def test_deploy_blocked_when_limit_exceeded(mock_limit, uploaded_client):
     """Live deploy returns 400 when users exceed the catalog limit."""

@@ -41,7 +41,7 @@ import InfoCircleIcon from '@patternfly/react-icons/dist/esm/icons/info-circle-i
 import { api, getSelectedTarget, selectTargetCluster } from '../services/api';
 import { DiffView } from './DiffView';
 import { CatalogItemSelect } from './CatalogItemSelect';
-import type { WorkshopSchedule, DeploymentResult, NumUsersViolation, UsersNotInCatalogAdvisory, ScheduleExampleMeta, LabagatorEventSummary, LabagatorPreviewResponse, LabagatorSessionSummary } from '../types';
+import type { WorkshopSchedule, DeploymentResult, NumUsersViolation, UsersNotInCatalogAdvisory, UsersBlankCatalogDefaultAdvisory, ScheduleExampleMeta, LabagatorEventSummary, LabagatorPreviewResponse, LabagatorSessionSummary } from '../types';
 
 /* ── Schedule date validation helpers ── */
 
@@ -325,6 +325,8 @@ export const UploadTab: React.FC<Props> = ({
   // num_users limit validation
   const [numUsersViolations, setNumUsersViolations] = useState<NumUsersViolation[]>([]);
   const [usersNotInCatalog, setUsersNotInCatalog] = useState<UsersNotInCatalogAdvisory[]>([]);
+  const [usersBlankCatalogDefault, setUsersBlankCatalogDefault] = useState<UsersBlankCatalogDefaultAdvisory[]>([]);
+  const [usersBlankExpanded, setUsersBlankExpanded] = useState(false);
   const [numUsersLimits, setNumUsersLimits] = useState<Record<string, number>>({});
 
   // Catalog namespace validation
@@ -582,6 +584,7 @@ export const UploadTab: React.FC<Props> = ({
     setMissingNamespaces([]);
     setNumUsersViolations([]);
     setUsersNotInCatalog([]);
+    setUsersBlankCatalogDefault([]);
     setNumUsersLimits({});
     setCatalogNamespaceMismatches([]);
     setCatalogNotFound([]);
@@ -599,6 +602,7 @@ export const UploadTab: React.FC<Props> = ({
     if (nsRes.missing.length) setMissingNamespaces(nsRes.missing);
     if (nuRes.violations.length) setNumUsersViolations(nuRes.violations);
     if (nuRes.users_not_in_catalog?.length) setUsersNotInCatalog(nuRes.users_not_in_catalog);
+    if (nuRes.users_blank_catalog_default?.length) setUsersBlankCatalogDefault(nuRes.users_blank_catalog_default);
     if (Object.keys(nuRes.limits).length) setNumUsersLimits(nuRes.limits);
     if (cnRes.mismatches.length) {
       setCatalogNamespaceMismatches(cnRes.mismatches);
@@ -1491,6 +1495,7 @@ export const UploadTab: React.FC<Props> = ({
       const nuRes = await api.validateNumUsers();
       setNumUsersViolations(nuRes.violations || []);
       setUsersNotInCatalog(nuRes.users_not_in_catalog || []);
+      setUsersBlankCatalogDefault(nuRes.users_blank_catalog_default || []);
       if (Object.keys(nuRes.limits || {}).length) setNumUsersLimits(nuRes.limits);
     } catch { /* non-fatal */ }
     await recordOperatorOverride({
@@ -1540,6 +1545,7 @@ export const UploadTab: React.FC<Props> = ({
       const nuRes = await api.validateNumUsers();
       setNumUsersViolations(nuRes.violations || []);
       setUsersNotInCatalog(nuRes.users_not_in_catalog || []);
+      setUsersBlankCatalogDefault(nuRes.users_blank_catalog_default || []);
       if (Object.keys(nuRes.limits || {}).length) setNumUsersLimits(nuRes.limits);
     } catch { /* non-fatal */ }
     await recordOperatorOverride({
@@ -2198,6 +2204,36 @@ export const UploadTab: React.FC<Props> = ({
               <div style={{ fontSize: '0.85rem', color: 'var(--pf-v6-global--Color--200)' }}>
                 Labagator is still the master plan for the event. Use the buttons above only to unblock testing / partial deploys in Flow.
               </div>
+            </Alert>
+          )}
+
+          {/* Users blank but catalog has num_users — info only, never blocks deploy */}
+          {usersBlankCatalogDefault.length > 0 && (
+            <Alert
+              variant="info"
+              isInline
+              title={`${usersBlankCatalogDefault.length} row(s): Users blank — will use catalog default seats`}
+              style={{ marginBottom: 12 }}
+              actionLinks={
+                <Button variant="link" size="sm" onClick={() => setUsersBlankCatalogDefault([])}>
+                  Dismiss
+                </Button>
+              }
+            >
+              <div style={{ fontSize: '0.9rem', marginBottom: 8 }}>
+                Shared multiuser labs need <strong>Users</strong> for seats (and usually <strong>Instances=1</strong>).
+                Deploy still proceeds with the catalog default — set Users if that default is too small.
+              </div>
+              <AffectsItemsList
+                count={usersBlankCatalogDefault.length}
+                expanded={usersBlankExpanded}
+                onToggle={() => setUsersBlankExpanded((v) => !v)}
+                noun="row"
+              >
+                {sortByCiName(usersBlankCatalogDefault).map((a, i) => (
+                  <li key={i}>{a.message}</li>
+                ))}
+              </AffectsItemsList>
             </Alert>
           )}
 
@@ -3330,6 +3366,7 @@ export const UploadTab: React.FC<Props> = ({
                             setMissingNamespaces([]);
                             setNumUsersViolations([]);
                             setUsersNotInCatalog([]);
+                            setUsersBlankCatalogDefault([]);
                             setNumUsersLimits({});
                             setCatalogNamespaceMismatches([]);
                             setProdNotEvent([]);

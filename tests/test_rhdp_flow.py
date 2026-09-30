@@ -24,6 +24,7 @@ try:
         DeploymentResult,
         RHDPConfig,
         WorkshopSchedule,
+        _provider_parameter_values,
         build_resource_claim_payload,
         calculate_duration,
         construct_workshop_url,
@@ -48,6 +49,7 @@ try:
         read_csv_input,
         scale_workshops,
         unlock_workshops,
+        users_blank_catalog_default_advisory,
         verify_deployment,
         write_deployment_results,
     )
@@ -529,6 +531,46 @@ Valid Row,valid-ci,valid-ns,20,True,pass,Admin,QA,My Workshop,15/02/2026 11:00,1
 # ============================================================================
 
 
+class TestProviderParameterValues(unittest.TestCase):
+    """Users → num_users must apply with workshop UI enabled (WorkshopProvision seats)."""
+
+    def test_includes_num_users_when_workshop_ui_enabled(self):
+        schedule = make_schedule(enable_workshop_interface=True, users=15, instances=1)
+        pv = _provider_parameter_values(schedule, "2026-02-15T11:00:00Z", "2026-02-15T19:00:00Z")
+        self.assertEqual(pv["num_users"], 15)
+
+    def test_includes_num_users_when_workshop_ui_disabled(self):
+        schedule = make_schedule(enable_workshop_interface=False, users=20)
+        pv = _provider_parameter_values(schedule, "2026-02-15T11:00:00Z", "2026-02-15T19:00:00Z")
+        self.assertEqual(pv["num_users"], 20)
+
+    def test_omits_num_users_when_users_blank(self):
+        schedule = make_schedule(enable_workshop_interface=True, users=None, instances=8)
+        pv = _provider_parameter_values(schedule, "2026-02-15T11:00:00Z", "2026-02-15T19:00:00Z")
+        self.assertNotIn("num_users", pv)
+
+    def test_blank_users_catalog_default_advisory(self):
+        schedule = make_schedule(users=None, instances=1, enable_workshop_interface=True)
+        adv = users_blank_catalog_default_advisory(
+            schedule,
+            schedule.ci,
+            {"has_num_users": True, "maximum": 65, "minimum": 2, "default": 2},
+        )
+        self.assertIsNotNone(adv)
+        self.assertEqual(adv["severity"], "medium")
+        self.assertEqual(adv["catalog_default"], 2)
+        self.assertIn("2 seats", adv["message"].lower())
+
+    def test_no_blank_advisory_when_users_set(self):
+        schedule = make_schedule(users=15)
+        adv = users_blank_catalog_default_advisory(
+            schedule,
+            schedule.ci,
+            {"has_num_users": True, "maximum": 65, "minimum": 2, "default": 2},
+        )
+        self.assertIsNone(adv)
+
+
 class TestBuildResourceClaimPayload(unittest.TestCase):
     """Tests for build_resource_claim_payload."""
 
@@ -552,6 +594,12 @@ class TestBuildResourceClaimPayload(unittest.TestCase):
         self.assertEqual(provider["parameterValues"]["num_users"], 20)
         self.assertIn("start_timestamp", provider["parameterValues"])
         self.assertIn("stop_timestamp", provider["parameterValues"])
+
+    def test_provider_fields_include_num_users_with_workshop_ui(self):
+        config = make_config(dry_run=True)
+        schedule = make_schedule(enable_workshop_interface=True, users=15)
+        payload = build_resource_claim_payload(schedule, config)
+        self.assertEqual(payload["spec"]["provider"]["parameterValues"]["num_users"], 15)
 
     def test_access_password_present(self):
         config = make_config(dry_run=True)
