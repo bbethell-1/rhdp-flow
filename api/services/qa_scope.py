@@ -8,8 +8,8 @@ falls back to the calendar day of ``Provisioning Date`` when unset.
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timezone
-from typing import Iterable
+from collections.abc import Iterable
+from datetime import UTC, datetime
 
 # Labagator landing_export / ops_signals bands (event-local / CSV clock time).
 TIME_BANDS: tuple[tuple[str, str, int, int], ...] = (
@@ -32,7 +32,7 @@ def parse_provisioning_dt(value: str | None) -> datetime | None:
         try:
             dt = datetime.strptime(raw, fmt)
             if dt.tzinfo is not None:
-                dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+                dt = dt.astimezone(UTC).replace(tzinfo=None)
             return dt
         except ValueError:
             continue

@@ -2871,7 +2871,7 @@ def _load_catalog_item_aliases() -> dict[str, str]:
                     for k, v in raw.items()
                     if str(k).strip() and str(v).strip() and not str(k).startswith("_")
                 }
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.debug("catalog_item_aliases load failed: %s", exc)
         aliases = {}
     _catalog_item_aliases_cache = aliases
