@@ -128,6 +128,7 @@ function StatusCard({
   tooltip,
   onClick,
   active,
+  detail,
 }: {
   icon: React.ComponentType<{ style?: React.CSSProperties }>;
   color: string;
@@ -136,6 +137,8 @@ function StatusCard({
   tooltip: string;
   onClick?: () => void;
   active?: boolean;
+  /** Secondary line — e.g. "of 12 in scope" for coverage */
+  detail?: string;
 }) {
   return (
     <Tooltip content={tooltip}>
@@ -154,10 +157,93 @@ function StatusCard({
             {count}
           </div>
           <div className="summary-card-label">{label}</div>
+          {detail ? (
+            <div style={{ fontSize: '0.7rem', textAlign: 'center', opacity: 0.7, marginTop: 2 }}>
+              {detail}
+            </div>
+          ) : null}
         </CardBody>
       </Card>
     </Tooltip>
   );
+}
+
+type LastRunMeta = {
+  label: string;
+  floor: FloorMode;
+  floorDate: string | null;
+  timeBand: string;
+  ranCount: number;
+  scoped: boolean;
+};
+
+type StageGlance = {
+  id: 'qa1' | 'qa2' | 'qa3';
+  label: string;
+  passed: number;
+  failed: number;
+  total: number;
+};
+
+/** Lightweight Catalog / Setup / Healthy glance from stored QA rows (mirrors Ops glass). */
+function stageGlanceFromResults(results: QAResult[]): StageGlance[] {
+  const stages: Record<'qa1' | 'qa2' | 'qa3', StageGlance> = {
+    qa1: { id: 'qa1', label: 'Catalog', passed: 0, failed: 0, total: 0 },
+    qa2: { id: 'qa2', label: 'Setup', passed: 0, failed: 0, total: 0 },
+    qa3: { id: 'qa3', label: 'Healthy', passed: 0, failed: 0, total: 0 },
+  };
+
+  for (const r of results) {
+    const exists = String((r as QAResult & { exists?: unknown }).exists ?? '').trim().toLowerCase();
+    const matches = String(
+      (r as QAResult & { matches_schedule?: unknown }).matches_schedule ?? '',
+    )
+      .trim()
+      .toLowerCase();
+    const deployed = String(r.deployed || '').trim().toLowerCase();
+    const status = (r.status || '').toLowerCase();
+    const hasHealthy = r.healthy !== null && r.healthy !== undefined && r.healthy !== '';
+
+    const hitQa1 =
+      exists !== '' ||
+      (deployed === '' &&
+        !hasHealthy &&
+        matches === '' &&
+        !!status &&
+        (/not found|catalog|namespace|suffix/.test(status) ||
+          status === 'ok' ||
+          status === 'cannot verify'));
+    if (hitQa1) {
+      stages.qa1.total++;
+      if (exists === 'yes' || ['ok', 'verified', 'pass', 'passed', 'healthy', 'success'].includes(status)) {
+        stages.qa1.passed++;
+      } else if (exists === 'no' || /not found|fail|wrong/.test(status)) {
+        stages.qa1.failed++;
+      }
+    }
+
+    if (matches !== '') {
+      stages.qa2.total++;
+      if (matches === 'yes') stages.qa2.passed++;
+      else if (matches === 'no') stages.qa2.failed++;
+      else if (issuesDisplayish(r)) stages.qa2.failed++;
+    }
+
+    if (hasHealthy || deployed === 'yes' || deployed === 'no') {
+      stages.qa3.total++;
+      if (isVerified(r.status) && !isUnhealthy(r)) stages.qa3.passed++;
+      else if (isFailed(r.status) || isUnhealthy(r)) stages.qa3.failed++;
+    }
+  }
+
+  return (['qa1', 'qa2', 'qa3'] as const)
+    .map((id) => stages[id])
+    .filter((s) => s.total > 0);
+}
+
+function issuesDisplayish(r: QAResult): boolean {
+  const raw = String(r.issues || '').trim().toLowerCase();
+  return !!raw && raw !== 'none' && raw !== 'n/a' && raw !== '-';
 }
 
 export const QATab: React.FC<Props> = ({
@@ -198,6 +284,7 @@ export const QATab: React.FC<Props> = ({
   const [qaSearch, setQaSearch] = useState('');
   const [qaStatusFilter, setQaStatusFilter] = useState<QAStatusFilter>('all');
   const [viewNamespace, setViewNamespace] = useState<string>(ALL_NAMESPACES);
+  const [lastRunMeta, setLastRunMeta] = useState<LastRunMeta | null>(null);
   const isEmbedded =
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('embedded') === 'true';
@@ -430,14 +517,22 @@ export const QATab: React.FC<Props> = ({
       setQaStatusFilter('all');
       setPage(1);
       const ran = data.ran_count ?? data.count;
-      const scopeHint =
-        floor === 'day' || (ciNames && ciNames.length > 0)
-          ? ' — scoped run only, not a full-event sign-off'
-          : '';
+      const scoped = floor === 'day' || !!(ciNames && ciNames.length > 0);
+      setLastRunMeta({
+        label,
+        floor,
+        floorDate: floor === 'day' ? floorDate : null,
+        timeBand: floor === 'day' ? timeBand : ALL_BANDS,
+        ranCount: ran,
+        scoped,
+      });
+      const scopeHint = scoped
+        ? ' — scoped coverage only (not a full-day / full-event sign-off)'
+        : ' — full-event coverage for the selected namespaces';
       showToast(
         ciNames
-          ? `QA complete for ${label}: re-checked ${ran} · ${data.count} result row(s)${scopeHint}`
-          : `QA complete for ${label}: ${data.count} workshop(s)${scopeHint}`,
+          ? `QA finished for ${label}: re-checked ${ran} · ${data.count} result row(s)${scopeHint}`
+          : `QA finished for ${label}: ${data.count} workshop(s) QAed${scopeHint}`,
         'success',
       );
     } catch (e) {
@@ -530,8 +625,16 @@ export const QATab: React.FC<Props> = ({
 
       const data = await api.runQA({ type: qaType, namespaces });
       setQAResults(data.results);
+      setLastRunMeta({
+        label: `CSV · ${namespaces.length} namespace(s)`,
+        floor: 'event',
+        floorDate: null,
+        timeBand: ALL_BANDS,
+        ranCount: data.count,
+        scoped: true,
+      });
       showToast(
-        `QA complete from CSV: ${data.count} result(s) across ${namespaces.length} namespace(s)`,
+        `QA finished from CSV: ${data.count} result(s) across ${namespaces.length} namespace(s) — scoped to CSV namespaces only`,
         'success',
       );
     } catch (e) {
@@ -545,6 +648,17 @@ export const QATab: React.FC<Props> = ({
     () => [...new Set(qaResults.map((r) => r.namespace || '').filter(Boolean))].sort(),
     [qaResults],
   );
+
+  const qaedCiNames = useMemo(
+    () => new Set(qaResults.map((r) => r.ci_name).filter(Boolean)),
+    [qaResults],
+  );
+  const qaedInScope = useMemo(
+    () => scopedCiNames.filter((n) => qaedCiNames.has(n)).length,
+    [scopedCiNames, qaedCiNames],
+  );
+  const notQaedInScope = Math.max(0, workshopsInScope - qaedInScope);
+  const coverageIncomplete = workshopsInScope > 0 && qaResults.length > 0 && notQaedInScope > 0;
 
   const statusCounts = useMemo(() => {
     const counts = {
@@ -562,6 +676,8 @@ export const QATab: React.FC<Props> = ({
     }
     return counts;
   }, [qaResults]);
+
+  const stageGlance = useMemo(() => stageGlanceFromResults(qaResults), [qaResults]);
 
   const filteredQAResults = useMemo(() => {
     let filtered = qaResults;
@@ -594,9 +710,13 @@ export const QATab: React.FC<Props> = ({
     qaStatusFilter !== 'all' ||
     qaSearch.length > 0 ||
     viewNamespace !== ALL_NAMESPACES;
+  const coverageTitlePart =
+    workshopsInScope > 0
+      ? ` · ${qaedInScope}/${workshopsInScope} QAed in scope`
+      : '';
   const qaTitle = isQAFiltered
-    ? `QA Results (${filteredQAResults.length} of ${qaResults.length})`
-    : `QA Results (${qaResults.length})`;
+    ? `QA Results (${filteredQAResults.length} of ${qaResults.length}${coverageTitlePart})`
+    : `QA Results (${qaResults.length}${coverageTitlePart})`;
 
   const handleDownloadFilteredCSV = () => {
     const headers = [
@@ -658,10 +778,9 @@ export const QATab: React.FC<Props> = ({
   return (
     <PageSection>
       <Alert variant="info" isInline isPlain title="Keep it simple" style={{ marginBottom: 16 }}>
-        <strong>QA</strong> = Catalog → Setup → Healthy (match Ops Floor day when scoped).
-        {' '}
-        <strong>Admin Ops</strong> = live workshops + ad-hoc lock/extend/scale.
-        {' '}
+        <strong>QA</strong> = Catalog → Setup → Healthy (gate checks). Scope to Ops Floor day / band so
+        undeployed later sessions do not fail the run.{' '}
+        <strong>Admin Ops</strong> = live workshops + ad-hoc lock/extend/scale.{' '}
         <Button
           component="a"
           variant="link"
@@ -682,13 +801,19 @@ export const QATab: React.FC<Props> = ({
         <CardTitle>Catalog → Setup → Healthy</CardTitle>
         <CardBody>
           <p style={{ marginTop: 0, marginBottom: 12, fontSize: '0.9rem', opacity: 0.85 }}>
-            Pick <strong>This day</strong> (Ops Floor pin) or <strong>Full event</strong>, then select
-            workshops and Run QA. Schedule shows provision / session / auto-stop per lab.
+            Choose <strong>This day</strong> or <strong>Full event</strong>, optionally a time band,
+            select workshops, then Run QA.
+            {' '}
+            <em>Finished</em> means every selected workshop in that run was checked — not that the
+            whole floor day or event is signed off. Coverage below shows QAed vs still pending.
             {floor === 'day' && selectedDayMeta ? (
               <>
                 {' '}
-                Scoped to <strong>{selectedDayMeta.label}</strong> ({workshopsInScope} workshop
-                {workshopsInScope === 1 ? '' : 's'}
+                Now scoped to <strong>{selectedDayMeta.label}</strong>
+                {timeBand !== ALL_BANDS
+                  ? ` · ${selectedDayMeta.bands.find((b) => b.key === timeBand)?.label || timeBand}`
+                  : ''}{' '}
+                ({workshopsInScope} workshop{workshopsInScope === 1 ? '' : 's'}
                 {workshopsInScope > 0
                   ? ` · deploy ${scopeTiming.earliestProvision} → stop ${scopeTiming.latestStop}`
                   : ''}
@@ -698,8 +823,11 @@ export const QATab: React.FC<Props> = ({
             {floor === 'event' && workshopsInScope > 0 ? (
               <>
                 {' '}
-                Full event · {workshopsInScope} workshop{workshopsInScope === 1 ? '' : 's'} ·{' '}
-                {scopeDates.length} day{scopeDates.length === 1 ? '' : 's'}.
+                Full event · {workshopsInScope} workshop{workshopsInScope === 1 ? '' : 's'}
+                {scopeDates.length > 0
+                  ? ` · ${scopeDates.length} day${scopeDates.length === 1 ? '' : 's'}`
+                  : ''}
+                .
               </>
             ) : null}
           </p>
@@ -946,15 +1074,14 @@ export const QATab: React.FC<Props> = ({
             {!noSchedules && (
               <>
                 {' '}
-                Scope: <strong>{runScopeLabel}</strong>
+                Will check: <strong>{runScopeLabel}</strong>
                 {workshopsInScope > 0 && (
                   <>
                     {' '}
-                    · {selectedCount}/{workshopsInScope} workshop(s) selected
+                    · {selectedCount}/{workshopsInScope} selected
                   </>
                 )}
-                . For multi-day events, pin This day (or Full event), then deselect
-                workshops not deployed yet — or use Retry failed after a run.
+                .
               </>
             )}
           </p>
@@ -1101,18 +1228,107 @@ export const QATab: React.FC<Props> = ({
         </Card>
       </ExpandableSection>
 
-      {qaResults.length > 0 && workshopsInScope > 0 && qaResults.length < workshopsInScope ? (
+      {qaResults.length > 0 && workshopsInScope > 0 ? (
         <Alert
-          variant="warning"
+          variant={coverageIncomplete ? 'warning' : 'success'}
           isInline
-          title="Last QA run is a subset of the current floor scope"
+          title={
+            coverageIncomplete
+              ? `Coverage ${qaedInScope}/${workshopsInScope} in current floor scope — not a full sign-off`
+              : `Coverage complete for current floor scope (${qaedInScope}/${workshopsInScope} QAed)`
+          }
           style={{ marginBottom: 12 }}
         >
-          Flow has <strong>{qaResults.length}</strong> result row(s), but this scope lists{' '}
-          <strong>{workshopsInScope}</strong> workshop(s). A morning (or selected) run that shows
-          all verified is <em>not</em> a full-day / full-event sign-off — widen Floor scope or select
-          the remaining workshops and Run QA again.
+          <div style={{ fontSize: '0.9rem' }}>
+            <strong>Pass</strong> among QAed rows: {statusCounts.verified} verified ·{' '}
+            {statusCounts.failed} failed
+            {statusCounts.unhealthy ? ` · ${statusCounts.unhealthy} unhealthy` : ''}.
+            {coverageIncomplete ? (
+              <>
+                {' '}
+                <strong>{notQaedInScope}</strong> workshop
+                {notQaedInScope === 1 ? '' : 's'} in this scope still have no QA row
+                {lastRunMeta?.scoped
+                  ? ` (last run was scoped: ${lastRunMeta.label})`
+                  : ''}
+                . Widen Floor / band or select the remaining workshops and Run QA again.
+              </>
+            ) : (
+              <>
+                {' '}
+                Every workshop in the current Floor scope has a result row
+                {floor === 'day' ? ' for this day/band' : ' for the full event'}.
+              </>
+            )}
+          </div>
         </Alert>
+      ) : null}
+
+      {qaResults.length > 0 && (
+        <Flex
+          style={{ marginBottom: 12 }}
+          gap={{ default: 'gapSm' }}
+          alignItems={{ default: 'alignItemsCenter' }}
+          flexWrap={{ default: 'wrap' }}
+        >
+          <Label isCompact color="blue">
+            Floor: {floor === 'day' ? selectedDayMeta?.label || floorDate || 'This day' : 'Full event'}
+            {floor === 'day' && timeBand !== ALL_BANDS
+              ? ` · ${selectedDayMeta?.bands.find((b) => b.key === timeBand)?.label || timeBand}`
+              : ''}
+          </Label>
+          {lastRunMeta ? (
+            <Label isCompact color={lastRunMeta.scoped ? 'orange' : 'green'}>
+              Last run: {lastRunMeta.scoped ? 'scoped' : 'full event'} · {lastRunMeta.ranCount}{' '}
+              checked
+            </Label>
+          ) : null}
+          {workshopsInScope > 0 ? (
+            <Label isCompact color="grey">
+              {qaedInScope}/{workshopsInScope} QAed · {statusCounts.verified} passed ·{' '}
+              {statusCounts.failed} failed
+              {notQaedInScope > 0 ? ` · ${notQaedInScope} not QAed` : ''}
+            </Label>
+          ) : null}
+        </Flex>
+      )}
+
+      {qaResults.length > 0 && stageGlance.length > 0 ? (
+        <Flex style={{ marginBottom: 12 }} gap={{ default: 'gapMd' }} flexWrap={{ default: 'wrap' }}>
+          {stageGlance.map((st) => {
+            const ok = st.failed === 0 && st.passed === st.total;
+            const color = ok
+              ? 'var(--pf-v6-global--success-color--100)'
+              : st.failed > 0
+                ? 'var(--pf-v6-global--danger-color--100)'
+                : 'var(--pf-t--global--text--color--regular)';
+            return (
+              <FlexItem key={st.id}>
+                <div style={{ minWidth: 110 }}>
+                  <div
+                    style={{
+                      fontSize: '0.7rem',
+                      fontWeight: 600,
+                      letterSpacing: '0.04em',
+                      textTransform: 'uppercase',
+                      opacity: 0.65,
+                      marginBottom: 2,
+                    }}
+                  >
+                    {st.label}
+                  </div>
+                  <div style={{ fontWeight: 700, color, fontSize: '0.95rem' }}>
+                    {st.failed > 0
+                      ? `${st.failed} failed`
+                      : st.passed === st.total
+                        ? `${st.passed}/${st.total} clear`
+                        : `${st.passed}/${st.total}`}
+                  </div>
+                </div>
+              </FlexItem>
+            );
+          })}
+        </Flex>
       ) : null}
 
       {qaResults.length > 0 && (
@@ -1121,9 +1337,10 @@ export const QATab: React.FC<Props> = ({
             <StatusCard
               icon={CubesIcon}
               color="var(--pf-t--global--text--color--regular)"
-              count={statusCounts.total}
-              label="In QA set"
-              tooltip="Rows from the last Flow QA run (may be a day/band/CI subset — not always the full event)"
+              count={qaedInScope}
+              label="QAed"
+              detail={workshopsInScope > 0 ? `of ${workshopsInScope} in scope` : undefined}
+              tooltip="Workshops in the current Floor scope that have a QA result row (coverage, not pass rate)"
               onClick={() => {
                 setQaStatusFilter('all');
                 setViewNamespace(ALL_NAMESPACES);
@@ -1137,8 +1354,9 @@ export const QATab: React.FC<Props> = ({
               icon={CheckCircleIcon}
               color="var(--pf-v6-global--success-color--100)"
               count={statusCounts.verified}
-              label="Verified"
-              tooltip="Passed QA verification"
+              label="Passed"
+              detail="among QAed rows"
+              tooltip="Passed QA verification (pass rate among rows that were checked)"
               onClick={() => {
                 setQaStatusFilter('verified');
                 setPage(1);
@@ -1160,29 +1378,44 @@ export const QATab: React.FC<Props> = ({
               active={qaStatusFilter === 'failed'}
             />
           </FlexItem>
-          <FlexItem>
-            <StatusCard
-              icon={ExclamationTriangleIcon}
-              color="var(--pf-v6-global--warning-color--100)"
-              count={statusCounts.unhealthy}
-              label="Unhealthy"
-              tooltip="Deployed but health check failed"
-              onClick={() => {
-                setQaStatusFilter('unhealthy');
-                setPage(1);
-              }}
-              active={qaStatusFilter === 'unhealthy'}
-            />
-          </FlexItem>
-          <FlexItem>
-            <StatusCard
-              icon={ExternalLinkAltIcon}
-              color="var(--pf-v6-global--info-color--100)"
-              count={statusCounts.landing}
-              label="Landing URLs"
-              tooltip="Rows with a student landing page URL (also on Students tab)"
-            />
-          </FlexItem>
+          {notQaedInScope > 0 ? (
+            <FlexItem>
+              <StatusCard
+                icon={ExclamationTriangleIcon}
+                color="var(--pf-v6-global--warning-color--100)"
+                count={notQaedInScope}
+                label="Not QAed"
+                detail="in current scope"
+                tooltip="Workshops in the current Floor / band scope with no QA result yet — morning-only or selection subset"
+              />
+            </FlexItem>
+          ) : (
+            <FlexItem>
+              <StatusCard
+                icon={ExclamationTriangleIcon}
+                color="var(--pf-v6-global--warning-color--100)"
+                count={statusCounts.unhealthy}
+                label="Unhealthy"
+                tooltip="Deployed but health check failed"
+                onClick={() => {
+                  setQaStatusFilter('unhealthy');
+                  setPage(1);
+                }}
+                active={qaStatusFilter === 'unhealthy'}
+              />
+            </FlexItem>
+          )}
+          {statusCounts.landing > 0 ? (
+            <FlexItem>
+              <StatusCard
+                icon={ExternalLinkAltIcon}
+                color="var(--pf-v6-global--info-color--100)"
+                count={statusCounts.landing}
+                label="Landing URLs"
+                tooltip="Rows with a student landing page URL (also on Students tab)"
+              />
+            </FlexItem>
+          ) : null}
         </Flex>
       )}
 

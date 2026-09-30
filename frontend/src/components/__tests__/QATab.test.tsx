@@ -24,7 +24,7 @@ describe('QATab', () => {
 
   it('renders results table with QA data', () => {
     render(<QATab qaResults={[mockQAResult]} setQAResults={noop} showToast={noop} />);
-    expect(screen.getByText('QA Results (1)')).toBeInTheDocument();
+    expect(screen.getByText(/QA Results \(1/)).toBeInTheDocument();
     expect(screen.getByText('Test Workshop')).toBeInTheDocument();
     expect(screen.getByText('test-ns')).toBeInTheDocument();
   });
@@ -78,5 +78,60 @@ describe('QATab', () => {
       />,
     );
     expect(screen.getByRole('button', { name: /Retry failed \(1\)/ })).toBeInTheDocument();
+  });
+
+  it('shows coverage incomplete when QA rows are a subset of floor-scoped workshops', () => {
+    const schedules = [
+      {
+        ci_name: 'Morning Lab',
+        ci: 'morning.event',
+        namespace: 'ns-a',
+        enable_workshop_interface: true,
+        password: '',
+        activity: 'Workshops',
+        purpose: 'QA',
+        workshop_name: 'Morning Lab',
+        session_date: '2026-05-06',
+        provisioning_date: '05/06/2026 09:00',
+        auto_stop: '05/06/2026 12:00',
+        auto_destroy: '05/06/2026 18:00',
+      },
+      {
+        ci_name: 'Afternoon Lab',
+        ci: 'afternoon.event',
+        namespace: 'ns-a',
+        enable_workshop_interface: true,
+        password: '',
+        activity: 'Workshops',
+        purpose: 'QA',
+        workshop_name: 'Afternoon Lab',
+        session_date: '2026-05-06',
+        provisioning_date: '05/06/2026 15:00',
+        auto_stop: '05/06/2026 18:00',
+        auto_destroy: '05/07/2026 09:00',
+      },
+    ];
+    render(
+      <QATab
+        qaResults={[
+          {
+            ...mockQAResult,
+            ci_name: 'Morning Lab',
+            ci: 'morning.event',
+            namespace: 'ns-a',
+            status: 'verified',
+            deployed: 'Yes',
+            healthy: true,
+          },
+        ]}
+        setQAResults={noop}
+        showToast={noop}
+        schedules={schedules as never}
+      />,
+    );
+    expect(screen.getByText(/Coverage 1\/2 in current floor scope/)).toBeInTheDocument();
+    expect(screen.getByText('QAed')).toBeInTheDocument();
+    expect(screen.getByText('Not QAed')).toBeInTheDocument();
+    expect(screen.getByText(/QA Results \(1 · 1\/2 QAed in scope\)/)).toBeInTheDocument();
   });
 });
