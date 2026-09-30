@@ -503,9 +503,9 @@ export const QATab: React.FC<Props> = ({
   return (
     <PageSection>
       <Alert variant="info" isInline isPlain title="Keep it simple" style={{ marginBottom: 16 }}>
-        <strong>QA</strong> = verify the plan matches reality (QA1 catalog · QA2 setup · QA3 deploy + Soundcheck).
+        <strong>QA</strong> = Catalog → Setup → Healthy (match Ops Floor day when scoped).
         {' '}
-        <strong>Admin Ops</strong> = live workshops + ad-hoc lock/extend/scale (can diverge from Labagator).
+        <strong>Admin Ops</strong> = live workshops + ad-hoc lock/extend/scale.
         {' '}
         <Button
           component="a"
@@ -522,9 +522,20 @@ export const QATab: React.FC<Props> = ({
         </Button>
       </Alert>
 
-      {/* Scope + type + run */}
+      {/* Floor day + namespace + type + run — Floor scope first so multi-day events stay quiet */}
       <Card isCompact style={{ marginBottom: 16 }}>
+        <CardTitle>Catalog → Setup → Healthy</CardTitle>
         <CardBody>
+          <p style={{ marginTop: 0, marginBottom: 12, fontSize: '0.9rem', opacity: 0.85 }}>
+            Pick <strong>This day</strong> (Ops Floor pin) or <strong>Full event</strong>, then Run QA.
+            {floor === 'day' && selectedDayMeta ? (
+              <>
+                {' '}
+                Scoped to <strong>{selectedDayMeta.label}</strong> ({workshopsInScope} workshop
+                {workshopsInScope === 1 ? '' : 's'}).
+              </>
+            ) : null}
+          </p>
           <Split hasGutter style={{ alignItems: 'flex-start', flexWrap: 'wrap' }}>
             <SplitItem>
               <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>

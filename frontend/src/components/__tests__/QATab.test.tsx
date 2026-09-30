@@ -15,9 +15,11 @@ describe('QATab', () => {
     expect(screen.getByLabelText('QA type')).toBeInTheDocument();
   });
 
-  it('renders guidance alert', () => {
+  it('renders guidance alert and floor scope on QA card', () => {
     render(<QATab qaResults={[]} setQAResults={noop} showToast={noop} />);
     expect(screen.getByText('Keep it simple')).toBeInTheDocument();
+    expect(screen.getByText('Catalog → Setup → Healthy')).toBeInTheDocument();
+    expect(screen.getByLabelText('QA floor scope: this day or full event')).toBeInTheDocument();
   });
 
   it('renders results table with QA data', () => {
@@ -63,7 +65,7 @@ describe('QATab', () => {
   it('renders Ops Floor This day / Full event scope controls', () => {
     render(<QATab qaResults={[]} setQAResults={noop} showToast={noop} />);
     expect(screen.getByLabelText('QA floor scope: this day or full event')).toBeInTheDocument();
-    expect(screen.getByText('This day')).toBeInTheDocument();
-    expect(screen.getByText('Full event')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'This day' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Full event' })).toBeInTheDocument();
   });
 });
