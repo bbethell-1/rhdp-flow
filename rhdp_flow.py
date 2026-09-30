@@ -67,19 +67,18 @@ def _expected_total_seats(schedule: "WorkshopSchedule") -> int | None:
 def _provider_parameter_values(
     schedule: "WorkshopSchedule", start_timestamp: str, stop_timestamp: str
 ) -> dict:
-    """Build provider parameterValues; include num_users only when Users is set and > 0.
+    """Build provider parameterValues; include num_users when Users is set and > 0.
 
-    When Enable_workshop_interface=True, num_users is NOT included because Workshop/WorkshopProvision
-    handles instance count via spec.count (from Workshop_instance_count column), not via num_users parameter.
+    Users → num_users (seats on multiuser catalog items). Instances → WorkshopProvision
+    spec.count (shared-lab replica count, usually 1). Both apply with workshop UI enabled:
+    WorkshopProvision merges these parameterValues into spec.parameters.
     """
     pv: dict = {
         "purpose": schedule.purpose,
         "start_timestamp": start_timestamp,
         "stop_timestamp": stop_timestamp,
     }
-    # Only include num_users when workshop interface is disabled
-    # With workshop interface enabled, instance count is handled by WorkshopProvision spec.count
-    if not schedule.enable_workshop_interface and _should_include_users(schedule) and schedule.users is not None:
+    if _should_include_users(schedule) and schedule.users is not None:
         pv["num_users"] = schedule.users
     regions = [r.strip().replace("_", "-") for r in schedule.aws_regions.split(",") if r.strip()]
     if len(regions) == 1:
@@ -1381,18 +1380,23 @@ def dry_run_validate_schedules(
                 if ci_expects_num_users is False:
                     logger.info(f"  ✓ {schedule.ci_name}: Users=0, Instances={schedule.instances} (instances-only workshop)")
                 elif ci_expects_num_users is True:
-                    logger.warning(f"  ⚠️  {schedule.ci_name}: Users=0 but catalog item expects num_users parameter")
-                    logger.warning(f"      Hint: Set Users={schedule.instances}, Instances=1 for num_users workshops.")
+                    logger.warning(f"  ⚠️  {schedule.ci_name}: Users blank/0 but catalog expects num_users — deploy will use catalog default seats")
+                    logger.warning(
+                        f"      Hint: Set Users=<seat count>, Instances={schedule.instances or 1} "
+                        "(shared multiuser: usually Instances=1)."
+                    )
+            elif not has_users and not has_instances and ci_expects_num_users is True:
+                logger.warning(f"  ⚠️  {schedule.ci_name}: Users blank and catalog expects num_users — deploy will use catalog default seats")
+                logger.warning("      Hint: Set Users=<seat count> (and Instances=1 for shared multiuser labs).")
             elif ci_expects_num_users is None:
                 logger.info(f"  ℹ️  {schedule.ci_name}: Users={schedule.users or 0}, Instances={schedule.instances or 0} (catalog item not checked)")
 
-            # CRITICAL: Check Enable_workshop_interface vs num_users compatibility
+            # Workshop UI + num_users is the normal shared-lab path (Users→seats, Instances→count).
             if ci_expects_num_users is True and has_users and schedule.enable_workshop_interface:
-                logger.error(f"  ❌ {schedule.ci_name}: Enable_workshop_interface=True BUT catalog expects num_users!")
-                logger.error(f"      This will deploy as instances-only Workshop instead of ResourceClaims with num_users={schedule.users}")
-                logger.error("      FIX: Set Enable_workshop_interface=False for num_users workshops")
-                logger.error(f"      Current: Users={schedule.users}, Instances={schedule.instances or 1}, Enable_workshop_interface=True")
-                logger.error(f"      Correct: Users={schedule.users}, Instances={schedule.instances or 1}, Enable_workshop_interface=False")
+                logger.info(
+                    f"  ✓ {schedule.ci_name}: Workshop UI + Users={schedule.users} → num_users seats; "
+                    f"Instances={schedule.instances or 1} → WorkshopProvision.count"
+                )
 
         if not schedule.is_multi_asset:
             continue
@@ -2709,6 +2713,41 @@ def users_column_ignored_by_catalog_advisory(
         "enable_workshop_interface": schedule.enable_workshop_interface,
         "instances": inst,
         "severity": severity,
+        "message": message,
+    }
+
+
+def users_blank_catalog_default_advisory(
+    schedule: WorkshopSchedule,
+    catalog_ci: str,
+    catalog_limit_info: dict | None,
+) -> dict[str, Any] | None:
+    """
+    When Users is blank/0 but the catalog defines num_users, warn that seats fall back to the
+    catalog default. Advisory only — never blocks deploy.
+    """
+    if catalog_limit_info is None or not catalog_limit_info.get("has_num_users"):
+        return None
+    if schedule.users is not None and schedule.users > 0:
+        return None
+
+    default = catalog_limit_info.get("default")
+    default_txt = str(default) if default is not None else "catalog default"
+    inst = getattr(schedule, "instances", None)
+    message = (
+        f'"{schedule.ci_name}" catalog item {catalog_ci} expects num_users but Users is blank — '
+        f"WorkshopProvision will use {default_txt} seats. "
+        "Set Users to the intended seat count (shared multiuser labs usually use Instances=1)."
+    )
+    return {
+        "ci_name": schedule.ci_name,
+        "ci": catalog_ci,
+        "namespace": schedule.namespace,
+        "users": schedule.users,
+        "enable_workshop_interface": schedule.enable_workshop_interface,
+        "instances": inst,
+        "catalog_default": default,
+        "severity": "medium",
         "message": message,
     }
 

@@ -310,9 +310,22 @@ export interface UsersNotInCatalogAdvisory {
   message: string;
 }
 
+export interface UsersBlankCatalogDefaultAdvisory {
+  ci_name: string;
+  ci: string;
+  namespace: string;
+  users: number | null;
+  enable_workshop_interface: boolean;
+  instances: number | null;
+  catalog_default: number | null;
+  severity: 'medium';
+  message: string;
+}
+
 export interface NumUsersValidationResponse {
   violations: NumUsersViolation[];
   users_not_in_catalog: UsersNotInCatalogAdvisory[];
+  users_blank_catalog_default?: UsersBlankCatalogDefaultAdvisory[];
   checked: number;
   skipped: number;
   limits: Record<string, number>;

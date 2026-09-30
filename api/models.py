@@ -446,6 +446,20 @@ class UsersNotInCatalogAdvisory(BaseModel):
     message: str
 
 
+class UsersBlankCatalogDefaultAdvisory(BaseModel):
+    """Users blank/0 but catalog defines num_users — seats fall back to catalog default (non-blocking)."""
+
+    ci_name: str
+    ci: str
+    namespace: str
+    users: int | None = None
+    enable_workshop_interface: bool
+    instances: int | None = None
+    catalog_default: int | None = None
+    severity: Literal["medium"] = "medium"
+    message: str
+
+
 class NumUsersValidationResponse(BaseModel):
     """Response for POST /schedules/validate-num-users."""
 
@@ -453,6 +467,10 @@ class NumUsersValidationResponse(BaseModel):
     users_not_in_catalog: list[UsersNotInCatalogAdvisory] = Field(
         default_factory=list,
         description="Schedules with Users set where the catalog item does not define num_users",
+    )
+    users_blank_catalog_default: list[UsersBlankCatalogDefaultAdvisory] = Field(
+        default_factory=list,
+        description="Schedules with Users blank where the catalog defines num_users (catalog default seats)",
     )
     checked: int = 0
     skipped: int = 0

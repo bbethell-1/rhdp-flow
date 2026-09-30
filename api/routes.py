@@ -81,6 +81,7 @@ from api.models import (
     ShowroomHealthRequest,
     ShowroomPreflightRequest,
     UploadResponse,
+    UsersBlankCatalogDefaultAdvisory,
     UsersNotInCatalogAdvisory,
     WorkshopScheduleResponse,
 )
@@ -123,6 +124,7 @@ from rhdp_flow import (
     teardown_showroom,
     unlock_workshops,
     update_passwords,
+    users_blank_catalog_default_advisory,
     users_column_ignored_by_catalog_advisory,
     utc_timestamp_str,
     validate_catalog_item_exists,
@@ -1342,6 +1344,7 @@ def validate_num_users(_key=Depends(verify_api_key), config=Depends(_request_con
         raise HTTPException(400, "No schedules loaded.")
     violations: list[NumUsersViolation] = []
     users_not_in_catalog: list[UsersNotInCatalogAdvisory] = []
+    users_blank_catalog_default: list[UsersBlankCatalogDefaultAdvisory] = []
     limits: dict[str, int] = {}
     checked = 0
     skipped = 0
@@ -1351,15 +1354,24 @@ def validate_num_users(_key=Depends(verify_api_key), config=Depends(_request_con
     def _check_ci(ci: str, schedule: WorkshopSchedule):
         nonlocal checked, skipped
         requested_users = schedule.users
-        if requested_users is None or requested_users <= 0:
-            skipped += 1
-            return
         if ci not in ci_cache:
             ci_cache[ci] = get_catalog_item_num_users_limit(ci, config)
         info = ci_cache[ci]
         if info is None:
             skipped += 1
             return
+
+        blank_adv = users_blank_catalog_default_advisory(schedule, ci, info)
+        if blank_adv:
+            key = ("blank", schedule.ci_name, schedule.namespace, ci, blank_adv["message"])
+            if key not in advisory_seen:
+                advisory_seen.add(key)
+                users_blank_catalog_default.append(UsersBlankCatalogDefaultAdvisory(**blank_adv))
+
+        if requested_users is None or requested_users <= 0:
+            skipped += 1
+            return
+
         checked += 1
         adv = users_column_ignored_by_catalog_advisory(schedule, ci, info)
         if adv:
@@ -1390,6 +1402,7 @@ def validate_num_users(_key=Depends(verify_api_key), config=Depends(_request_con
     return NumUsersValidationResponse(
         violations=violations,
         users_not_in_catalog=users_not_in_catalog,
+        users_blank_catalog_default=users_blank_catalog_default,
         checked=checked,
         skipped=skipped,
         limits=limits,
