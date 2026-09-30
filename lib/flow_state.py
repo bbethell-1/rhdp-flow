@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import asdict, fields, is_dataclass
+from dataclasses import MISSING, asdict, fields, is_dataclass
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -64,11 +64,23 @@ def _read_json(path: Path) -> Any | None:
 
 
 def _dataclass_from_dict(cls: type[T], raw: dict) -> T:
-    """Construct a dataclass ignoring unknown keys (forward/backward compatible)."""
+    """Construct a dataclass ignoring unknown keys (forward/backward compatible).
+
+    Missing keys use field defaults so PVC payloads from older builds still restore
+    after rollouts that add optional schedule fields (e.g. session_date).
+    """
     if not is_dataclass(cls):
         raise TypeError(f"{cls} is not a dataclass")
-    allowed = {f.name for f in fields(cls)}
-    return cls(**{k: v for k, v in raw.items() if k in allowed})  # type: ignore[arg-type]
+    kwargs: dict[str, Any] = {}
+    for f in fields(cls):
+        if f.name in raw:
+            kwargs[f.name] = raw[f.name]
+        elif f.default is not MISSING:
+            kwargs[f.name] = f.default
+        elif f.default_factory is not MISSING:  # type: ignore[comparison-overlap]
+            kwargs[f.name] = f.default_factory()  # type: ignore[misc]
+        # else: required field missing — let TypeError surface
+    return cls(**kwargs)  # type: ignore[arg-type]
 
 
 def save_schedules(schedules: list[Any], *, filename: str = "") -> None:

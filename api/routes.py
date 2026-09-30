@@ -86,6 +86,7 @@ from api.models import (
 )
 from api.services import labagator_client
 from api.services.labagator_import import transform_labagator_to_flow
+from api.services.qa_scope import build_qa_scopes, filter_schedules_by_scope
 from lib.deploy_pace import deploy_pace_seconds
 from rhdp_flow import (
     DeploymentResult,
@@ -245,11 +246,31 @@ def _schedule_examples_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "docs" / "examples"
 
 
-def _write_qa_csv_for_namespace(namespace: str) -> str:
-    """Write a temporary CSV containing only schedules for one namespace."""
-    filtered = [s for s in _schedules if s.namespace == namespace]
+def _write_qa_csv_for_namespace(
+    namespace: str,
+    *,
+    floor: str = "event",
+    floor_date: str | None = None,
+    time_band: str | None = None,
+) -> str:
+    """Write a temporary CSV containing schedules for one namespace (optional floor day)."""
+    filtered = filter_schedules_by_scope(
+        _schedules,
+        namespace=namespace,
+        floor=floor,
+        floor_date=floor_date,
+        time_band=time_band,
+    )
     if not filtered:
-        raise HTTPException(400, f'No loaded schedules match namespace "{namespace}".')
+        scope_bits = [f'namespace "{namespace}"']
+        if floor == "day" and floor_date:
+            scope_bits.append(f"floor day {floor_date}")
+        if time_band:
+            scope_bits.append(f"band {time_band}")
+        raise HTTPException(
+            400,
+            f"No loaded schedules match {' · '.join(scope_bits)}.",
+        )
 
     fieldnames = [
         "CI Name",
@@ -264,6 +285,7 @@ def _write_qa_csv_for_namespace(namespace: str) -> str:
         "Provisioning Date (UTC)",
         "Auto-stop (UTC)",
         "Auto-destroy (UTC)",
+        "Session Date",
         "Multi_Asset",
         "Asset_CIs",
         "Multi_Workshop_Name",
@@ -301,6 +323,7 @@ def _write_qa_csv_for_namespace(namespace: str) -> str:
                 "Provisioning Date (UTC)": s.provisioning_date,
                 "Auto-stop (UTC)": s.auto_stop,
                 "Auto-destroy (UTC)": s.auto_destroy,
+                "Session Date": getattr(s, "session_date", "") or "",
                 "Multi_Asset": s.is_multi_asset,
                 "Asset_CIs": s.asset_cis,
                 "Multi_Workshop_Name": s.multi_workshop_name,
@@ -543,6 +566,7 @@ def _schedule_to_response(s: WorkshopSchedule) -> WorkshopScheduleResponse:
         password=s.password, activity=s.activity, purpose=s.purpose,
         workshop_name=s.workshop_name, provisioning_date=s.provisioning_date,
         auto_stop=s.auto_stop, auto_destroy=s.auto_destroy,
+        session_date=getattr(s, "session_date", "") or "",
         is_multi_asset=s.is_multi_asset, asset_cis=s.asset_cis,
         multi_workshop_name=s.multi_workshop_name,
         concurrency=s.concurrency, instances=s.instances,
@@ -2713,6 +2737,15 @@ def qa_namespaces():
     return list(dict.fromkeys(s.namespace for s in _schedules if s.namespace))
 
 
+@router.get("/qa/scopes")
+def qa_scopes(namespace: str | None = None):
+    """Ops Floor day options derived from loaded schedules (Session Date / provisioning day)."""
+    if not _schedules:
+        return {"total": 0, "unknown_date_count": 0, "dates": []}
+    ns = namespace.strip() if namespace else None
+    return build_qa_scopes(_schedules, namespace=ns or None)
+
+
 @router.post("/qa/run")
 @_rate_limit("10/minute")
 def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_api_key), config=Depends(_request_config)):  # type: ignore
@@ -2720,6 +2753,11 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
     if not _schedules:
         raise HTTPException(400, "No schedules loaded.")
 
+    floor = body.floor or "event"
+    floor_date = body.floor_date
+    time_band = body.time_band
+    if floor == "day" and not floor_date:
+        raise HTTPException(400, "floor_date is required when floor=day (Ops Floor day pin).")
 
     # Support multiple namespaces for faster targeted QA
     if body.namespaces:
@@ -2745,7 +2783,11 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
         for ns in namespaces:
             # Always write a fresh temp CSV from in-memory schedules so that
             # UI edits (changed dates, users, etc.) are reflected in QA checks.
-            temp_path = _write_qa_csv_for_namespace(ns)
+            # Floor day filter matches Ops Floor pin so multi-day events don't
+            # run Catalog→Setup→Healthy against undeployed later days.
+            temp_path = _write_qa_csv_for_namespace(
+                ns, floor=floor, floor_date=floor_date, time_band=time_band
+            )
             temp_csv_paths.append(temp_path)
 
             if run_setup:
@@ -2753,9 +2795,59 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
             if run_deploy:
                 all_deploy.extend(qa2_verify_deployment_status(temp_path, ns, config))
 
-        # Catalog runs once on full CSV (not namespace-specific)
-        if run_catalog and temp_csv_paths:
-            all_catalog.extend(qa3_verify_catalog_items_exist(temp_csv_paths[0], config))
+        # Catalog once on floor-scoped rows (all selected namespaces).
+        if run_catalog:
+            catalog_schedules = [
+                s
+                for s in filter_schedules_by_scope(
+                    _schedules,
+                    floor=floor,
+                    floor_date=floor_date,
+                    time_band=time_band,
+                )
+                if s.namespace in namespaces
+            ]
+            ns_set = {s.namespace for s in catalog_schedules}
+            if len(ns_set) == 1:
+                cat_path = _write_qa_csv_for_namespace(
+                    next(iter(ns_set)),
+                    floor=floor,
+                    floor_date=floor_date,
+                    time_band=time_band,
+                )
+                temp_csv_paths.append(cat_path)
+                all_catalog.extend(qa3_verify_catalog_items_exist(cat_path, config))
+            elif ns_set:
+                combined = tempfile.NamedTemporaryFile(
+                    delete=False, suffix=".csv", mode="w", newline="", encoding="utf-8"
+                )
+                fieldnames = [
+                    "CI Name", "CI", "Namespace", "Users", "Enable_workshop_interface",
+                    "Password", "Activity", "Purpose", "Workshop Name",
+                    "Provisioning Date (UTC)", "Auto-stop (UTC)", "Auto-destroy (UTC)",
+                    "Session Date",
+                ]
+                with combined:
+                    writer = csv.DictWriter(combined, fieldnames=fieldnames)
+                    writer.writeheader()
+                    for s in catalog_schedules:
+                        writer.writerow({
+                            "CI Name": s.ci_name,
+                            "CI": s.ci,
+                            "Namespace": s.namespace,
+                            "Users": "" if s.users is None else s.users,
+                            "Enable_workshop_interface": s.enable_workshop_interface,
+                            "Password": s.password,
+                            "Activity": s.activity,
+                            "Purpose": s.purpose,
+                            "Workshop Name": s.workshop_name,
+                            "Provisioning Date (UTC)": s.provisioning_date,
+                            "Auto-stop (UTC)": s.auto_stop,
+                            "Auto-destroy (UTC)": s.auto_destroy,
+                            "Session Date": getattr(s, "session_date", "") or "",
+                        })
+                temp_csv_paths.append(combined.name)
+                all_catalog.extend(qa3_verify_catalog_items_exist(combined.name, config))
 
         if body.type.value == "1":
             all_raw = all_catalog
@@ -2779,6 +2871,9 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
             "count": len(all_results),
             "results": all_results,
             "log_file": os.path.basename(log_path),
+            "floor": floor,
+            "floor_date": floor_date,
+            "time_band": time_band,
         }
     finally:
         stop_log_capture(handler)

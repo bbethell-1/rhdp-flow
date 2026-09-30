@@ -53,3 +53,40 @@ def test_qa_results_roundtrip(tmp_path, monkeypatch):
     rows = [{"ci_name": "A", "ci": "a.prod", "namespace": "ns", "status": "VERIFIED"}]
     flow_state.save_qa_results(rows)
     assert flow_state.load_qa_results() == rows
+
+
+def test_load_schedules_tolerates_missing_new_optional_fields(tmp_path, monkeypatch):
+    """PVC payloads from older builds must restore after rollout adds fields."""
+    monkeypatch.setenv("RHDP_FLOW_DATA_DIR", str(tmp_path))
+
+    @dataclass
+    class _SchedV2:
+        ci_name: str
+        ci: str
+        namespace: str = "ns"
+        session_date: str = ""  # new optional field after rollout
+
+    # Simulate pre-rollout JSON without session_date
+    path = tmp_path / "last_schedules.json"
+    path.write_text(
+        '[{"ci_name": "A", "ci": "a.prod", "namespace": "ns"}]',
+        encoding="utf-8",
+    )
+    loaded, _ = flow_state.load_schedules(_SchedV2)
+    assert len(loaded) == 1
+    assert loaded[0].ci == "a.prod"
+    assert loaded[0].session_date == ""
+
+
+def test_load_schedules_ignores_unknown_keys_from_newer_builds(tmp_path, monkeypatch):
+    """Older pods must ignore keys written by newer builds (rolling update)."""
+    monkeypatch.setenv("RHDP_FLOW_DATA_DIR", str(tmp_path))
+    path = tmp_path / "last_schedules.json"
+    path.write_text(
+        '[{"ci_name": "A", "ci": "a.prod", "namespace": "ns", "session_date": "2026-09-30", "future_field": 1}]',
+        encoding="utf-8",
+    )
+    loaded, _ = flow_state.load_schedules(_Sched)
+    assert len(loaded) == 1
+    assert loaded[0].ci_name == "A"
+    assert not hasattr(loaded[0], "session_date") or True

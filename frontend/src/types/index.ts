@@ -25,6 +25,8 @@ export interface WorkshopSchedule {
   provisioning_date: string;
   auto_stop: string;
   auto_destroy: string;
+  /** Ops Floor day (YYYY-MM-DD); optional CSV Session Date / Floor Date */
+  session_date?: string;
   is_multi_asset: boolean;
   asset_cis: string;
   multi_workshop_name: string;
@@ -213,6 +215,29 @@ export interface QARequest {
   type: '1' | '2' | '3' | 'both' | 'all';
   namespace?: string | null;
   namespaces?: string[];
+  /** Ops Floor scope — day matches Labagator floor_date pin; event = full schedule */
+  floor?: 'day' | 'event';
+  floor_date?: string | null;
+  time_band?: 'morning' | 'midday' | 'afternoon' | null;
+}
+
+export interface QAScopeBand {
+  key: 'morning' | 'midday' | 'afternoon';
+  label: string;
+  count: number;
+}
+
+export interface QAScopeDate {
+  date: string;
+  label: string;
+  count: number;
+  bands: QAScopeBand[];
+}
+
+export interface QAScopesResponse {
+  total: number;
+  unknown_date_count: number;
+  dates: QAScopeDate[];
 }
 
 export interface RetryRequest {

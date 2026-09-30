@@ -182,6 +182,7 @@ class WorkshopSchedule:
     provisioning_date: str  # Format: DD/MM/YYYY HH:MM
     auto_stop: str  # Format: DD/MM/YY HH:MM
     auto_destroy: str  # Format: DD/MM/YY HH:MM
+    session_date: str = ""  # Optional Ops Floor day (YYYY-MM-DD); aliases: Session Date, Floor Date
     is_multi_asset: bool = False  # True if this is a multi-asset workshop
     asset_cis: str = ""  # Comma-separated list of catalog items for multi-asset workshops (e.g., "ci1,ci2,ci3")
     multi_workshop_name: str = ""  # Optional custom name for multi-asset workshop (e.g., "automation-test" or "test-qvvdw")
@@ -1153,6 +1154,26 @@ def read_csv_input(filepath: str) -> list[WorkshopSchedule]:
                     provisioning_date = row.get(provisioning_date_key, '').strip()
                     auto_stop = row.get(auto_stop_key, '').strip()
                     auto_destroy = row.get(auto_destroy_key, '').strip()
+                    # Optional Ops Floor day (Labagator session_date). Prefer Session Date /
+                    # Floor Date; keep deploy/provisioning timestamps separate.
+                    session_date = ""
+                    for sess_key in (
+                        "session date",
+                        "session_date",
+                        "floor date",
+                        "floor_date",
+                    ):
+                        if sess_key in header_map:
+                            session_date = row.get(header_map[sess_key], "").strip()
+                            break
+                    if session_date:
+                        # Normalize DD/MM/YYYY → YYYY-MM-DD when operators paste local dates
+                        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d/%m/%y"):
+                            try:
+                                session_date = datetime.strptime(session_date[:10], fmt).strftime("%Y-%m-%d")
+                                break
+                            except ValueError:
+                                continue
                     
                     # Validate required fields
                     if not all([ci_name, ci, namespace]):
@@ -1215,6 +1236,7 @@ def read_csv_input(filepath: str) -> list[WorkshopSchedule]:
                         provisioning_date=provisioning_date,
                         auto_stop=auto_stop,
                         auto_destroy=auto_destroy,
+                        session_date=session_date,
                         is_multi_asset=is_multi_asset,
                         asset_cis=asset_cis,
                         multi_workshop_name=multi_workshop_name,
@@ -2849,7 +2871,7 @@ def _load_catalog_item_aliases() -> dict[str, str]:
                     for k, v in raw.items()
                     if str(k).strip() and str(v).strip() and not str(k).startswith("_")
                 }
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.debug("catalog_item_aliases load failed: %s", exc)
         aliases = {}
     _catalog_item_aliases_cache = aliases

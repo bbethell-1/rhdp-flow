@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 from typing import Literal
 
@@ -25,6 +26,7 @@ class WorkshopScheduleResponse(BaseModel):
     provisioning_date: str
     auto_stop: str
     auto_destroy: str
+    session_date: str = ""
     is_multi_asset: bool = False
     asset_cis: str = ""
     multi_workshop_name: str = ""
@@ -235,6 +237,18 @@ class QARequest(BaseModel):
         None,
         description="Optional list of namespaces to scan for faster targeted QA",
     )
+    floor: Literal["day", "event"] = Field(
+        "event",
+        description="Ops Floor scope: day = one floor day (Catalog→Setup→Healthy); event = full schedule",
+    )
+    floor_date: str | None = Field(
+        None,
+        description="YYYY-MM-DD Ops Floor day pin when floor=day (matches Labagator floor_date)",
+    )
+    time_band: Literal["morning", "midday", "afternoon"] | None = Field(
+        None,
+        description="Optional Morning / Mid-day / Afternoon band within the floor day",
+    )
 
     @field_validator("namespace")
     @classmethod
@@ -243,6 +257,22 @@ class QARequest(BaseModel):
             return None
         value = value.strip()
         return value or None
+
+    @field_validator("floor_date")
+    @classmethod
+    def _normalize_floor_date(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            return None
+        raw = value[:10]
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d/%m/%y"):
+            try:
+                return datetime.strptime(raw, fmt).strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+        raise ValueError("floor_date must be YYYY-MM-DD")
 
 
 class DestroyCheckRequest(BaseModel):

@@ -804,6 +804,69 @@ def test_qa_run_with_namespace_override_filters_csv(mock_qa1, client):
     assert data["results"][0]["ci_name"] == "Workshop B"
 
 
+QA_FLOOR_DAY_CSV = """CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC),Session Date
+Wed Lab,vendor.wed.prod,qa-ns,10,True,pass,Admin,QA,Wed Lab,30/09/2026 10:30,30/09/2026 12:00,01/10/2026 10:00,2026-09-30
+Thu Lab,vendor.thu.prod,qa-ns,10,True,pass,Admin,QA,Thu Lab,01/10/2026 10:30,01/10/2026 12:00,02/10/2026 10:00,2026-10-01
+"""
+
+
+@patch("api.routes.qa1_verify_setup")
+def test_qa_run_floor_day_scopes_catalog_setup_healthy(mock_qa1, client):
+    """floor=day must QA only Ops Floor day rows (not the whole multi-day event)."""
+    upload = client.post(
+        "/api/schedules/upload",
+        files={"file": ("floor.csv", QA_FLOOR_DAY_CSV.encode(), "text/csv")},
+    )
+    assert upload.status_code == 200
+
+    scopes = client.get("/api/qa/scopes")
+    assert scopes.status_code == 200
+    body = scopes.json()
+    assert body["total"] == 2
+    assert [d["date"] for d in body["dates"]] == ["2026-09-30", "2026-10-01"]
+
+    def fake_qa(csv_file, namespace, config):
+        schedules = read_csv_input(csv_file)
+        assert len(schedules) == 1
+        assert schedules[0].ci_name == "Wed Lab"
+        assert schedules[0].session_date == "2026-09-30"
+        return [{
+            "ci_name": schedules[0].ci_name,
+            "ci": schedules[0].ci,
+            "namespace": namespace,
+            "status": "verified",
+            "deployed": "Yes",
+            "healthy": True,
+            "expected_users": schedules[0].users,
+            "actual_count": schedules[0].users,
+            "landing_page_url": "",
+            "showroom_status": "",
+            "showroom_url": "",
+        }]
+
+    mock_qa1.side_effect = fake_qa
+    resp = client.post(
+        "/api/qa/run",
+        json={"type": "2", "floor": "day", "floor_date": "2026-09-30"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["count"] == 1
+    assert data["floor"] == "day"
+    assert data["floor_date"] == "2026-09-30"
+    assert data["results"][0]["ci_name"] == "Wed Lab"
+
+
+def test_qa_run_floor_day_requires_floor_date(client):
+    upload = client.post(
+        "/api/schedules/upload",
+        files={"file": ("floor.csv", QA_FLOOR_DAY_CSV.encode(), "text/csv")},
+    )
+    assert upload.status_code == 200
+    resp = client.post("/api/qa/run", json={"type": "2", "floor": "day"})
+    assert resp.status_code == 400
+
+
 @patch("api.routes.qa2_verify_deployment_status")
 @patch("api.routes.qa1_verify_setup")
 def test_qa_run_both_merges_one_row_per_workshop(mock_qa1, mock_qa2, client):

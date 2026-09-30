@@ -59,4 +59,11 @@ describe('QATab', () => {
     expect(screen.getByLabelText('QA namespace scope')).toHaveValue('user-bbethell-redhat-com');
     expect(screen.getByText(/Run QA for bbethell/)).toBeInTheDocument();
   });
+
+  it('renders Ops Floor This day / Full event scope controls', () => {
+    render(<QATab qaResults={[]} setQAResults={noop} showToast={noop} />);
+    expect(screen.getByLabelText('QA floor scope: this day or full event')).toBeInTheDocument();
+    expect(screen.getByText('This day')).toBeInTheDocument();
+    expect(screen.getByText('Full event')).toBeInTheDocument();
+  });
 });

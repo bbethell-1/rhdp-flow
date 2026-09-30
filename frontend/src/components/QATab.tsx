@@ -34,7 +34,7 @@ import { useAutoRefresh } from '../hooks/useAutoRefresh';
 
 import { api } from '../services/api';
 import { AUTO_REFRESH_INTERVAL_MS, DEFAULT_PER_PAGE } from '../constants';
-import type { QAResult, WorkshopSchedule } from '../types';
+import type { QAResult, QAScopeDate, WorkshopSchedule } from '../types';
 import { QAResultsTable } from './QAResultsTable';
 import { DestroyQASection } from './DestroyQASection';
 
@@ -47,8 +47,31 @@ interface Props {
 
 type SortableQAColumn = 'ci_name' | 'ci' | 'status';
 type QAStatusFilter = 'all' | 'verified' | 'failed' | 'unhealthy';
+type FloorMode = 'day' | 'event';
+type TimeBand = 'morning' | 'midday' | 'afternoon';
 
 const ALL_NAMESPACES = '__all__';
+const ALL_BANDS = '__all__';
+
+function readFloorFromUrl(): { floor: FloorMode; floorDate: string | null } {
+  if (typeof window === 'undefined') return { floor: 'event', floorDate: null };
+  const q = new URLSearchParams(window.location.search);
+  const floorDate = q.get('floor_date');
+  if (q.get('floor') === 'event') return { floor: 'event', floorDate };
+  if (floorDate) return { floor: 'day', floorDate };
+  return { floor: 'event', floorDate: null };
+}
+
+function scheduleFloorDate(s: WorkshopSchedule): string | null {
+  const explicit = (s.session_date || '').trim().slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(explicit)) return explicit;
+  const m = (s.provisioning_date || '')
+    .trim()
+    .match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+  if (!m) return null;
+  const yr = m[3].length === 2 ? 2000 + parseInt(m[3], 10) : parseInt(m[3], 10);
+  return `${yr}-${String(parseInt(m[2], 10)).padStart(2, '0')}-${String(parseInt(m[1], 10)).padStart(2, '0')}`;
+}
 
 function isVerified(status: string): boolean {
   const s = (status || '').toLowerCase();
@@ -120,6 +143,11 @@ export const QATab: React.FC<Props> = ({
   const [runNamespace, setRunNamespace] = useState<string>(() =>
     scheduleNamespaces.length === 1 ? scheduleNamespaces[0] : ALL_NAMESPACES,
   );
+  const initialFloor = readFloorFromUrl();
+  const [floor, setFloor] = useState<FloorMode>(initialFloor.floor);
+  const [floorDate, setFloorDate] = useState<string | null>(initialFloor.floorDate);
+  const [timeBand, setTimeBand] = useState<string>(ALL_BANDS);
+  const [scopeDates, setScopeDates] = useState<QAScopeDate[]>([]);
   const [running, setRunning] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
@@ -173,6 +201,36 @@ export const QATab: React.FC<Props> = ({
     }
   }, [scheduleNamespaces]);
 
+  // Floor day options from schedules (Session Date / provisioning day)
+  useEffect(() => {
+    const ns = runNamespace === ALL_NAMESPACES ? undefined : runNamespace;
+    let cancelled = false;
+    api
+      .qaScopes(ns)
+      .then((res) => {
+        if (cancelled) return;
+        const dates = res.dates || [];
+        setScopeDates(dates);
+        setFloorDate((prev) => {
+          if (prev && dates.some((d) => d.date === prev)) return prev;
+          return dates[0]?.date ?? prev;
+        });
+        // Multi-day schedules default to This day (Ops Floor pin), unless URL
+        // explicitly asks for Full event (?floor=event).
+        const q = new URLSearchParams(window.location.search);
+        if (dates.length > 1 && q.get('floor') !== 'event' && !q.get('floor_date')) {
+          setFloor((prev) => (prev === 'event' && !initialFloor.floorDate ? 'day' : prev));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setScopeDates([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // initialFloor.floorDate is mount-stable from URL
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schedules, runNamespace]);
 
   const refreshQA = useCallback(async () => {
     try {
@@ -185,22 +243,63 @@ export const QATab: React.FC<Props> = ({
 
   useAutoRefresh(refreshQA, AUTO_REFRESH_INTERVAL_MS, autoRefresh);
 
-  const workshopsInScope = useMemo(() => {
-    if (runNamespace === ALL_NAMESPACES) return schedules.length;
-    return schedules.filter((s) => s.namespace === runNamespace).length;
-  }, [schedules, runNamespace]);
+  const selectedDayMeta = useMemo(
+    () => scopeDates.find((d) => d.date === floorDate) || null,
+    [scopeDates, floorDate],
+  );
 
-  const runScopeLabel =
-    runNamespace === ALL_NAMESPACES
-      ? scheduleNamespaces.length > 0
-        ? `all ${scheduleNamespaces.length} namespace(s)`
-        : 'loaded schedules'
-      : runNamespace;
+  const workshopsInScope = useMemo(() => {
+    let rows = schedules;
+    if (runNamespace !== ALL_NAMESPACES) {
+      rows = rows.filter((s) => s.namespace === runNamespace);
+    }
+    if (floor === 'day' && floorDate) {
+      rows = rows.filter((s) => scheduleFloorDate(s) === floorDate);
+    }
+    return rows.length;
+  }, [schedules, runNamespace, floor, floorDate]);
+
+  const runScopeLabel = useMemo(() => {
+    const nsPart =
+      runNamespace === ALL_NAMESPACES
+        ? scheduleNamespaces.length > 0
+          ? `all ${scheduleNamespaces.length} namespace(s)`
+          : 'loaded schedules'
+        : runNamespace;
+    if (floor === 'day' && floorDate) {
+      const dayLabel = selectedDayMeta?.label || floorDate;
+      const band =
+        timeBand !== ALL_BANDS
+          ? selectedDayMeta?.bands.find((b) => b.key === timeBand)?.label || timeBand
+          : null;
+      return `${dayLabel}${band ? ` · ${band}` : ''} · ${nsPart}`;
+    }
+    return `Full event · ${nsPart}`;
+  }, [
+    runNamespace,
+    scheduleNamespaces.length,
+    floor,
+    floorDate,
+    timeBand,
+    selectedDayMeta,
+  ]);
 
   const handleRun = async () => {
+    if (floor === 'day' && !floorDate) {
+      showToast('Pick a floor day (or switch to Full event)', 'danger');
+      return;
+    }
     setRunning(true);
     try {
-      const body: Parameters<typeof api.runQA>[0] = { type: qaType };
+      const body: Parameters<typeof api.runQA>[0] = {
+        type: qaType,
+        floor,
+        floor_date: floor === 'day' ? floorDate : null,
+        time_band:
+          floor === 'day' && timeBand !== ALL_BANDS
+            ? (timeBand as TimeBand)
+            : null,
+      };
       if (runNamespace !== ALL_NAMESPACES) {
         body.namespaces = [runNamespace];
       }
@@ -427,6 +526,86 @@ export const QATab: React.FC<Props> = ({
       <Card isCompact style={{ marginBottom: 16 }}>
         <CardBody>
           <Split hasGutter style={{ alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <SplitItem>
+              <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>
+                Floor scope
+              </label>
+              <ToggleGroup aria-label="QA floor scope: this day or full event">
+                <ToggleGroupItem
+                  text="This day"
+                  buttonId="qa-floor-day"
+                  isSelected={floor === 'day'}
+                  onChange={() => {
+                    setFloor('day');
+                    if (!floorDate && scopeDates[0]) setFloorDate(scopeDates[0].date);
+                  }}
+                  isDisabled={noSchedules || scopeDates.length === 0}
+                />
+                <ToggleGroupItem
+                  text="Full event"
+                  buttonId="qa-floor-event"
+                  isSelected={floor === 'event'}
+                  onChange={() => setFloor('event')}
+                  isDisabled={noSchedules}
+                />
+              </ToggleGroup>
+            </SplitItem>
+            {floor === 'day' ? (
+              <SplitItem>
+                <label htmlFor="qa-floor-date" style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>
+                  Floor day
+                </label>
+                <FormSelect
+                  id="qa-floor-date"
+                  value={floorDate || ''}
+                  onChange={(_e, val) => {
+                    setFloorDate(val || null);
+                    setTimeBand(ALL_BANDS);
+                  }}
+                  aria-label="QA floor day"
+                  isDisabled={scopeDates.length === 0}
+                  style={{ width: 200 }}
+                >
+                  {scopeDates.length === 0 ? (
+                    <FormSelectOption value="" label="No floor days in schedule" />
+                  ) : (
+                    scopeDates.map((d) => (
+                      <FormSelectOption
+                        key={d.date}
+                        value={d.date}
+                        label={`${d.label} (${d.count})`}
+                      />
+                    ))
+                  )}
+                </FormSelect>
+              </SplitItem>
+            ) : null}
+            {floor === 'day' && selectedDayMeta && selectedDayMeta.bands.length > 1 ? (
+              <SplitItem>
+                <label htmlFor="qa-time-band" style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>
+                  Time band
+                </label>
+                <FormSelect
+                  id="qa-time-band"
+                  value={timeBand}
+                  onChange={(_e, val) => setTimeBand(val)}
+                  aria-label="QA time band"
+                  style={{ width: 180 }}
+                >
+                  <FormSelectOption
+                    value={ALL_BANDS}
+                    label={`Whole day (${selectedDayMeta.count})`}
+                  />
+                  {selectedDayMeta.bands.map((b) => (
+                    <FormSelectOption
+                      key={b.key}
+                      value={b.key}
+                      label={`${b.label} (${b.count})`}
+                    />
+                  ))}
+                </FormSelect>
+              </SplitItem>
+            ) : null}
             <SplitItem>
               <label htmlFor="qa-namespace-select" style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>
                 Namespace scope
