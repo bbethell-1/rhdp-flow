@@ -1,8 +1,51 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { afterEach, vi } from 'vitest';
 import { QATab } from '../QATab';
+import { api } from '../../services/api';
 import { mockQAResult } from '../../test/mocks/api';
 
 const noop = () => {};
+
+const oneSchedule = [
+  {
+    ci_name: 'W',
+    ci: 'w.prod',
+    namespace: 'user-bbethell-redhat-com',
+    enable_workshop_interface: true,
+    password: '',
+    activity: 'Workshops',
+    purpose: 'QA',
+    workshop_name: 'W',
+    provisioning_date: '',
+    auto_stop: '',
+    auto_destroy: '',
+  },
+] as never;
+
+/** Minimal EventSource stand-in that can emit a single `status` event. */
+class FakeEventSource {
+  onerror: ((ev: unknown) => void) | null = null;
+  private listeners: Record<string, ((ev: MessageEvent) => void)[]> = {};
+  closed = false;
+  addEventListener(type: string, cb: (ev: MessageEvent) => void) {
+    (this.listeners[type] ||= []).push(cb);
+  }
+  removeEventListener(type: string, cb: (ev: MessageEvent) => void) {
+    this.listeners[type] = (this.listeners[type] || []).filter((f) => f !== cb);
+  }
+  emit(data: Record<string, unknown>) {
+    (this.listeners['status'] || []).forEach((cb) =>
+      cb({ data: JSON.stringify(data) } as MessageEvent),
+    );
+  }
+  close() {
+    this.closed = true;
+  }
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('QATab', () => {
   it('renders empty state when no QA results', () => {
@@ -133,5 +176,62 @@ describe('QATab', () => {
     expect(screen.getByText('QAed')).toBeInTheDocument();
     expect(screen.getByText('Not QAed')).toBeInTheDocument();
     expect(screen.getByText(/QA Results \(1 · 1\/2 QAed in scope\)/)).toBeInTheDocument();
+  });
+
+  it('runs QA as a streamed job and loads results on completion', async () => {
+    const fakeEs = new FakeEventSource();
+    const setResults = vi.fn();
+    const toast = vi.fn();
+    vi.spyOn(api, 'runQA').mockResolvedValue({
+      job_id: 'job-123',
+      status: 'running',
+      progress: 0,
+    } as never);
+    vi.spyOn(api, 'qaStream').mockReturnValue(fakeEs as never);
+    vi.spyOn(api, 'qaResults').mockResolvedValue({
+      count: 1,
+      results: [mockQAResult],
+    } as never);
+
+    render(
+      <QATab
+        qaResults={[]}
+        setQAResults={setResults}
+        showToast={toast}
+        schedules={oneSchedule}
+      />,
+    );
+
+    fireEvent.click(screen.getByText(/Run QA for bbethell/));
+
+    await waitFor(() => expect(api.runQA).toHaveBeenCalled());
+    // Drive the stream to completion; the tab must then fetch final results.
+    fakeEs.emit({ status: 'completed', progress: 100, message: 'done' });
+
+    await waitFor(() => expect(setResults).toHaveBeenCalledWith([mockQAResult]));
+    expect(api.qaResults).toHaveBeenCalled();
+    expect(fakeEs.closed).toBe(true);
+  });
+
+  it('shows a Cancel button while a QA job is running and cancels it', async () => {
+    const fakeEs = new FakeEventSource(); // never emits → job stays running
+    vi.spyOn(api, 'runQA').mockResolvedValue({
+      job_id: 'job-xyz',
+      status: 'running',
+      progress: 0,
+    } as never);
+    vi.spyOn(api, 'qaStream').mockReturnValue(fakeEs as never);
+    vi.spyOn(api, 'qaResults').mockResolvedValue({ count: 0, results: [] } as never);
+    const cancel = vi.spyOn(api, 'qaCancel').mockResolvedValue({ message: 'ok' } as never);
+
+    render(
+      <QATab qaResults={[]} setQAResults={noop} showToast={noop} schedules={oneSchedule} />,
+    );
+
+    fireEvent.click(screen.getByText(/Run QA for bbethell/));
+
+    const cancelBtn = await screen.findByText('Cancel');
+    fireEvent.click(cancelBtn);
+    await waitFor(() => expect(cancel).toHaveBeenCalledWith('job-xyz'));
   });
 });

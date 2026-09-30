@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 
 import pytest
 
@@ -20,6 +21,59 @@ from rhdp_flow import (
     RHDPConfig,
     WorkshopSchedule,
 )
+
+
+@pytest.fixture(autouse=True)
+def _drain_background_jobs():
+    """Drain in-flight background jobs (QA/deploy) after every test, suite-wide.
+
+    Jobs run as async tasks on the shared TestClient anyio portal loop and
+    outlive the request that started them. A job writes its results to the
+    module-global stores *before* it flips to a terminal status, so once no
+    job is pending/running every write has landed. Draining here — for every
+    test in every file, not just the ones that assert on jobs — stops an
+    orphaned task from a prior test bleeding a late write into the next
+    test's freshly reset globals.
+    """
+    import logging as _logging
+
+    def _purge_rhdp_file_handlers():
+        _logger = _logging.getLogger("rhdp_flow")
+        for _h in list(_logger.handlers):
+            if isinstance(_h, _logging.FileHandler):
+                _logger.removeHandler(_h)
+                try:
+                    _h.close()
+                except Exception:
+                    pass
+
+    # Start every test with a clean logger: any per-run FileHandler still
+    # attached from an earlier test's job would make this test's workers fan
+    # their log records out to stale handlers, which under concurrency can wedge
+    # a background job. Purge on the way in as well as out.
+    _purge_rhdp_file_handlers()
+    yield
+
+    from api import jobs
+
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        pending = [
+            j for j in list(jobs._jobs.values())
+            if j.status in (jobs.Status.pending, jobs.Status.running)
+        ]
+        if not pending:
+            break
+        time.sleep(0.02)
+
+    # Detach per-run FileHandlers left on the shared ``rhdp_flow`` logger. Each
+    # QA/deploy job attaches one via start_log_capture and removes it on
+    # completion — but a job that outlived its test (or timed out above) never
+    # does. Left in place they accumulate across the suite, so every later
+    # worker's ``logger.info`` fans out to dozens of stale handlers, which under
+    # concurrency intermittently wedges a background job.
+    _purge_rhdp_file_handlers()
+
 
 # ============================================================================
 # CSV Fixture Constants

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   Alert,
   Button,
@@ -11,6 +11,8 @@ import {
   FlexItem,
   PageSection,
   Label,
+  Progress,
+  ProgressSize,
   Switch,
   FormSelect,
   FormSelectOption,
@@ -269,6 +271,10 @@ export const QATab: React.FC<Props> = ({
   const [selectedCiNames, setSelectedCiNames] = useState<Set<string>>(new Set());
   const [showWorkshopPicker, setShowWorkshopPicker] = useState(false);
   const [running, setRunning] = useState(false);
+  const [qaProgress, setQaProgress] = useState(0);
+  const [qaMessage, setQaMessage] = useState('');
+  const qaEsRef = useRef<EventSource | null>(null);
+  const qaJobIdRef = useRef<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [groupByNamespace, setGroupByNamespace] = useState(
@@ -485,6 +491,60 @@ export const QATab: React.FC<Props> = ({
     selectedCount,
   ]);
 
+  // QA now runs as a background job: POST returns a job id, progress streams
+  // over SSE (with a polling fallback), and final results land on /qa/results.
+  // This is what keeps a 50+ lab sweep from timing out the HTTP request and
+  // gives live visibility + cancellation.
+  const streamQaJob = useCallback(
+    (jobId: string): Promise<'completed' | 'failed' | 'cancelled'> =>
+      new Promise((resolve) => {
+        let settled = false;
+        let pollTimer: ReturnType<typeof setInterval> | undefined;
+        const es = api.qaStream(jobId);
+        qaEsRef.current = es;
+
+        const cleanup = () => {
+          es.removeEventListener('status', onStatus as EventListener);
+          es.close();
+          if (qaEsRef.current === es) qaEsRef.current = null;
+          if (pollTimer) clearInterval(pollTimer);
+        };
+        const settle = (s: 'completed' | 'failed' | 'cancelled') => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(s);
+        };
+        const apply = (d: { progress?: number; message?: string; status?: string }) => {
+          if (typeof d.progress === 'number') setQaProgress(d.progress);
+          if (d.message) setQaMessage(d.message);
+          if (d.status === 'completed' || d.status === 'failed' || d.status === 'cancelled') {
+            settle(d.status);
+          }
+        };
+        function onStatus(ev: MessageEvent) {
+          try {
+            apply(JSON.parse(ev.data));
+          } catch {
+            /* keepalive / empty payloads */
+          }
+        }
+        es.addEventListener('status', onStatus as EventListener);
+        // If SSE breaks (proxy buffering, dropped connection), fall back to polling.
+        es.onerror = () => {
+          if (settled || pollTimer) return;
+          pollTimer = setInterval(async () => {
+            try {
+              apply(await api.qaStatus(jobId));
+            } catch {
+              /* keep polling until terminal */
+            }
+          }, 2000);
+        };
+      }),
+    [],
+  );
+
   const runQAForCiNames = async (ciNames: string[] | null, label: string) => {
     if (floor === 'day' && !floorDate) {
       showToast('Pick a floor day (or switch to Full event)', 'danger');
@@ -495,6 +555,8 @@ export const QATab: React.FC<Props> = ({
       return;
     }
     setRunning(true);
+    setQaProgress(0);
+    setQaMessage('Starting QA…');
     try {
       const body: Parameters<typeof api.runQA>[0] = {
         type: qaType,
@@ -511,12 +573,19 @@ export const QATab: React.FC<Props> = ({
       if (ciNames) {
         body.ci_names = ciNames;
       }
-      const data = await api.runQA(body);
+      const job = await api.runQA(body);
+      qaJobIdRef.current = job.job_id;
+      const outcome = await streamQaJob(job.job_id);
+      const data = await api.qaResults();
       setQAResults(data.results);
       setViewNamespace(ALL_NAMESPACES);
       setQaStatusFilter('all');
       setPage(1);
-      const ran = data.ran_count ?? data.count;
+      // ran_count came from the old synchronous return; with the background job
+      // the run response is just a job id, so derive re-checked count client-side.
+      const ran = ciNames
+        ? data.results.filter((r) => ciNames.includes(r.ci_name)).length
+        : data.count;
       const scoped = floor === 'day' || !!(ciNames && ciNames.length > 0);
       setLastRunMeta({
         label,
@@ -529,16 +598,25 @@ export const QATab: React.FC<Props> = ({
       const scopeHint = scoped
         ? ' — scoped coverage only (not a full-day / full-event sign-off)'
         : ' — full-event coverage for the selected namespaces';
-      showToast(
-        ciNames
-          ? `QA finished for ${label}: re-checked ${ran} · ${data.count} result row(s)${scopeHint}`
-          : `QA finished for ${label}: ${data.count} workshop(s) QAed${scopeHint}`,
-        'success',
-      );
+      if (outcome === 'completed') {
+        showToast(
+          ciNames
+            ? `QA finished for ${label}: re-checked ${ran} · ${data.count} result row(s)${scopeHint}`
+            : `QA finished for ${label}: ${data.count} workshop(s) QAed${scopeHint}`,
+          'success',
+        );
+      } else if (outcome === 'cancelled') {
+        showToast(`QA cancelled — ${data.count} partial result(s) shown`, 'info');
+      } else {
+        showToast('QA failed — check the logs for details', 'danger');
+      }
     } catch (e) {
       showToast(`QA failed: ${e}`, 'danger');
     } finally {
       setRunning(false);
+      qaJobIdRef.current = null;
+      setQaProgress(0);
+      setQaMessage('');
     }
   };
 
@@ -568,6 +646,20 @@ export const QATab: React.FC<Props> = ({
       return next;
     });
   };
+
+  const handleCancelQa = async () => {
+    const jobId = qaJobIdRef.current;
+    if (!jobId) return;
+    try {
+      await api.qaCancel(jobId);
+      showToast('Cancelling QA…', 'info');
+    } catch (e) {
+      showToast(`Cancel failed: ${e}`, 'danger');
+    }
+  };
+
+  // Close any open QA stream when the tab unmounts.
+  useEffect(() => () => qaEsRef.current?.close(), []);
 
   const handleRefresh = async () => {
     if (refreshing) return;
@@ -623,7 +715,13 @@ export const QATab: React.FC<Props> = ({
         return;
       }
 
-      const data = await api.runQA({ type: qaType, namespaces });
+      setRunning(true);
+      setQaProgress(0);
+      setQaMessage('Starting QA…');
+      const job = await api.runQA({ type: qaType, namespaces });
+      qaJobIdRef.current = job.job_id;
+      const outcome = await streamQaJob(job.job_id);
+      const data = await api.qaResults();
       setQAResults(data.results);
       setLastRunMeta({
         label: `CSV · ${namespaces.length} namespace(s)`,
@@ -633,14 +731,24 @@ export const QATab: React.FC<Props> = ({
         ranCount: data.count,
         scoped: true,
       });
-      showToast(
-        `QA finished from CSV: ${data.count} result(s) across ${namespaces.length} namespace(s) — scoped to CSV namespaces only`,
-        'success',
-      );
+      if (outcome === 'completed') {
+        showToast(
+          `QA finished from CSV: ${data.count} result(s) across ${namespaces.length} namespace(s) — scoped to CSV namespaces only`,
+          'success',
+        );
+      } else if (outcome === 'cancelled') {
+        showToast(`QA cancelled — ${data.count} partial result(s) shown`, 'info');
+      } else {
+        showToast('CSV QA failed — check the logs for details', 'danger');
+      }
     } catch (e) {
       showToast(`CSV QA failed: ${e}`, 'danger');
     } finally {
       setCsvUploading(false);
+      setRunning(false);
+      qaJobIdRef.current = null;
+      setQaProgress(0);
+      setQaMessage('');
     }
   };
 
@@ -1031,6 +1139,15 @@ export const QATab: React.FC<Props> = ({
                 </Button>
               </Tooltip>
             </SplitItem>
+            {running && (
+              <SplitItem style={{ paddingTop: 22 }}>
+                <Tooltip content="Stop the running QA job (partial results are kept)">
+                  <Button variant="secondary" isDanger onClick={handleCancelQa}>
+                    Cancel
+                  </Button>
+                </Tooltip>
+              </SplitItem>
+            )}
             <SplitItem style={{ paddingTop: 22 }}>
               <Button
                 variant="secondary"
@@ -1052,6 +1169,15 @@ export const QATab: React.FC<Props> = ({
               </Tooltip>
             </SplitItem>
           </Split>
+          {running && (
+            <Progress
+              aria-label="QA progress"
+              value={qaProgress}
+              title={qaMessage || 'Running QA…'}
+              size={ProgressSize.sm}
+              style={{ marginTop: 12 }}
+            />
+          )}
           <p className="qa-type-hint" style={{ marginTop: 8, marginBottom: 0 }}>
             {noSchedules && (
               <>Load schedules on Upload &amp; Deploy first, then run QA against your namespace.</>

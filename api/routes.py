@@ -2763,63 +2763,49 @@ def qa_scopes(namespace: str | None = None):
     return build_qa_scopes(_schedules, namespace=ns or None)
 
 
-@router.post("/qa/run")
-@_rate_limit("10/minute")
-def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_api_key), config=Depends(_request_config)):  # type: ignore
-    global _qa_results, _qa_log_path
-    if not _schedules:
-        raise HTTPException(400, "No schedules loaded.")
+def _run_qa_over(
+    namespaces,
+    qa_type,
+    config,
+    *,
+    floor="event",
+    floor_date=None,
+    time_band=None,
+    ci_names=None,
+    job_id=None,
+):
+    """Run the selected QA checks across ``namespaces`` and return QAResultItems.
 
-    floor = body.floor or "event"
-    floor_date = body.floor_date
-    time_band = body.time_band
-    ci_names = body.ci_names
-    if floor == "day" and not floor_date:
-        raise HTTPException(400, "floor_date is required when floor=day (Ops Floor day pin).")
+    Blocking (each namespace fans out to several ``oc`` subprocess calls). When
+    ``job_id`` is given, per-namespace progress is pushed to the job and the loop
+    exits early on a cancel request. Callers offload this to a worker thread.
 
-    # Support multiple namespaces for faster targeted QA
-    if body.namespaces:
-        namespaces = body.namespaces
-    elif body.namespace:
-        # Support comma-separated namespaces in single field for backward compat
-        namespaces = [ns.strip() for ns in body.namespace.split(",") if ns.strip()]
-    else:
-        namespaces = list(dict.fromkeys(s.namespace for s in _schedules))
-
-    # When a CI Name subset is requested, only touch namespaces that still have matches.
-    if ci_names:
-        scoped = filter_schedules_by_scope(
-            _schedules,
-            floor=floor,
-            floor_date=floor_date,
-            time_band=time_band,
-            ci_names=ci_names,
-        )
-        ns_with_matches = {s.namespace for s in scoped if s.namespace in namespaces}
-        if not ns_with_matches:
-            raise HTTPException(
-                400,
-                "No loaded schedules match the selected CI names in the current floor/namespace scope.",
-            )
-        namespaces = [ns for ns in namespaces if ns in ns_with_matches]
-
-    handler, log_path = start_log_capture("qa")
+    Operator-facing order: catalog → setup → deploy+Soundcheck. Internal helpers
+    keep historical names (qa1=setup, qa2=deploy, qa3=catalog). Floor/time_band/
+    ci_names scope which schedules are QAed (Ops Floor day pin / retry-failed).
+    """
     temp_csv_paths: list[str] = []
+    all_setup: list[dict] = []
+    all_deploy: list[dict] = []
+    all_catalog: list[dict] = []
+    run_catalog = qa_type in ("1", "all")
+    run_setup = qa_type in ("2", "both", "all")
+    run_deploy = qa_type in ("3", "both", "all")
+    total = max(1, len(namespaces))
     try:
-        # Operator-facing order: catalog → setup → deploy+Soundcheck.
-        # Internal helpers keep historical names (qa1=setup, qa2=deploy, qa3=catalog).
-        all_setup: list[dict] = []
-        all_deploy: list[dict] = []
-        all_catalog: list[dict] = []
-        run_catalog = body.type.value in ("1", "all")
-        run_setup = body.type.value in ("2", "both", "all")
-        run_deploy = body.type.value in ("3", "both", "all")
-
-        for ns in namespaces:
+        for i, ns in enumerate(namespaces):
+            if job_id and jobs.is_cancel_requested(job_id):
+                break
+            if job_id:
+                jobs.update_job(
+                    job_id,
+                    progress=int(5 + (i / total) * 85),
+                    message=f"QA{qa_type}: {ns} ({i + 1}/{total})",
+                )
             # Always write a fresh temp CSV from in-memory schedules so that
             # UI edits (changed dates, users, etc.) are reflected in QA checks.
-            # Floor day filter matches Ops Floor pin so multi-day events don't
-            # run Catalog→Setup→Healthy against undeployed later days.
+            # Floor day filter matches the Ops Floor pin so multi-day events
+            # don't run Catalog→Setup→Healthy against undeployed later days.
             # Optional ci_names = early-deployed subset or retry-failed.
             temp_path = _write_qa_csv_for_namespace(
                 ns,
@@ -2835,8 +2821,11 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
             if run_deploy:
                 all_deploy.extend(qa2_verify_deployment_status(temp_path, ns, config))
 
-        # Catalog once on floor-scoped rows (all selected namespaces).
-        if run_catalog:
+        # Catalog runs once on floor-scoped rows across all selected namespaces.
+        cancelled = bool(job_id and jobs.is_cancel_requested(job_id))
+        if not cancelled and run_catalog:
+            if job_id:
+                jobs.update_job(job_id, progress=95, message="QA1: verifying catalog items")
             catalog_schedules = [
                 s
                 for s in filter_schedules_by_scope(
@@ -2891,53 +2880,197 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
                 temp_csv_paths.append(combined.name)
                 all_catalog.extend(qa3_verify_catalog_items_exist(combined.name, config))
 
-        if body.type.value == "1":
+        if qa_type == "1":
             all_raw = all_catalog
-        elif body.type.value == "2":
+        elif qa_type == "2":
             all_raw = _dedup_qa_results(all_setup)
-        elif body.type.value == "3":
+        elif qa_type == "3":
             all_raw = all_deploy
-        elif body.type.value == "both":
+        elif qa_type == "both":
             all_raw = _merge_qa1_qa2(all_setup, all_deploy)
         else:  # "all" — catalog rows first, then merged setup+deploy
             merged = _merge_qa1_qa2(all_setup, all_deploy)
             all_raw = all_catalog + merged
 
         all_raw = [_normalize_qa_result_dict(r) for r in all_raw]
-        new_results = [QAResultItem(**r) for r in all_raw]
-        # Subset / retry-failed: replace only those CI names; keep prior passes.
-        if ci_names:
-            selected = set(ci_names)
-            with _state_lock:
-                kept = [r for r in _qa_results if (r.ci_name or "") not in selected]
-                all_results = kept + new_results
-                _qa_results = all_results
-                _qa_log_path = log_path
-        else:
-            all_results = new_results
-            with _state_lock:
-                _qa_results = all_results
-                _qa_log_path = log_path
-        _save_qa_results()
-        return {
-            "count": len(all_results),
-            "results": all_results,
-            "log_file": os.path.basename(log_path),
-            "floor": floor,
-            "floor_date": floor_date,
-            "time_band": time_band,
-            "ci_names": ci_names,
-            "ran_count": len(new_results),
-        }
+        return [QAResultItem(**r) for r in all_raw]
     finally:
-        stop_log_capture(handler)
         for tp in temp_csv_paths:
             Path(tp).unlink(missing_ok=True)
+
+
+@router.post("/qa/run", response_model=JobResponse)
+@_rate_limit("10/minute")
+async def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_api_key)):  # type: ignore
+    """Start a QA run as a background job.
+
+    Returns a ``job_id`` immediately; progress streams over
+    ``GET /qa/stream/{job_id}`` and final results land in ``GET /qa/results``.
+    Running as a job (instead of one long blocking request) is what lets a
+    full 50+ lab QA sweep finish without the HTTP request timing out, and adds
+    live progress plus cancellation.
+    """
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+
+    floor = body.floor or "event"
+    floor_date = body.floor_date
+    time_band = body.time_band
+    ci_names = body.ci_names
+    if floor == "day" and not floor_date:
+        raise HTTPException(400, "floor_date is required when floor=day (Ops Floor day pin).")
+
+    # Resolve the (optional) non-default target the same way _request_config
+    # does, but defer credential setup to the background task so the temp
+    # kubeconfig is not cleaned up when this request returns.
+    target = request.headers.get("X-RHDP-Target-Cluster") or request.query_params.get("target_cluster")
+    if target:
+        identity.require_picker_access(request, target)
+
+    # Support multiple namespaces for faster targeted QA
+    if body.namespaces:
+        namespaces = body.namespaces
+    elif body.namespace:
+        # Support comma-separated namespaces in single field for backward compat
+        namespaces = [ns.strip() for ns in body.namespace.split(",") if ns.strip()]
+    else:
+        namespaces = list(dict.fromkeys(s.namespace for s in _schedules))
+
+    # When a CI Name subset is requested, only touch namespaces that still have matches.
+    if ci_names:
+        scoped = filter_schedules_by_scope(
+            _schedules,
+            floor=floor,
+            floor_date=floor_date,
+            time_band=time_band,
+            ci_names=ci_names,
+        )
+        ns_with_matches = {s.namespace for s in scoped if s.namespace in namespaces}
+        if not ns_with_matches:
+            raise HTTPException(
+                400,
+                "No loaded schedules match the selected CI names in the current floor/namespace scope.",
+            )
+        namespaces = [ns for ns in namespaces if ns in ns_with_matches]
+
+    qa_type = body.type.value
+    job = jobs.create_job()
+
+    async def _run():
+        global _qa_results, _qa_log_path
+        handler, log_path = start_log_capture("qa", job.job_id)
+        config = None
+        try:
+            if target:
+                config = await asyncio.to_thread(_get_config, target_cluster=target)
+            else:
+                config = await asyncio.to_thread(_get_config)
+            jobs.update_job(
+                job.job_id,
+                status=jobs.Status.running,
+                progress=2,
+                message=f"Starting QA{qa_type} across {len(namespaces)} namespace(s)",
+            )
+            new_results = await asyncio.to_thread(
+                _run_qa_over,
+                namespaces,
+                qa_type,
+                config,
+                floor=floor,
+                floor_date=floor_date,
+                time_band=time_band,
+                ci_names=ci_names,
+                job_id=job.job_id,
+            )
+            # Subset / retry-failed: replace only those CI names; keep prior passes.
+            if ci_names:
+                selected = set(ci_names)
+                with _state_lock:
+                    kept = [r for r in _qa_results if (r.ci_name or "") not in selected]
+                    all_results = kept + new_results
+                    _qa_results = all_results
+                    _qa_log_path = log_path
+            else:
+                all_results = new_results
+                with _state_lock:
+                    _qa_results = all_results
+                    _qa_log_path = log_path
+            _save_qa_results()
+            if jobs.is_cancel_requested(job.job_id):
+                jobs.update_job(
+                    job.job_id,
+                    status=jobs.Status.cancelled,
+                    message=f"Cancelled after {len(all_results)} result(s)",
+                    log_path=log_path,
+                )
+            else:
+                jobs.update_job(
+                    job.job_id,
+                    status=jobs.Status.completed,
+                    progress=100,
+                    message=f"Completed: {len(new_results)} result(s)",
+                    log_path=log_path,
+                )
+        except Exception as exc:
+            with _state_lock:
+                _qa_log_path = log_path
+            jobs.update_job(
+                job.job_id,
+                status=jobs.Status.failed,
+                error=str(exc),
+                message=f"QA failed: {exc}",
+                log_path=log_path,
+            )
+        finally:
+            if target and config is not None:
+                cluster_targets.cleanup_kubeconfig(config.kubeconfig_path)
+            stop_log_capture(handler)
+
+    asyncio.create_task(_run())
+    return JobResponse(
+        job_id=job.job_id,
+        status=JobStatus(job.status.value),
+        progress=job.progress,
+        message=f"QA{qa_type} started",
+    )
 
 
 @router.get("/qa/results")
 def qa_get_results():
     return {"count": len(_qa_results), "results": _qa_results}
+
+
+@router.get("/qa/status/{job_id}", response_model=JobResponse)
+def qa_status(job_id: str):
+    """Return current QA job status/progress (results live on /qa/results)."""
+    job = jobs.get_job(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    return JobResponse(
+        job_id=job.job_id,
+        status=JobStatus(job.status.value),
+        progress=job.progress,
+        message=job.message,
+        error=job.error,
+        log_file=os.path.basename(job.log_path) if job.log_path else None,
+    )
+
+
+@router.get("/qa/stream/{job_id}")
+async def qa_stream(job_id: str, _key=Depends(verify_api_key)):
+    """Server-sent events for live QA progress across all namespaces/labs."""
+    job = jobs.get_job(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    return EventSourceResponse(jobs.event_generator(job_id))
+
+
+@router.post("/qa/cancel/{job_id}")
+def qa_cancel(job_id: str, _key=Depends(verify_api_key)):
+    """Cancel a running QA job."""
+    if jobs.request_cancel(job_id):
+        return {"message": f"Cancel requested for job {job_id}"}
+    raise HTTPException(404, "Job not found or not cancellable")
 
 
 @router.post("/qa/destroy-check", response_model=DestroyCheckResponse)
