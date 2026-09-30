@@ -430,10 +430,14 @@ export const QATab: React.FC<Props> = ({
       setQaStatusFilter('all');
       setPage(1);
       const ran = data.ran_count ?? data.count;
+      const scopeHint =
+        floor === 'day' || (ciNames && ciNames.length > 0)
+          ? ' — scoped run only, not a full-event sign-off'
+          : '';
       showToast(
         ciNames
-          ? `QA complete: re-checked ${ran} · ${data.count} total result(s) (${label})`
-          : `QA complete: ${data.count} result(s) for ${label}`,
+          ? `QA complete for ${label}: re-checked ${ran} · ${data.count} result row(s)${scopeHint}`
+          : `QA complete for ${label}: ${data.count} workshop(s)${scopeHint}`,
         'success',
       );
     } catch (e) {
@@ -1097,6 +1101,20 @@ export const QATab: React.FC<Props> = ({
         </Card>
       </ExpandableSection>
 
+      {qaResults.length > 0 && workshopsInScope > 0 && qaResults.length < workshopsInScope ? (
+        <Alert
+          variant="warning"
+          isInline
+          title="Last QA run is a subset of the current floor scope"
+          style={{ marginBottom: 12 }}
+        >
+          Flow has <strong>{qaResults.length}</strong> result row(s), but this scope lists{' '}
+          <strong>{workshopsInScope}</strong> workshop(s). A morning (or selected) run that shows
+          all verified is <em>not</em> a full-day / full-event sign-off — widen Floor scope or select
+          the remaining workshops and Run QA again.
+        </Alert>
+      ) : null}
+
       {qaResults.length > 0 && (
         <Flex style={{ marginBottom: 16 }} gap={{ default: 'gapMd' }}>
           <FlexItem>
@@ -1104,8 +1122,8 @@ export const QATab: React.FC<Props> = ({
               icon={CubesIcon}
               color="var(--pf-t--global--text--color--regular)"
               count={statusCounts.total}
-              label="Total"
-              tooltip="All QA result rows"
+              label="In QA set"
+              tooltip="Rows from the last Flow QA run (may be a day/band/CI subset — not always the full event)"
               onClick={() => {
                 setQaStatusFilter('all');
                 setViewNamespace(ALL_NAMESPACES);
