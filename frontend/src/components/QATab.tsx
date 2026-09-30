@@ -74,6 +74,36 @@ function scheduleFloorDate(s: WorkshopSchedule): string | null {
   return `${yr}-${String(parseInt(m[2], 10)).padStart(2, '0')}-${String(parseInt(m[1], 10)).padStart(2, '0')}`;
 }
 
+/** Short display for CSV datetime strings (provision / auto-stop). */
+function shortScheduleTime(raw: string | undefined): string {
+  const s = (raw || '').trim();
+  if (!s) return '—';
+  // MM/DD/YYYY HH:MM[:SS] [AM/PM]
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?/i);
+  if (m) {
+    let h = parseInt(m[4], 10);
+    const min = m[5];
+    const ap = (m[6] || '').toUpperCase();
+    if (ap === 'PM' && h < 12) h += 12;
+    if (ap === 'AM' && h === 12) h = 0;
+    return `${String(h).padStart(2, '0')}:${min}`;
+  }
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(11, 16) || s.slice(0, 10);
+  return s.length > 16 ? s.slice(0, 16) : s;
+}
+
+function earliestLatestTimes(rows: WorkshopSchedule[]): {
+  earliestProvision: string;
+  latestStop: string;
+} {
+  const provisions = rows.map((r) => (r.provisioning_date || '').trim()).filter(Boolean).sort();
+  const stops = rows.map((r) => (r.auto_stop || '').trim()).filter(Boolean).sort();
+  return {
+    earliestProvision: provisions[0] ? shortScheduleTime(provisions[0]) : '—',
+    latestStop: stops.length ? shortScheduleTime(stops[stops.length - 1]) : '—',
+  };
+}
+
 function isVerified(status: string): boolean {
   const s = (status || '').toLowerCase();
   return s.includes('verified') && !s.includes('unverified');
@@ -281,6 +311,33 @@ export const QATab: React.FC<Props> = ({
     () => [...new Set(scopedSchedules.map((s) => s.ci_name).filter(Boolean))],
     [scopedSchedules],
   );
+  const scopeTiming = useMemo(() => earliestLatestTimes(scopedSchedules), [scopedSchedules]);
+  const schedulesByDay = useMemo(() => {
+    const map = new Map<string, WorkshopSchedule[]>();
+    for (const s of schedules) {
+      if (runNamespace !== ALL_NAMESPACES && s.namespace !== runNamespace) continue;
+      const d = scheduleFloorDate(s);
+      if (!d) continue;
+      const list = map.get(d) || [];
+      list.push(s);
+      map.set(d, list);
+    }
+    return map;
+  }, [schedules, runNamespace]);
+
+  // Keep embed / Ops Floor pin in sync when operators switch day vs full event.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (floor === 'event') {
+      url.searchParams.set('floor', 'event');
+      url.searchParams.delete('floor_date');
+    } else if (floorDate) {
+      url.searchParams.set('floor', 'day');
+      url.searchParams.set('floor_date', floorDate);
+    }
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [floor, floorDate]);
 
   // When Floor/namespace/band changes, default to all workshops in that scope
   // (multi-day: pick a day, then optionally deselect not-yet-deployed rows).
@@ -616,15 +673,61 @@ export const QATab: React.FC<Props> = ({
         <CardTitle>Catalog → Setup → Healthy</CardTitle>
         <CardBody>
           <p style={{ marginTop: 0, marginBottom: 12, fontSize: '0.9rem', opacity: 0.85 }}>
-            Pick <strong>This day</strong> (Ops Floor pin) or <strong>Full event</strong>, then Run QA.
+            Pick <strong>This day</strong> (Ops Floor pin) or <strong>Full event</strong>, then select
+            workshops and Run QA. Schedule shows provision / session / auto-stop per lab.
             {floor === 'day' && selectedDayMeta ? (
               <>
                 {' '}
                 Scoped to <strong>{selectedDayMeta.label}</strong> ({workshopsInScope} workshop
-                {workshopsInScope === 1 ? '' : 's'}).
+                {workshopsInScope === 1 ? '' : 's'}
+                {workshopsInScope > 0
+                  ? ` · deploy ${scopeTiming.earliestProvision} → stop ${scopeTiming.latestStop}`
+                  : ''}
+                ).
+              </>
+            ) : null}
+            {floor === 'event' && workshopsInScope > 0 ? (
+              <>
+                {' '}
+                Full event · {workshopsInScope} workshop{workshopsInScope === 1 ? '' : 's'} ·{' '}
+                {scopeDates.length} day{scopeDates.length === 1 ? '' : 's'}.
               </>
             ) : null}
           </p>
+
+          {scopeDates.length > 1 ? (
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: 6 }}>
+                {floor === 'event' ? 'Event runway — tap a day to scope QA' : 'Floor days'}
+              </label>
+              <ToggleGroup aria-label="QA floor day runway">
+                <ToggleGroupItem
+                  text={`Full event (${schedules.length})`}
+                  isSelected={floor === 'event'}
+                  onChange={() => setFloor('event')}
+                />
+                {scopeDates.map((d) => {
+                  const dayRows = schedulesByDay.get(d.date) || [];
+                  const t = earliestLatestTimes(dayRows);
+                  return (
+                    <ToggleGroupItem
+                      key={d.date}
+                      text={`${d.label} (${d.count})${
+                        dayRows.length ? ` · ${t.earliestProvision}` : ''
+                      }`}
+                      isSelected={floor === 'day' && floorDate === d.date}
+                      onChange={() => {
+                        setFloor('day');
+                        setFloorDate(d.date);
+                        setTimeBand(ALL_BANDS);
+                      }}
+                    />
+                  );
+                })}
+              </ToggleGroup>
+            </div>
+          ) : null}
+
           <Split hasGutter style={{ alignItems: 'flex-start', flexWrap: 'wrap' }}>
             <SplitItem>
               <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>
@@ -849,7 +952,7 @@ export const QATab: React.FC<Props> = ({
 
           {!noSchedules && scopedCiNames.length > 0 ? (
             <ExpandableSection
-              toggleText={`Select workshops to QA (${selectedCount}/${scopedCiNames.length})`}
+              toggleText={`Select workshops + schedule (${selectedCount}/${scopedCiNames.length}) · deploy ${scopeTiming.earliestProvision} → stop ${scopeTiming.latestStop}`}
               isExpanded={showWorkshopPicker}
               onToggle={(_e, expanded) => setShowWorkshopPicker(expanded)}
               style={{ marginTop: 12 }}
@@ -858,6 +961,7 @@ export const QATab: React.FC<Props> = ({
                 gap={{ default: 'gapSm' }}
                 style={{ marginBottom: 8 }}
                 alignItems={{ default: 'alignItemsCenter' }}
+                flexWrap={{ default: 'wrap' }}
               >
                 <Button
                   variant="link"
@@ -882,37 +986,73 @@ export const QATab: React.FC<Props> = ({
                     Select failed only ({failedCiNames.length})
                   </Button>
                 ) : null}
+                <Label isCompact color="blue">
+                  {floor === 'day' ? 'This day' : 'Full event'}
+                </Label>
+                <Label isCompact color="grey">
+                  {workshopsInScope} scheduled
+                </Label>
               </Flex>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-                  gap: '6px 12px',
-                  maxHeight: 220,
-                  overflow: 'auto',
-                  padding: '4px 2px',
-                }}
-              >
-                {scopedSchedules.map((s) => {
-                  const key = `${s.ci_name}::${s.namespace}`;
-                  return (
-                    <Checkbox
-                      key={key}
-                      id={`qa-pick-${key}`}
-                      label={
-                        <span title={`${s.ci_name} · ${s.namespace}`}>
-                          <strong>{s.ci_name}</strong>
-                          <span style={{ opacity: 0.65, fontSize: '0.85em' }}>
-                            {' '}
-                            · {s.namespace}
-                          </span>
-                        </span>
-                      }
-                      isChecked={selectedCiNames.has(s.ci_name)}
-                      onChange={(_e, checked) => toggleCiSelected(s.ci_name, checked)}
-                    />
-                  );
-                })}
+              <div style={{ maxHeight: 280, overflow: 'auto' }}>
+                <table
+                  style={{
+                    width: '100%',
+                    borderCollapse: 'collapse',
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  <thead>
+                    <tr style={{ textAlign: 'left', opacity: 0.7 }}>
+                      <th style={{ padding: '4px 8px 6px 0', width: 28 }} />
+                      <th style={{ padding: '4px 8px 6px 0' }}>Workshop</th>
+                      <th style={{ padding: '4px 8px 6px 0' }}>Day</th>
+                      <th style={{ padding: '4px 8px 6px 0' }}>Provision</th>
+                      <th style={{ padding: '4px 8px 6px 0' }}>Auto-stop</th>
+                      <th style={{ padding: '4px 8px 6px 0' }}>Seats</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scopedSchedules.map((s) => {
+                      const key = `${s.ci_name}::${s.namespace}`;
+                      const day = scheduleFloorDate(s);
+                      const dayMeta = scopeDates.find((d) => d.date === day);
+                      return (
+                        <tr key={key} style={{ borderTop: '1px solid var(--pf-t--global--border--color--default)' }}>
+                          <td style={{ padding: '6px 8px 6px 0', verticalAlign: 'top' }}>
+                            <Checkbox
+                              id={`qa-pick-${key}`}
+                              aria-label={`Select ${s.ci_name}`}
+                              isChecked={selectedCiNames.has(s.ci_name)}
+                              onChange={(_e, checked) => toggleCiSelected(s.ci_name, checked)}
+                            />
+                          </td>
+                          <td style={{ padding: '6px 8px 6px 0', verticalAlign: 'top' }}>
+                            <strong title={s.ci_name}>{s.ci_name}</strong>
+                            <div style={{ opacity: 0.65, fontSize: '0.9em' }}>{s.namespace}</div>
+                          </td>
+                          <td style={{ padding: '6px 8px 6px 0', verticalAlign: 'top', whiteSpace: 'nowrap' }}>
+                            {dayMeta?.label || day || '—'}
+                          </td>
+                          <td
+                            style={{ padding: '6px 8px 6px 0', verticalAlign: 'top', whiteSpace: 'nowrap' }}
+                            title={s.provisioning_date || ''}
+                          >
+                            {shortScheduleTime(s.provisioning_date)}
+                          </td>
+                          <td
+                            style={{ padding: '6px 8px 6px 0', verticalAlign: 'top', whiteSpace: 'nowrap' }}
+                            title={s.auto_stop || ''}
+                          >
+                            {shortScheduleTime(s.auto_stop)}
+                          </td>
+                          <td style={{ padding: '6px 8px 6px 0', verticalAlign: 'top' }}>
+                            {s.users ?? '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             </ExpandableSection>
           ) : null}
