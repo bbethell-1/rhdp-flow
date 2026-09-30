@@ -15,6 +15,7 @@ import type {
 
   QARequest,
   QAResponse,
+  QAScopesResponse,
   RetryRequest,
   NumUsersValidationResponse,
   PoolCapacityValidationResponse,
@@ -408,6 +409,10 @@ export const api = {
     request<OperationResponse>('/operations/showroom-preflight', { method: 'POST', body: JSON.stringify(body) }),
   // QA
   qaNamespaces: () => cachedRequest<string[]>('/qa/namespaces'),
+  qaScopes: (namespace?: string) => {
+    const qs = namespace ? `?namespace=${encodeURIComponent(namespace)}` : '';
+    return cachedRequest<QAScopesResponse>(`/qa/scopes${qs}`);
+  },
   runQA: (body: QARequest) =>
     request<QAResponse>('/qa/run', { method: 'POST', body: JSON.stringify(body) }),
   qaResults: () => cachedRequest<QAResponse>('/qa/results'),
