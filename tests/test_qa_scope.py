@@ -62,6 +62,18 @@ def test_time_band_midday():
     assert [r.ci_name for r in scoped] == ["MID"]
 
 
+def test_filter_ci_names_subset():
+    rows = [
+        _row(ci_name="Keep", session_date="2026-09-30"),
+        _row(ci_name="Skip", session_date="2026-09-30"),
+        _row(ci_name="OtherDay", session_date="2026-10-01"),
+    ]
+    scoped = filter_schedules_by_scope(
+        rows, floor="day", floor_date="2026-09-30", ci_names=["Keep", "missing"]
+    )
+    assert [r.ci_name for r in scoped] == ["Keep"]
+
+
 def test_build_qa_scopes_labels():
     rows = [
         _row(session_date="2026-09-30", provisioning_date="30/09/2026 10:00"),

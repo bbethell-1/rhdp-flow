@@ -249,6 +249,14 @@ class QARequest(BaseModel):
         None,
         description="Optional Morning / Mid-day / Afternoon band within the floor day",
     )
+    ci_names: list[str] | None = Field(
+        None,
+        description=(
+            "Optional CI Name subset within the floor/namespace scope. "
+            "Used to QA only early-deployed workshops or to retry failed rows; "
+            "when set, new results merge into the previous QA result set."
+        ),
+    )
 
     @field_validator("namespace")
     @classmethod
@@ -257,6 +265,15 @@ class QARequest(BaseModel):
             return None
         value = value.strip()
         return value or None
+
+    @field_validator("ci_names")
+    @classmethod
+    def _normalize_ci_names(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        cleaned = [str(n).strip() for n in value if str(n).strip()]
+        # Preserve order, drop dupes
+        return list(dict.fromkeys(cleaned)) or None
 
     @field_validator("floor_date")
     @classmethod

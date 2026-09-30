@@ -867,6 +867,58 @@ def test_qa_run_floor_day_requires_floor_date(client):
     assert resp.status_code == 400
 
 
+@patch("api.routes.qa1_verify_setup")
+def test_qa_run_ci_names_subset_and_merge_retry(mock_qa1, client):
+    """Multi-day / early-deploy: QA a CI subset, then retry failed without wiping passes."""
+    upload = client.post(
+        "/api/schedules/upload",
+        files={"file": ("floor.csv", QA_FLOOR_DAY_CSV.encode(), "text/csv")},
+    )
+    assert upload.status_code == 200
+
+    def row(s, status):
+        return {
+            "ci_name": s.ci_name,
+            "ci": s.ci,
+            "namespace": s.namespace,
+            "status": status,
+            "deployed": "Yes",
+            "healthy": status == "verified",
+            "expected_users": s.users,
+            "actual_count": s.users,
+            "landing_page_url": "",
+            "showroom_status": "",
+            "showroom_url": "",
+        }
+
+    # Full event: Wed fails, Thu passes.
+    mock_qa1.side_effect = lambda csv_file, namespace, config: [
+        row(s, "failed" if s.ci_name == "Wed Lab" else "verified")
+        for s in read_csv_input(csv_file)
+    ]
+    first = client.post("/api/qa/run", json={"type": "2", "floor": "event"})
+    assert first.status_code == 200
+    assert first.json()["count"] == 2
+    by_name = {r["ci_name"]: r["status"] for r in first.json()["results"]}
+    assert by_name == {"Wed Lab": "failed", "Thu Lab": "verified"}
+
+    # Retry only Wed — merge keeps Thu verified.
+    mock_qa1.side_effect = lambda csv_file, namespace, config: [
+        row(s, "verified") for s in read_csv_input(csv_file)
+    ]
+    retry = client.post(
+        "/api/qa/run",
+        json={"type": "2", "floor": "event", "ci_names": ["Wed Lab"]},
+    )
+    assert retry.status_code == 200
+    data = retry.json()
+    assert data["ran_count"] == 1
+    assert data["ci_names"] == ["Wed Lab"]
+    assert data["count"] == 2
+    by_name = {r["ci_name"]: r["status"] for r in data["results"]}
+    assert by_name == {"Wed Lab": "verified", "Thu Lab": "verified"}
+
+
 @patch("api.routes.qa2_verify_deployment_status")
 @patch("api.routes.qa1_verify_setup")
 def test_qa_run_both_merges_one_row_per_workshop(mock_qa1, mock_qa2, client):
