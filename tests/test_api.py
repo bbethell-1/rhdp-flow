@@ -6,6 +6,7 @@ import io
 import json
 import os
 import sys
+import time
 
 import pytest
 
@@ -52,6 +53,19 @@ def reset_state():
     if _test_limiter:
         _test_limiter.reset()
     yield
+    # Drain any in-flight background jobs (e.g. QA runs) before the next test
+    # resets module globals — otherwise a late task write to routes._qa_results
+    # bleeds across tests. A job writes results before its terminal status, so
+    # "no running/pending jobs" guarantees all writes have landed.
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        pending = [
+            j for j in list(jobs._jobs.values())
+            if j.status in (jobs.Status.pending, jobs.Status.running)
+        ]
+        if not pending:
+            break
+        time.sleep(0.02)
 
 
 @pytest.fixture
@@ -749,9 +763,58 @@ def test_delete_deploy_results_removes_matching_rows(client):
 # QA
 # ---------------------------------------------------------------------------
 
+def _run_qa_and_wait(client, payload, timeout=15.0):
+    """Start a QA job and poll until it reaches a terminal state.
+
+    QA is now a background job (POST returns a job_id immediately); the final
+    results live on GET /qa/results. Returns (job_id, terminal_status_dict).
+    """
+    resp = client.post("/api/qa/run", json=payload)
+    assert resp.status_code == 200, resp.text
+    job_id = resp.json()["job_id"]
+    deadline = time.monotonic() + timeout
+    status = {}
+    while time.monotonic() < deadline:
+        status = client.get(f"/api/qa/status/{job_id}").json()
+        if status.get("status") in ("completed", "failed", "cancelled"):
+            return job_id, status
+        time.sleep(0.02)
+    raise AssertionError(f"QA job {job_id} did not finish in time: {status}")
+
+
 def test_qa_no_schedules(client):
     resp = client.post("/api/qa/run", json={"type": "1"})
     assert resp.status_code == 400
+
+
+@patch("api.routes._get_config", return_value=MagicMock(kubeconfig_path=None))
+@patch("api.routes.qa1_verify_setup")
+def test_qa_run_returns_job_id_and_streams(mock_qa1, _mock_cfg, uploaded_client):
+    """POST /qa/run must return a job id immediately instead of blocking."""
+    mock_qa1.return_value = []
+    resp = uploaded_client.post("/api/qa/run", json={"type": "2"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["job_id"]
+    assert body["status"] in ("pending", "running", "completed")
+    # The job is resolvable and eventually terminal.
+    _job_id, status = _run_qa_and_wait(uploaded_client, {"type": "2"})
+    assert status["status"] == "completed"
+
+
+def test_qa_status_not_found(client):
+    resp = client.get("/api/qa/status/nonexistent")
+    assert resp.status_code == 404
+
+
+def test_qa_cancel_not_found(client):
+    resp = client.post("/api/qa/cancel/nonexistent")
+    assert resp.status_code == 404
+
+
+def test_qa_stream_not_found(client):
+    resp = client.get("/api/qa/stream/nonexistent")
+    assert resp.status_code == 404
 
 
 def test_qa_results_empty(client):
@@ -766,8 +829,9 @@ Workshop B,vendor.b.prod,qa-ns-b,12,True,pass456,Admin,QA,Workshop B,01/01/2026 
 """
 
 
+@patch("api.routes._get_config", return_value=MagicMock(kubeconfig_path=None))
 @patch("api.routes.qa1_verify_setup")
-def test_qa_run_with_namespace_override_filters_csv(mock_qa1, client):
+def test_qa_run_with_namespace_override_filters_csv(mock_qa1, _mock_cfg, client):
     """QA namespace override should run against only matching schedule rows."""
     upload = client.post(
         "/api/schedules/upload",
@@ -796,9 +860,9 @@ def test_qa_run_with_namespace_override_filters_csv(mock_qa1, client):
         }]
 
     mock_qa1.side_effect = fake_qa
-    resp = client.post("/api/qa/run", json={"type": "2", "namespace": "qa-ns-b"})
-    assert resp.status_code == 200
-    data = resp.json()
+    _job_id, status = _run_qa_and_wait(client, {"type": "2", "namespace": "qa-ns-b"})
+    assert status["status"] == "completed"
+    data = client.get("/api/qa/results").json()
     assert data["count"] == 1
     assert data["results"][0]["namespace"] == "qa-ns-b"
     assert data["results"][0]["ci_name"] == "Workshop B"
@@ -810,8 +874,9 @@ Thu Lab,vendor.thu.prod,qa-ns,10,True,pass,Admin,QA,Thu Lab,01/10/2026 10:30,01/
 """
 
 
+@patch("api.routes._get_config", return_value=MagicMock(kubeconfig_path=None))
 @patch("api.routes.qa1_verify_setup")
-def test_qa_run_floor_day_scopes_catalog_setup_healthy(mock_qa1, client):
+def test_qa_run_floor_day_scopes_catalog_setup_healthy(mock_qa1, _mock_cfg, client):
     """floor=day must QA only Ops Floor day rows (not the whole multi-day event)."""
     upload = client.post(
         "/api/schedules/upload",
@@ -845,15 +910,14 @@ def test_qa_run_floor_day_scopes_catalog_setup_healthy(mock_qa1, client):
         }]
 
     mock_qa1.side_effect = fake_qa
-    resp = client.post(
-        "/api/qa/run",
-        json={"type": "2", "floor": "day", "floor_date": "2026-09-30"},
+    # Type "2" runs setup (qa1). Day scoping is enforced inside the worker via
+    # fake_qa's assertions, so a completed status proves only the Wed row ran.
+    _job_id, status = _run_qa_and_wait(
+        client, {"type": "2", "floor": "day", "floor_date": "2026-09-30"}
     )
-    assert resp.status_code == 200
-    data = resp.json()
+    assert status["status"] == "completed"
+    data = client.get("/api/qa/results").json()
     assert data["count"] == 1
-    assert data["floor"] == "day"
-    assert data["floor_date"] == "2026-09-30"
     assert data["results"][0]["ci_name"] == "Wed Lab"
 
 
@@ -863,12 +927,14 @@ def test_qa_run_floor_day_requires_floor_date(client):
         files={"file": ("floor.csv", QA_FLOOR_DAY_CSV.encode(), "text/csv")},
     )
     assert upload.status_code == 200
+    # Validation happens synchronously before the job is created.
     resp = client.post("/api/qa/run", json={"type": "2", "floor": "day"})
     assert resp.status_code == 400
 
 
+@patch("api.routes._get_config", return_value=MagicMock(kubeconfig_path=None))
 @patch("api.routes.qa1_verify_setup")
-def test_qa_run_ci_names_subset_and_merge_retry(mock_qa1, client):
+def test_qa_run_ci_names_subset_and_merge_retry(mock_qa1, _mock_cfg, client):
     """Multi-day / early-deploy: QA a CI subset, then retry failed without wiping passes."""
     upload = client.post(
         "/api/schedules/upload",
@@ -896,33 +962,32 @@ def test_qa_run_ci_names_subset_and_merge_retry(mock_qa1, client):
         row(s, "failed" if s.ci_name == "Wed Lab" else "verified")
         for s in read_csv_input(csv_file)
     ]
-    first = client.post("/api/qa/run", json={"type": "2", "floor": "event"})
-    assert first.status_code == 200
-    assert first.json()["count"] == 2
-    by_name = {r["ci_name"]: r["status"] for r in first.json()["results"]}
+    _job_id, status = _run_qa_and_wait(client, {"type": "2", "floor": "event"})
+    assert status["status"] == "completed"
+    first = client.get("/api/qa/results").json()
+    assert first["count"] == 2
+    by_name = {r["ci_name"]: r["status"] for r in first["results"]}
     assert by_name == {"Wed Lab": "failed", "Thu Lab": "verified"}
 
-    # Retry only Wed — merge keeps Thu verified.
+    # Retry only Wed — merge keeps Thu verified (subset replace, prior passes kept).
     mock_qa1.side_effect = lambda csv_file, namespace, config: [
         row(s, "verified") for s in read_csv_input(csv_file)
     ]
-    retry = client.post(
-        "/api/qa/run",
-        json={"type": "2", "floor": "event", "ci_names": ["Wed Lab"]},
+    _job_id, status = _run_qa_and_wait(
+        client, {"type": "2", "floor": "event", "ci_names": ["Wed Lab"]}
     )
-    assert retry.status_code == 200
-    data = retry.json()
-    assert data["ran_count"] == 1
-    assert data["ci_names"] == ["Wed Lab"]
+    assert status["status"] == "completed"
+    data = client.get("/api/qa/results").json()
     assert data["count"] == 2
     by_name = {r["ci_name"]: r["status"] for r in data["results"]}
     assert by_name == {"Wed Lab": "verified", "Thu Lab": "verified"}
 
 
+@patch("api.routes._get_config", return_value=MagicMock(kubeconfig_path=None))
 @patch("api.routes.qa2_verify_deployment_status")
 @patch("api.routes.qa1_verify_setup")
-def test_qa_run_both_merges_one_row_per_workshop(mock_qa1, mock_qa2, client):
-    """Running both QA types must not duplicate rows; deploy (QA3) row wins for the same workshop."""
+def test_qa_run_both_merges_one_row_per_workshop(mock_qa1, mock_qa2, _mock_cfg, client):
+    """Running both QA types must not duplicate rows; QA2 row wins for the same workshop."""
     csv_single = """CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC)
 W1,vendor.w.prod,ns1,10,True,pw,Adm,QA,W1,01/01/2026 09:00,01/01/2026 17:00,02/01/2026 09:00
 """
@@ -958,9 +1023,9 @@ W1,vendor.w.prod,ns1,10,True,pw,Adm,QA,W1,01/01/2026 09:00,01/01/2026 17:00,02/0
         "ready": True,
     }]
 
-    resp = client.post("/api/qa/run", json={"type": "both"})
-    assert resp.status_code == 200
-    data = resp.json()
+    _job_id, status = _run_qa_and_wait(client, {"type": "both"})
+    assert status["status"] == "completed"
+    data = client.get("/api/qa/results").json()
     assert data["count"] == 1
     assert data["results"][0]["status"] == "DEPLOYED & READY"
     assert data["results"][0]["actual_count"] == 10
@@ -982,8 +1047,9 @@ def test_qa_namespaces_with_schedules(uploaded_client):
     assert len(ns_list) >= 1
 
 
+@patch("api.routes._get_config", return_value=MagicMock(kubeconfig_path=None))
 @patch("api.routes.qa1_verify_setup")
-def test_qa_status_emoji_stripped(mock_qa1, uploaded_client):
+def test_qa_status_emoji_stripped(mock_qa1, _mock_cfg, uploaded_client):
     """Normalize must strip emoji from status strings."""
     mock_qa1.return_value = [{
         "ci_name": "WS1",
@@ -996,9 +1062,10 @@ def test_qa_status_emoji_stripped(mock_qa1, uploaded_client):
         "landing_page_url": "",
         "healthy": True,
     }]
-    resp = uploaded_client.post("/api/qa/run", json={"type": "2"})
-    assert resp.status_code == 200
-    assert resp.json()["results"][0]["status"] == "VERIFIED"
+    _job_id, status = _run_qa_and_wait(uploaded_client, {"type": "2"})
+    assert status["status"] == "completed"
+    data = uploaded_client.get("/api/qa/results").json()
+    assert data["results"][0]["status"] == "VERIFIED"
 
 
 # ---------------------------------------------------------------------------

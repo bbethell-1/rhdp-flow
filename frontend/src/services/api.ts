@@ -413,8 +413,13 @@ export const api = {
     const qs = namespace ? `?namespace=${encodeURIComponent(namespace)}` : '';
     return cachedRequest<QAScopesResponse>(`/qa/scopes${qs}`);
   },
+  /** Start a QA run as a background job; returns a job id to stream/poll. */
   runQA: (body: QARequest) =>
-    request<QAResponse>('/qa/run', { method: 'POST', body: JSON.stringify(body) }),
+    request<JobResponse>('/qa/run', { method: 'POST', body: JSON.stringify(body) }),
+  qaStatus: (jobId: string) => request<JobResponse>(`/qa/status/${jobId}`),
+  qaStream: (jobId: string) => new EventSource(`${API}/qa/stream/${jobId}`),
+  qaCancel: (jobId: string) =>
+    request<{ message: string }>(`/qa/cancel/${jobId}`, { method: 'POST', body: '{}' }),
   qaResults: () => cachedRequest<QAResponse>('/qa/results'),
   destroyCheck: (namespace?: string) =>
     request<import('../types').DestroyCheckResponse>('/qa/destroy-check', {
