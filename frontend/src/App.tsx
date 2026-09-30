@@ -49,9 +49,15 @@ const VALID_TABS = ['upload', 'deployments', 'qa', 'students'];
 
 function getTabFromHash(): { tab: string; fromOps: boolean } {
   const hash = window.location.hash.replace('#', '');
+  const params = new URLSearchParams(window.location.search);
+  const embedded = params.get('embedded') === 'true';
   // Legacy Operations tab → QA (day-2 actions live in Babylon Admin Ops / Labagator)
   if (hash === 'operations') return { tab: 'qa', fromOps: true };
-  return { tab: VALID_TABS.includes(hash) ? hash : 'upload', fromOps: false };
+  if (VALID_TABS.includes(hash)) return { tab: hash, fromOps: false };
+  // Labagator /flow embed: land on QA so Floor scope (This day / Full event) is visible.
+  // Standalone Flow still opens Upload & Deploy.
+  if (embedded || params.get('tab') === 'qa') return { tab: 'qa', fromOps: false };
+  return { tab: 'upload', fromOps: false };
 }
 
 const App: React.FC = () => {
