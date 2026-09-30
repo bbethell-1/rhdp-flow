@@ -31,7 +31,7 @@ describe('QATab', () => {
 
   it('shows Run QA button', () => {
     render(<QATab qaResults={[]} setQAResults={noop} showToast={noop} />);
-    expect(screen.getByText('Run QA')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Run QA/ })).toBeInTheDocument();
   });
 
   it('defaults namespace scope to the only schedule namespace', () => {

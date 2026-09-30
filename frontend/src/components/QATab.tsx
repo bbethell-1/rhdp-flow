@@ -53,6 +53,7 @@ type TimeBand = 'morning' | 'midday' | 'afternoon';
 
 const ALL_NAMESPACES = '__all__';
 const ALL_BANDS = '__all__';
+const EMPTY_SCHEDULES: WorkshopSchedule[] = [];
 
 function readFloorFromUrl(): { floor: FloorMode; floorDate: string | null } {
   if (typeof window === 'undefined') return { floor: 'event', floorDate: null };
@@ -163,7 +164,7 @@ export const QATab: React.FC<Props> = ({
   qaResults,
   setQAResults,
   showToast,
-  schedules = [],
+  schedules = EMPTY_SCHEDULES,
 }) => {
   const scheduleNamespaces = useMemo(
     () => [...new Set(schedules.map((s) => s.namespace).filter(Boolean))],
@@ -329,14 +330,18 @@ export const QATab: React.FC<Props> = ({
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const url = new URL(window.location.href);
+    const next = new URL(window.location.href);
     if (floor === 'event') {
-      url.searchParams.set('floor', 'event');
-      url.searchParams.delete('floor_date');
+      next.searchParams.set('floor', 'event');
+      next.searchParams.delete('floor_date');
     } else if (floorDate) {
-      url.searchParams.set('floor', 'day');
-      url.searchParams.set('floor_date', floorDate);
+      next.searchParams.set('floor', 'day');
+      next.searchParams.set('floor_date', floorDate);
+    } else {
+      return;
     }
-    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    if (url.search === next.search) return;
+    window.history.replaceState({}, '', `${next.pathname}${next.search}${next.hash}`);
   }, [floor, floorDate]);
 
   // When Floor/namespace/band changes, default to all workshops in that scope
