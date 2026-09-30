@@ -219,6 +219,18 @@ export interface QARequest {
   floor?: 'day' | 'event';
   floor_date?: string | null;
   time_band?: 'morning' | 'midday' | 'afternoon' | null;
+  /** Optional CI Name subset (early-deployed pick, or retry failed). Merges into prior results. */
+  ci_names?: string[] | null;
+}
+
+export interface QAResponse {
+  count: number;
+  results: QAResult[];
+  floor?: 'day' | 'event';
+  floor_date?: string | null;
+  time_band?: string | null;
+  ci_names?: string[] | null;
+  ran_count?: number;
 }
 
 export interface QAScopeBand {
@@ -247,11 +259,6 @@ export interface RetryRequest {
   enable_resource_pools?: boolean;
   white_glove?: boolean;
   redirect?: boolean;
-}
-
-export interface QAResponse {
-  count: number;
-  results: QAResult[];
 }
 
 export interface QAResult {

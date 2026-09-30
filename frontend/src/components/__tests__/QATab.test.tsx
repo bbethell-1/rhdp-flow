@@ -31,7 +31,7 @@ describe('QATab', () => {
 
   it('shows Run QA button', () => {
     render(<QATab qaResults={[]} setQAResults={noop} showToast={noop} />);
-    expect(screen.getByText('Run QA')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Run QA/ })).toBeInTheDocument();
   });
 
   it('defaults namespace scope to the only schedule namespace', () => {
@@ -67,5 +67,16 @@ describe('QATab', () => {
     expect(screen.getByLabelText('QA floor scope: this day or full event')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'This day' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Full event' })).toBeInTheDocument();
+  });
+
+  it('shows Retry failed when prior QA has failures', () => {
+    render(
+      <QATab
+        qaResults={[{ ...mockQAResult, status: 'failed', ci_name: 'Broken Lab' }]}
+        setQAResults={noop}
+        showToast={noop}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /Retry failed \(1\)/ })).toBeInTheDocument();
   });
 });

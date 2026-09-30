@@ -5,6 +5,7 @@ import {
   Card,
   CardBody,
   CardTitle,
+  Checkbox,
   Divider,
   Flex,
   FlexItem,
@@ -52,6 +53,7 @@ type TimeBand = 'morning' | 'midday' | 'afternoon';
 
 const ALL_NAMESPACES = '__all__';
 const ALL_BANDS = '__all__';
+const EMPTY_SCHEDULES: WorkshopSchedule[] = [];
 
 function readFloorFromUrl(): { floor: FloorMode; floorDate: string | null } {
   if (typeof window === 'undefined') return { floor: 'event', floorDate: null };
@@ -71,6 +73,36 @@ function scheduleFloorDate(s: WorkshopSchedule): string | null {
   if (!m) return null;
   const yr = m[3].length === 2 ? 2000 + parseInt(m[3], 10) : parseInt(m[3], 10);
   return `${yr}-${String(parseInt(m[2], 10)).padStart(2, '0')}-${String(parseInt(m[1], 10)).padStart(2, '0')}`;
+}
+
+/** Short display for CSV datetime strings (provision / auto-stop). */
+function shortScheduleTime(raw: string | undefined): string {
+  const s = (raw || '').trim();
+  if (!s) return '—';
+  // MM/DD/YYYY HH:MM[:SS] [AM/PM]
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?/i);
+  if (m) {
+    let h = parseInt(m[4], 10);
+    const min = m[5];
+    const ap = (m[6] || '').toUpperCase();
+    if (ap === 'PM' && h < 12) h += 12;
+    if (ap === 'AM' && h === 12) h = 0;
+    return `${String(h).padStart(2, '0')}:${min}`;
+  }
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(11, 16) || s.slice(0, 10);
+  return s.length > 16 ? s.slice(0, 16) : s;
+}
+
+function earliestLatestTimes(rows: WorkshopSchedule[]): {
+  earliestProvision: string;
+  latestStop: string;
+} {
+  const provisions = rows.map((r) => (r.provisioning_date || '').trim()).filter(Boolean).sort();
+  const stops = rows.map((r) => (r.auto_stop || '').trim()).filter(Boolean).sort();
+  return {
+    earliestProvision: provisions[0] ? shortScheduleTime(provisions[0]) : '—',
+    latestStop: stops.length ? shortScheduleTime(stops[stops.length - 1]) : '—',
+  };
 }
 
 function isVerified(status: string): boolean {
@@ -132,7 +164,7 @@ export const QATab: React.FC<Props> = ({
   qaResults,
   setQAResults,
   showToast,
-  schedules = [],
+  schedules = EMPTY_SCHEDULES,
 }) => {
   const scheduleNamespaces = useMemo(
     () => [...new Set(schedules.map((s) => s.namespace).filter(Boolean))],
@@ -148,6 +180,8 @@ export const QATab: React.FC<Props> = ({
   const [floorDate, setFloorDate] = useState<string | null>(initialFloor.floorDate);
   const [timeBand, setTimeBand] = useState<string>(ALL_BANDS);
   const [scopeDates, setScopeDates] = useState<QAScopeDate[]>([]);
+  const [selectedCiNames, setSelectedCiNames] = useState<Set<string>>(new Set());
+  const [showWorkshopPicker, setShowWorkshopPicker] = useState(false);
   const [running, setRunning] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(false);
@@ -248,7 +282,8 @@ export const QATab: React.FC<Props> = ({
     [scopeDates, floorDate],
   );
 
-  const workshopsInScope = useMemo(() => {
+  /** Schedules in the current Floor / namespace / band scope (candidates for QA). */
+  const scopedSchedules = useMemo(() => {
     let rows = schedules;
     if (runNamespace !== ALL_NAMESPACES) {
       rows = rows.filter((s) => s.namespace === runNamespace);
@@ -256,8 +291,81 @@ export const QATab: React.FC<Props> = ({
     if (floor === 'day' && floorDate) {
       rows = rows.filter((s) => scheduleFloorDate(s) === floorDate);
     }
-    return rows.length;
-  }, [schedules, runNamespace, floor, floorDate]);
+    if (floor === 'day' && timeBand !== ALL_BANDS) {
+      rows = rows.filter((s) => {
+        const m = (s.provisioning_date || '')
+          .trim()
+          .match(/^\d{1,2}\/\d{1,2}\/\d{2,4}\s+(\d{1,2}):(\d{2})/);
+        if (!m) return true;
+        const minutes = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+        if (timeBand === 'morning') return minutes < 12 * 60;
+        if (timeBand === 'midday') return minutes >= 12 * 60 && minutes < 15 * 60;
+        if (timeBand === 'afternoon') return minutes >= 15 * 60;
+        return true;
+      });
+    }
+    return rows;
+  }, [schedules, runNamespace, floor, floorDate, timeBand]);
+
+  const workshopsInScope = scopedSchedules.length;
+  const scopedCiNames = useMemo(
+    () => [...new Set(scopedSchedules.map((s) => s.ci_name).filter(Boolean))],
+    [scopedSchedules],
+  );
+  const scopeTiming = useMemo(() => earliestLatestTimes(scopedSchedules), [scopedSchedules]);
+  const schedulesByDay = useMemo(() => {
+    const map = new Map<string, WorkshopSchedule[]>();
+    for (const s of schedules) {
+      if (runNamespace !== ALL_NAMESPACES && s.namespace !== runNamespace) continue;
+      const d = scheduleFloorDate(s);
+      if (!d) continue;
+      const list = map.get(d) || [];
+      list.push(s);
+      map.set(d, list);
+    }
+    return map;
+  }, [schedules, runNamespace]);
+
+  // Keep embed / Ops Floor pin in sync when operators switch day vs full event.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    const next = new URL(window.location.href);
+    if (floor === 'event') {
+      next.searchParams.set('floor', 'event');
+      next.searchParams.delete('floor_date');
+    } else if (floorDate) {
+      next.searchParams.set('floor', 'day');
+      next.searchParams.set('floor_date', floorDate);
+    } else {
+      return;
+    }
+    if (url.search === next.search) return;
+    window.history.replaceState({}, '', `${next.pathname}${next.search}${next.hash}`);
+  }, [floor, floorDate]);
+
+  // When Floor/namespace/band changes, default to all workshops in that scope
+  // (multi-day: pick a day, then optionally deselect not-yet-deployed rows).
+  useEffect(() => {
+    setSelectedCiNames(new Set(scopedCiNames));
+  }, [scopedCiNames]);
+
+  const selectedCount = useMemo(
+    () => scopedCiNames.filter((n) => selectedCiNames.has(n)).length,
+    [scopedCiNames, selectedCiNames],
+  );
+  const allInScopeSelected =
+    scopedCiNames.length > 0 && selectedCount === scopedCiNames.length;
+
+  const failedCiNames = useMemo(
+    () =>
+      [
+        ...new Set(
+          qaResults.filter((r) => isFailed(r.status)).map((r) => r.ci_name).filter(Boolean),
+        ),
+      ],
+    [qaResults],
+  );
 
   const runScopeLabel = useMemo(() => {
     const nsPart =
@@ -266,15 +374,19 @@ export const QATab: React.FC<Props> = ({
           ? `all ${scheduleNamespaces.length} namespace(s)`
           : 'loaded schedules'
         : runNamespace;
+    const pick =
+      scopedCiNames.length > 0 && selectedCount < scopedCiNames.length
+        ? ` · ${selectedCount}/${scopedCiNames.length} selected`
+        : '';
     if (floor === 'day' && floorDate) {
       const dayLabel = selectedDayMeta?.label || floorDate;
       const band =
         timeBand !== ALL_BANDS
           ? selectedDayMeta?.bands.find((b) => b.key === timeBand)?.label || timeBand
           : null;
-      return `${dayLabel}${band ? ` · ${band}` : ''} · ${nsPart}`;
+      return `${dayLabel}${band ? ` · ${band}` : ''} · ${nsPart}${pick}`;
     }
-    return `Full event · ${nsPart}`;
+    return `Full event · ${nsPart}${pick}`;
   }, [
     runNamespace,
     scheduleNamespaces.length,
@@ -282,11 +394,17 @@ export const QATab: React.FC<Props> = ({
     floorDate,
     timeBand,
     selectedDayMeta,
+    scopedCiNames.length,
+    selectedCount,
   ]);
 
-  const handleRun = async () => {
+  const runQAForCiNames = async (ciNames: string[] | null, label: string) => {
     if (floor === 'day' && !floorDate) {
       showToast('Pick a floor day (or switch to Full event)', 'danger');
+      return;
+    }
+    if (ciNames && ciNames.length === 0) {
+      showToast('Select at least one workshop to QA', 'danger');
       return;
     }
     setRunning(true);
@@ -303,13 +421,19 @@ export const QATab: React.FC<Props> = ({
       if (runNamespace !== ALL_NAMESPACES) {
         body.namespaces = [runNamespace];
       }
+      if (ciNames) {
+        body.ci_names = ciNames;
+      }
       const data = await api.runQA(body);
       setQAResults(data.results);
       setViewNamespace(ALL_NAMESPACES);
       setQaStatusFilter('all');
       setPage(1);
+      const ran = data.ran_count ?? data.count;
       showToast(
-        `QA complete: ${data.count} result(s) for ${runScopeLabel}`,
+        ciNames
+          ? `QA complete: re-checked ${ran} · ${data.count} total result(s) (${label})`
+          : `QA complete: ${data.count} result(s) for ${label}`,
         'success',
       );
     } catch (e) {
@@ -317,6 +441,33 @@ export const QATab: React.FC<Props> = ({
     } finally {
       setRunning(false);
     }
+  };
+
+  const handleRun = async () => {
+    const subset =
+      scopedCiNames.length > 0 && selectedCount < scopedCiNames.length
+        ? scopedCiNames.filter((n) => selectedCiNames.has(n))
+        : null;
+    await runQAForCiNames(subset, runScopeLabel);
+  };
+
+  const handleRetryFailed = async () => {
+    if (failedCiNames.length === 0) {
+      showToast('No failed QA rows to retry', 'info');
+      return;
+    }
+    setSelectedCiNames(new Set(failedCiNames));
+    setShowWorkshopPicker(true);
+    await runQAForCiNames(failedCiNames, `retry failed (${failedCiNames.length})`);
+  };
+
+  const toggleCiSelected = (ciName: string, checked: boolean) => {
+    setSelectedCiNames((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(ciName);
+      else next.delete(ciName);
+      return next;
+    });
   };
 
   const handleRefresh = async () => {
@@ -527,15 +678,61 @@ export const QATab: React.FC<Props> = ({
         <CardTitle>Catalog → Setup → Healthy</CardTitle>
         <CardBody>
           <p style={{ marginTop: 0, marginBottom: 12, fontSize: '0.9rem', opacity: 0.85 }}>
-            Pick <strong>This day</strong> (Ops Floor pin) or <strong>Full event</strong>, then Run QA.
+            Pick <strong>This day</strong> (Ops Floor pin) or <strong>Full event</strong>, then select
+            workshops and Run QA. Schedule shows provision / session / auto-stop per lab.
             {floor === 'day' && selectedDayMeta ? (
               <>
                 {' '}
                 Scoped to <strong>{selectedDayMeta.label}</strong> ({workshopsInScope} workshop
-                {workshopsInScope === 1 ? '' : 's'}).
+                {workshopsInScope === 1 ? '' : 's'}
+                {workshopsInScope > 0
+                  ? ` · deploy ${scopeTiming.earliestProvision} → stop ${scopeTiming.latestStop}`
+                  : ''}
+                ).
+              </>
+            ) : null}
+            {floor === 'event' && workshopsInScope > 0 ? (
+              <>
+                {' '}
+                Full event · {workshopsInScope} workshop{workshopsInScope === 1 ? '' : 's'} ·{' '}
+                {scopeDates.length} day{scopeDates.length === 1 ? '' : 's'}.
               </>
             ) : null}
           </p>
+
+          {scopeDates.length > 1 ? (
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: 6 }}>
+                {floor === 'event' ? 'Event runway — tap a day to scope QA' : 'Floor days'}
+              </label>
+              <ToggleGroup aria-label="QA floor day runway">
+                <ToggleGroupItem
+                  text={`Full event (${schedules.length})`}
+                  isSelected={floor === 'event'}
+                  onChange={() => setFloor('event')}
+                />
+                {scopeDates.map((d) => {
+                  const dayRows = schedulesByDay.get(d.date) || [];
+                  const t = earliestLatestTimes(dayRows);
+                  return (
+                    <ToggleGroupItem
+                      key={d.date}
+                      text={`${d.label} (${d.count})${
+                        dayRows.length ? ` · ${t.earliestProvision}` : ''
+                      }`}
+                      isSelected={floor === 'day' && floorDate === d.date}
+                      onChange={() => {
+                        setFloor('day');
+                        setFloorDate(d.date);
+                        setTimeBand(ALL_BANDS);
+                      }}
+                    />
+                  );
+                })}
+              </ToggleGroup>
+            </div>
+          ) : null}
+
           <Split hasGutter style={{ alignItems: 'flex-start', flexWrap: 'wrap' }}>
             <SplitItem>
               <label style={{ display: 'block', fontSize: '0.85rem', marginBottom: 4 }}>
@@ -670,18 +867,35 @@ export const QATab: React.FC<Props> = ({
                 content={
                   noSchedules
                     ? 'Upload a schedule CSV first'
-                    : `Scan ${workshopsInScope} workshop(s) in ${runScopeLabel}`
+                    : selectedCount === 0
+                      ? 'Select at least one workshop below'
+                      : `Scan ${selectedCount} of ${workshopsInScope} workshop(s) in ${runScopeLabel}`
                 }
               >
                 <Button
                   variant="primary"
-                  onClick={handleRun}
-                  isDisabled={running || noSchedules}
+                  onClick={() => void handleRun()}
+                  isDisabled={running || noSchedules || selectedCount === 0}
                   isLoading={running}
                 >
                   {runNamespace === ALL_NAMESPACES
-                    ? 'Run QA'
-                    : `Run QA for ${runNamespace.replace(/^user-/, '').replace(/-redhat-com$/, '')}`}
+                    ? allInScopeSelected
+                      ? 'Run QA'
+                      : `Run QA (${selectedCount})`
+                    : `Run QA for ${runNamespace.replace(/^user-/, '').replace(/-redhat-com$/, '')}${
+                        allInScopeSelected ? '' : ` (${selectedCount})`
+                      }`}
+                </Button>
+              </Tooltip>
+            </SplitItem>
+            <SplitItem style={{ paddingTop: 22 }}>
+              <Tooltip content="Re-run Catalog→Setup→Healthy only for rows that failed last time (keeps prior passes)">
+                <Button
+                  variant="secondary"
+                  onClick={() => void handleRetryFailed()}
+                  isDisabled={running || failedCiNames.length === 0}
+                >
+                  Retry failed{failedCiNames.length ? ` (${failedCiNames.length})` : ''}
                 </Button>
               </Tooltip>
             </SplitItem>
@@ -729,10 +943,124 @@ export const QATab: React.FC<Props> = ({
               <>
                 {' '}
                 Scope: <strong>{runScopeLabel}</strong>
-                {workshopsInScope > 0 && <> · {workshopsInScope} workshop(s)</>}
+                {workshopsInScope > 0 && (
+                  <>
+                    {' '}
+                    · {selectedCount}/{workshopsInScope} workshop(s) selected
+                  </>
+                )}
+                . For multi-day events, pin This day (or Full event), then deselect
+                workshops not deployed yet — or use Retry failed after a run.
               </>
             )}
           </p>
+
+          {!noSchedules && scopedCiNames.length > 0 ? (
+            <ExpandableSection
+              toggleText={`Select workshops + schedule (${selectedCount}/${scopedCiNames.length}) · deploy ${scopeTiming.earliestProvision} → stop ${scopeTiming.latestStop}`}
+              isExpanded={showWorkshopPicker}
+              onToggle={(_e, expanded) => setShowWorkshopPicker(expanded)}
+              style={{ marginTop: 12 }}
+            >
+              <Flex
+                gap={{ default: 'gapSm' }}
+                style={{ marginBottom: 8 }}
+                alignItems={{ default: 'alignItemsCenter' }}
+                flexWrap={{ default: 'wrap' }}
+              >
+                <Button
+                  variant="link"
+                  isInline
+                  onClick={() => setSelectedCiNames(new Set(scopedCiNames))}
+                >
+                  Select all in scope
+                </Button>
+                <Button
+                  variant="link"
+                  isInline
+                  onClick={() => setSelectedCiNames(new Set())}
+                >
+                  Clear
+                </Button>
+                {failedCiNames.length > 0 ? (
+                  <Button
+                    variant="link"
+                    isInline
+                    onClick={() => setSelectedCiNames(new Set(failedCiNames))}
+                  >
+                    Select failed only ({failedCiNames.length})
+                  </Button>
+                ) : null}
+                <Label isCompact color="blue">
+                  {floor === 'day' ? 'This day' : 'Full event'}
+                </Label>
+                <Label isCompact color="grey">
+                  {workshopsInScope} scheduled
+                </Label>
+              </Flex>
+              <div style={{ maxHeight: 280, overflow: 'auto' }}>
+                <table
+                  style={{
+                    width: '100%',
+                    borderCollapse: 'collapse',
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  <thead>
+                    <tr style={{ textAlign: 'left', opacity: 0.7 }}>
+                      <th style={{ padding: '4px 8px 6px 0', width: 28 }} />
+                      <th style={{ padding: '4px 8px 6px 0' }}>Workshop</th>
+                      <th style={{ padding: '4px 8px 6px 0' }}>Day</th>
+                      <th style={{ padding: '4px 8px 6px 0' }}>Provision</th>
+                      <th style={{ padding: '4px 8px 6px 0' }}>Auto-stop</th>
+                      <th style={{ padding: '4px 8px 6px 0' }}>Seats</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scopedSchedules.map((s) => {
+                      const key = `${s.ci_name}::${s.namespace}`;
+                      const day = scheduleFloorDate(s);
+                      const dayMeta = scopeDates.find((d) => d.date === day);
+                      return (
+                        <tr key={key} style={{ borderTop: '1px solid var(--pf-t--global--border--color--default)' }}>
+                          <td style={{ padding: '6px 8px 6px 0', verticalAlign: 'top' }}>
+                            <Checkbox
+                              id={`qa-pick-${key}`}
+                              aria-label={`Select ${s.ci_name}`}
+                              isChecked={selectedCiNames.has(s.ci_name)}
+                              onChange={(_e, checked) => toggleCiSelected(s.ci_name, checked)}
+                            />
+                          </td>
+                          <td style={{ padding: '6px 8px 6px 0', verticalAlign: 'top' }}>
+                            <strong title={s.ci_name}>{s.ci_name}</strong>
+                            <div style={{ opacity: 0.65, fontSize: '0.9em' }}>{s.namespace}</div>
+                          </td>
+                          <td style={{ padding: '6px 8px 6px 0', verticalAlign: 'top', whiteSpace: 'nowrap' }}>
+                            {dayMeta?.label || day || '—'}
+                          </td>
+                          <td
+                            style={{ padding: '6px 8px 6px 0', verticalAlign: 'top', whiteSpace: 'nowrap' }}
+                            title={s.provisioning_date || ''}
+                          >
+                            {shortScheduleTime(s.provisioning_date)}
+                          </td>
+                          <td
+                            style={{ padding: '6px 8px 6px 0', verticalAlign: 'top', whiteSpace: 'nowrap' }}
+                            title={s.auto_stop || ''}
+                          >
+                            {shortScheduleTime(s.auto_stop)}
+                          </td>
+                          <td style={{ padding: '6px 8px 6px 0', verticalAlign: 'top' }}>
+                            {s.users ?? '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </ExpandableSection>
+          ) : null}
         </CardBody>
       </Card>
 

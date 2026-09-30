@@ -254,14 +254,16 @@ def _write_qa_csv_for_namespace(
     floor: str = "event",
     floor_date: str | None = None,
     time_band: str | None = None,
+    ci_names: list[str] | None = None,
 ) -> str:
-    """Write a temporary CSV containing schedules for one namespace (optional floor day)."""
+    """Write a temporary CSV containing schedules for one namespace (optional floor day / CI subset)."""
     filtered = filter_schedules_by_scope(
         _schedules,
         namespace=namespace,
         floor=floor,
         floor_date=floor_date,
         time_band=time_band,
+        ci_names=ci_names,
     )
     if not filtered:
         scope_bits = [f'namespace "{namespace}"']
@@ -269,6 +271,8 @@ def _write_qa_csv_for_namespace(
             scope_bits.append(f"floor day {floor_date}")
         if time_band:
             scope_bits.append(f"band {time_band}")
+        if ci_names:
+            scope_bits.append(f"{len(ci_names)} selected CI name(s)")
         raise HTTPException(
             400,
             f"No loaded schedules match {' · '.join(scope_bits)}.",
@@ -2769,6 +2773,7 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
     floor = body.floor or "event"
     floor_date = body.floor_date
     time_band = body.time_band
+    ci_names = body.ci_names
     if floor == "day" and not floor_date:
         raise HTTPException(400, "floor_date is required when floor=day (Ops Floor day pin).")
 
@@ -2780,6 +2785,23 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
         namespaces = [ns.strip() for ns in body.namespace.split(",") if ns.strip()]
     else:
         namespaces = list(dict.fromkeys(s.namespace for s in _schedules))
+
+    # When a CI Name subset is requested, only touch namespaces that still have matches.
+    if ci_names:
+        scoped = filter_schedules_by_scope(
+            _schedules,
+            floor=floor,
+            floor_date=floor_date,
+            time_band=time_band,
+            ci_names=ci_names,
+        )
+        ns_with_matches = {s.namespace for s in scoped if s.namespace in namespaces}
+        if not ns_with_matches:
+            raise HTTPException(
+                400,
+                "No loaded schedules match the selected CI names in the current floor/namespace scope.",
+            )
+        namespaces = [ns for ns in namespaces if ns in ns_with_matches]
 
     handler, log_path = start_log_capture("qa")
     temp_csv_paths: list[str] = []
@@ -2798,8 +2820,13 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
             # UI edits (changed dates, users, etc.) are reflected in QA checks.
             # Floor day filter matches Ops Floor pin so multi-day events don't
             # run Catalog→Setup→Healthy against undeployed later days.
+            # Optional ci_names = early-deployed subset or retry-failed.
             temp_path = _write_qa_csv_for_namespace(
-                ns, floor=floor, floor_date=floor_date, time_band=time_band
+                ns,
+                floor=floor,
+                floor_date=floor_date,
+                time_band=time_band,
+                ci_names=ci_names,
             )
             temp_csv_paths.append(temp_path)
 
@@ -2817,6 +2844,7 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
                     floor=floor,
                     floor_date=floor_date,
                     time_band=time_band,
+                    ci_names=ci_names,
                 )
                 if s.namespace in namespaces
             ]
@@ -2827,6 +2855,7 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
                     floor=floor,
                     floor_date=floor_date,
                     time_band=time_band,
+                    ci_names=ci_names,
                 )
                 temp_csv_paths.append(cat_path)
                 all_catalog.extend(qa3_verify_catalog_items_exist(cat_path, config))
@@ -2875,10 +2904,20 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
             all_raw = all_catalog + merged
 
         all_raw = [_normalize_qa_result_dict(r) for r in all_raw]
-        all_results = [QAResultItem(**r) for r in all_raw]
-        with _state_lock:
-            _qa_results = all_results
-            _qa_log_path = log_path
+        new_results = [QAResultItem(**r) for r in all_raw]
+        # Subset / retry-failed: replace only those CI names; keep prior passes.
+        if ci_names:
+            selected = set(ci_names)
+            with _state_lock:
+                kept = [r for r in _qa_results if (r.ci_name or "") not in selected]
+                all_results = kept + new_results
+                _qa_results = all_results
+                _qa_log_path = log_path
+        else:
+            all_results = new_results
+            with _state_lock:
+                _qa_results = all_results
+                _qa_log_path = log_path
         _save_qa_results()
         return {
             "count": len(all_results),
@@ -2887,6 +2926,8 @@ def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(verify_
             "floor": floor,
             "floor_date": floor_date,
             "time_band": time_band,
+            "ci_names": ci_names,
+            "ran_count": len(new_results),
         }
     finally:
         stop_log_capture(handler)

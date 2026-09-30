@@ -88,17 +88,27 @@ def schedule_floor_date(schedule) -> str | None:
     return date_key(dt) if dt else None
 
 
+def normalize_ci_names(ci_names: Iterable[str] | None) -> frozenset[str] | None:
+    """Return a frozenset of CI Name values, or None when the filter is unused."""
+    if ci_names is None:
+        return None
+    cleaned = frozenset(str(n).strip() for n in ci_names if str(n).strip())
+    return cleaned or None
+
+
 def schedule_matches_scope(
     schedule,
     *,
     floor: str | None = None,
     floor_date: str | None = None,
     time_band: str | None = None,
+    ci_names: Iterable[str] | None = None,
 ) -> bool:
     """Return True if schedule row is in QA scope.
 
     ``floor=event`` / omitted → all rows (optionally still band-filtered).
     ``floor=day`` → only rows whose Ops floor date equals ``floor_date``.
+    ``ci_names`` → optional subset (retry-failed / pick which workshops to QA).
     """
     floor_mode = (floor or "event").strip().lower()
     if floor_mode not in VALID_FLOOR:
@@ -116,6 +126,12 @@ def schedule_matches_scope(
         dt = parse_provisioning_dt(getattr(schedule, "provisioning_date", None))
         if dt is None or time_band_key(dt) != time_band:
             return False
+
+    want_cis = normalize_ci_names(ci_names)
+    if want_cis is not None:
+        name = str(getattr(schedule, "ci_name", None) or "").strip()
+        if name not in want_cis:
+            return False
     return True
 
 
@@ -126,13 +142,19 @@ def filter_schedules_by_scope(
     floor: str | None = None,
     floor_date: str | None = None,
     time_band: str | None = None,
+    ci_names: Iterable[str] | None = None,
 ) -> list:
     out = []
+    want_cis = normalize_ci_names(ci_names)
     for s in schedules:
         if namespace and getattr(s, "namespace", None) != namespace:
             continue
         if not schedule_matches_scope(
-            s, floor=floor, floor_date=floor_date, time_band=time_band
+            s,
+            floor=floor,
+            floor_date=floor_date,
+            time_band=time_band,
+            ci_names=want_cis,
         ):
             continue
         out.append(s)
