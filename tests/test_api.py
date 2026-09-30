@@ -70,7 +70,15 @@ def reset_state():
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    # Enter TestClient as a context manager so a single anyio portal (and its
+    # event loop) persists for the whole test. Without this, TestClient opens a
+    # fresh portal per request, so a background task created during a POST (QA /
+    # deploy runs) is orphaned the moment that POST's portal is torn down — the
+    # job wedges mid-run (e.g. stuck at progress=5) and later status polls never
+    # see it complete. One persistent loop matches production (a single uvicorn
+    # loop) and lets background jobs finish across subsequent requests.
+    with TestClient(app) as c:
+        yield c
 
 
 @pytest.fixture
@@ -1702,7 +1710,8 @@ class TestAuthEnforcement:
 
     @pytest.fixture
     def auth_client(self):
-        return TestClient(app)
+        with TestClient(app) as c:
+            yield c
 
     def test_upload_requires_key(self, auth_client):
         resp = auth_client.post(

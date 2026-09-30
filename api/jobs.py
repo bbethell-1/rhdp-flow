@@ -42,6 +42,12 @@ class Job:
     _events: asyncio.Queue = field(default_factory=asyncio.Queue, repr=False)
     _cancel_requested: bool = field(default=False, repr=False)
     _pause_event: asyncio.Event = field(default_factory=lambda: _make_set_event(), repr=False)
+    # Event loop the job's async task + SSE queue live on. Captured at creation
+    # (create_job runs inside the request handler, i.e. on the loop). Progress
+    # updates arrive from worker threads (asyncio.to_thread), so queue writes
+    # must be marshalled back onto this loop — touching an asyncio.Queue from
+    # another thread races the loop's ready-queue and can wedge it.
+    _loop: asyncio.AbstractEventLoop | None = field(default=None, repr=False)
 
 
 MAX_JOBS = int(os.environ.get("RHDP_MAX_JOBS", "100"))
@@ -75,9 +81,83 @@ def create_job() -> Job:
     _cleanup_old_jobs()
     job_id = uuid.uuid4().hex[:12]
     job = Job(job_id=job_id)
+    # Bind the job to the loop it is created on so worker-thread progress updates
+    # can be marshalled back safely. create_job is called from the async request
+    # handler, so a loop is normally running here.
+    try:
+        job._loop = asyncio.get_running_loop()
+    except RuntimeError:
+        job._loop = None
     with _jobs_lock:
         _jobs[job_id] = job
     return job
+
+
+def _put_nowait_safe(queue: asyncio.Queue, data: dict) -> None:
+    """put_nowait that drops the event if the queue is full (SSE lag)."""
+    try:
+        queue.put_nowait(data)
+    except asyncio.QueueFull:
+        pass
+
+
+def _pause_event_op(job: Job, op: str) -> None:
+    """Set/clear a job's ``_pause_event`` from any thread, safely.
+
+    ``request_cancel``/``request_pause``/``request_resume`` are called from the
+    *sync* deploy control endpoints, which FastAPI runs in its threadpool — off
+    the loop. ``asyncio.Event.set()`` wakes waiters via the non-threadsafe
+    ``loop.call_soon`` (a paused deploy parks in ``wait_if_paused``), so calling
+    it off-loop can lose the wakeup and wedge the loop. Marshal onto the job's
+    loop, mirroring :func:`_emit_event`.
+    """
+    fn = job._pause_event.set if op == "set" else job._pause_event.clear
+    loop = job._loop
+    if loop is None or loop.is_closed():
+        fn()
+        return
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    if running is loop:
+        fn()
+    else:
+        try:
+            loop.call_soon_threadsafe(fn)
+        except RuntimeError:
+            pass
+
+
+def _emit_event(job: Job, data: dict) -> None:
+    """Push an SSE event onto the job's queue, thread-safely.
+
+    ``update_job`` is called both from the event loop (endpoints) and from
+    worker threads (``asyncio.to_thread`` deploy/QA runs). ``asyncio.Queue`` is
+    not thread-safe, and its ``put_nowait`` wakes waiting getters via
+    ``loop.call_soon`` — calling that off-loop corrupts the loop's ready queue
+    and can silently wedge the loop (a completed ``to_thread`` never resumes its
+    awaiting coroutine). Marshal off-thread writes back with
+    ``call_soon_threadsafe``; write directly when already on the loop.
+    """
+    loop = job._loop
+    if loop is None or loop.is_closed():
+        # No bound loop (e.g. a unit test calling update_job directly).
+        _put_nowait_safe(job._events, data)
+        return
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    if running is loop:
+        _put_nowait_safe(job._events, data)
+    else:
+        try:
+            loop.call_soon_threadsafe(_put_nowait_safe, job._events, data)
+        except RuntimeError:
+            # Loop stopped/closed between the check and the call — nothing to
+            # notify.
+            pass
 
 
 def get_job(job_id: str) -> Job | None:
@@ -103,7 +183,7 @@ def request_cancel(job_id: str) -> bool:
         if job is None or job.status not in (Status.pending, Status.running, Status.paused):
             return False
         job._cancel_requested = True
-        job._pause_event.set()  # unpause if paused so loop can exit
+        _pause_event_op(job, "set")  # unpause if paused so loop can exit
         return True
 
 
@@ -113,12 +193,9 @@ def request_pause(job_id: str) -> bool:
         job = _jobs.get(job_id)
         if job is None or job.status != Status.running:
             return False
-        job._pause_event.clear()
+        _pause_event_op(job, "clear")
         job.status = Status.paused
-        try:
-            job._events.put_nowait(_job_to_dict(job))
-        except asyncio.QueueFull:
-            pass
+        _emit_event(job, _job_to_dict(job))
         return True
 
 
@@ -128,12 +205,9 @@ def request_resume(job_id: str) -> bool:
         job = _jobs.get(job_id)
         if job is None or job.status != Status.paused:
             return False
-        job._pause_event.set()
+        _pause_event_op(job, "set")
         job.status = Status.running
-        try:
-            job._events.put_nowait(_job_to_dict(job))
-        except asyncio.QueueFull:
-            pass
+        _emit_event(job, _job_to_dict(job))
         return True
 
 
@@ -178,12 +252,11 @@ def update_job(
             job.error = error
         if log_path is not None:
             job.log_path = log_path
-        # Push event for SSE listeners (non-blocking)
-        try:
-            job._events.put_nowait(_job_to_dict(job))
-        except asyncio.QueueFull:
-            pass
-        return job
+        data = _job_to_dict(job)
+    # Push event for SSE listeners (non-blocking, thread-safe). Done outside the
+    # _jobs_lock so a slow cross-thread hop never holds the store lock.
+    _emit_event(job, data)
+    return job
 
 
 async def event_generator(job_id: str):
