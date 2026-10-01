@@ -89,7 +89,12 @@ from api.models import (
 )
 from api.services import labagator_client
 from api.services.labagator_import import transform_labagator_to_flow
-from api.services.qa_scope import build_qa_scopes, filter_schedules_by_scope
+from api.services.qa_scope import (
+    build_qa_coverage,
+    build_qa_scopes,
+    filter_schedules_by_scope,
+    merge_qa_coverage,
+)
 from lib.deploy_pace import deploy_pace_seconds
 from rhdp_flow import (
     DeploymentResult,
@@ -147,6 +152,10 @@ from lib import flow_state as _flow_state
 
 _schedules: list[WorkshopSchedule] = []
 _qa_results: list[QAResultItem] = []
+# Scope metadata for the last QA run — what QA actually covered (floor/band/CI
+# subset + per-row covered list). Emitted on /qa/results so Labagator trusts
+# Flow's coverage instead of guessing it from its own session roster.
+_qa_last_scope: dict | None = None
 _csv_filepath: str | None = None  # stashed for QA functions that need a path
 _current_filename: str = ""
 _asset_passwords: dict[str, str] | None = None
@@ -705,12 +714,13 @@ def _log_operator_overrides(prefix: str = "OPERATOR OVERRIDE") -> None:
 @router.post("/sessions/clear")
 def clear_session(_key=Depends(verify_api_key)):
     """Archive current session and reset state for a new upload."""
-    global _schedules, _deployment_results, _qa_results, _csv_filepath, _current_filename, _asset_passwords, _deploy_log_path, _qa_log_path, _destroy_check_results, _operator_overrides
+    global _schedules, _deployment_results, _qa_results, _qa_last_scope, _csv_filepath, _current_filename, _asset_passwords, _deploy_log_path, _qa_log_path, _destroy_check_results, _operator_overrides
     with _state_lock:
         _archive_current_session()
         _schedules = []
         _deployment_results = []
         _qa_results = []
+        _qa_last_scope = None
         _destroy_check_results = []
         _operator_overrides = []
         _csv_filepath = None
@@ -3085,7 +3095,7 @@ async def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(v
     job = jobs.create_job()
 
     async def _run():
-        global _qa_results, _qa_log_path
+        global _qa_results, _qa_log_path, _qa_last_scope
         handler, log_path = start_log_capture("qa", job.job_id)
         config = None
         try:
@@ -3110,6 +3120,16 @@ async def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(v
                 ci_names=ci_names,
                 job_id=job.job_id,
             )
+            # Coverage metadata: what this run actually QA'd (floor/band/CI subset
+            # + per-row list). Labagator consumes this instead of guessing scope.
+            coverage = build_qa_coverage(
+                _schedules,
+                floor=floor,
+                floor_date=floor_date,
+                time_band=time_band,
+                ci_names=ci_names,
+                namespaces=namespaces,
+            )
             # Subset / retry-failed: replace only those CI names; keep prior passes.
             if ci_names:
                 selected = set(ci_names)
@@ -3118,11 +3138,13 @@ async def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(v
                     all_results = kept + new_results
                     _qa_results = all_results
                     _qa_log_path = log_path
+                    _qa_last_scope = merge_qa_coverage(_qa_last_scope, coverage)
             else:
                 all_results = new_results
                 with _state_lock:
                     _qa_results = all_results
                     _qa_log_path = log_path
+                    _qa_last_scope = coverage
             _save_qa_results()
             if jobs.is_cancel_requested(job.job_id):
                 jobs.update_job(
@@ -3165,7 +3187,7 @@ async def qa_run(request: Request, body: QARequest = QARequest(), _key=Depends(v
 
 @router.get("/qa/results")
 def qa_get_results():
-    return {"count": len(_qa_results), "results": _qa_results}
+    return {"count": len(_qa_results), "results": _qa_results, "scope": _qa_last_scope}
 
 
 @router.get("/qa/status/{job_id}", response_model=JobResponse)

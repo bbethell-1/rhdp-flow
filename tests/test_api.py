@@ -39,6 +39,7 @@ def reset_state():
     routes._schedules = []
     routes._deployment_results = []
     routes._qa_results = []
+    routes._qa_last_scope = None
     routes._csv_filepath = None
     routes._current_filename = ""
     routes._sessions = []
@@ -830,6 +831,24 @@ def test_qa_results_empty(client):
     resp = client.get("/api/qa/results")
     assert resp.status_code == 200
     assert resp.json()["count"] == 0
+    # No run yet → scope is null (Labagator treats this as "no Flow coverage").
+    assert resp.json()["scope"] is None
+
+
+@patch("api.routes._get_config", return_value=MagicMock(kubeconfig_path=None))
+@patch("api.routes.qa1_verify_setup")
+def test_qa_results_emits_scope_metadata(mock_qa1, _mock_cfg, uploaded_client):
+    """A completed QA run must publish coverage scope on /qa/results."""
+    mock_qa1.return_value = []
+    _job_id, status = _run_qa_and_wait(uploaded_client, {"type": "2"})
+    assert status["status"] == "completed"
+    scope = uploaded_client.get("/api/qa/results").json()["scope"]
+    assert scope is not None
+    assert scope["floor"] == "event"
+    assert "covered" in scope
+    assert scope["expected_total"] == len(scope["covered"])
+    assert len(scope["covered"]) >= 1
+    assert all("session_date" in row and "namespace" in row for row in scope["covered"])
 
 
 QA_NAMESPACE_FILTER_CSV = """CI Name,CI,Namespace,Users,Enable_workshop_interface,Password,Activity,Purpose,Workshop Name,Provisioning Date (UTC),Auto-stop (UTC),Auto-destroy (UTC)
