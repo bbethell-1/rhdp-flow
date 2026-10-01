@@ -4853,7 +4853,8 @@ def qa1_verify_setup(
 def qa2_verify_deployment_status(
     csv_file: str,
     namespace: str,
-    config: RHDPConfig
+    config: RHDPConfig,
+    enrich_soundcheck: bool = True,
 ) -> list[dict]:
     """
     QA Function 2: Verify deployments are actually deployed and seat counts match.
@@ -5212,7 +5213,11 @@ def qa2_verify_deployment_status(
 
     # Showroom / deep health via Soundcheck (replaces oc-based showroom probes).
     # One batched full kickoff + status map — not N per-row Soundcheck runs.
-    _enrich_qa2_results_with_soundcheck(results, scheduled_items, namespace, config)
+    # The Flow QA job path runs this ONCE across all namespaces after the
+    # per-namespace loop (see api.routes._run_qa_over), so it passes
+    # ``enrich_soundcheck=False`` here. The CLI path still enriches inline.
+    if enrich_soundcheck:
+        _enrich_qa2_results_with_soundcheck(results, scheduled_items, [namespace], config)
 
     return results
 
@@ -5220,41 +5225,72 @@ def qa2_verify_deployment_status(
 def _enrich_qa2_results_with_soundcheck(
     results: list[dict],
     scheduled_items: list,
-    namespace: str,
+    namespaces: "list[str] | str",
     config: "RHDPConfig",
-) -> None:
-    """Run a full batched Soundcheck for QA3 workshops, then map status onto rows.
+    *,
+    on_progress=None,
+    is_cancelled=None,
+) -> dict:
+    """Run ONE batched Soundcheck across all QA3 workshops, then map status onto rows.
 
     Flow QA owns deep showroom checks so operators are not forced into Admin Ops
     for a pass/fail. Admin Ops still keeps its own full Run Soundcheck button for
     ad-hoc batches; status badges there are glance-only.
 
+    ``namespaces`` may be a single namespace (CLI path) or a list (the Flow QA
+    job runs one kickoff spanning every selected namespace instead of N separate
+    kickoffs). ``on_progress(pct, msg)`` and ``is_cancelled()`` are optional hooks
+    so the job's live progress bar advances and a cancel during the poll loop is
+    honored (rhdp_flow stays decoupled from api.jobs).
+
     Kickoff: GET /api/check?workshop=id1,id2 (≤40). Then light-poll + check-status.
-    Populates showroom_status / showroom_url on each result row.
+    Populates showroom_status / showroom_url on each result row. Returns a summary
+    ``{"reachable": bool, "checked": int, "session_status": str}`` so callers can
+    surface a degraded Soundcheck instead of reporting a silent pass.
     """
     import urllib.parse
 
+    summary = {"reachable": False, "checked": 0, "session_status": "unknown"}
     if not results:
-        return
+        return summary
 
-    pairs = _collect_workshop_ids_for_schedules(scheduled_items, namespace, config)
+    if isinstance(namespaces, str):
+        namespaces = [namespaces]
+
+    # Collect (schedule, workshop_name, workshop_id) across ALL namespaces so a
+    # single kickoff covers the whole run.
+    sched_by_ns: dict[str, list] = {}
+    for s in scheduled_items:
+        sched_by_ns.setdefault(getattr(s, "namespace", "") or "", []).append(s)
+    pairs: list[tuple[object, str, str]] = []
+    for ns in namespaces:
+        # scheduled_items usually carry .namespace; if a caller passes items
+        # without it, probe the namespace with the full set rather than skip.
+        items = sched_by_ns.get(ns) if ns in sched_by_ns else scheduled_items
+        pairs.extend(_collect_workshop_ids_for_schedules(items, ns, config))
+
     if not pairs:
         for r in results:
             r.setdefault("showroom_status", "")
             r.setdefault("showroom_url", "")
-        return
+        return summary
 
     ci_to_ids: dict[str, list[str]] = {}
     for sched, _wname, wid in pairs:
         ci_to_ids.setdefault(sched.ci, []).append(wid)
 
     all_ids = list(dict.fromkeys(wid for _, _, wid in pairs))[:40]
+    summary["checked"] = len(all_ids)
     base = _soundcheck_base_url()
     session_id = ""
     session_url = f"{base}/check?workshop={','.join(all_ids)}"
     session_status = "unknown"
+    kickoff_ok = False
 
-    # Full kickoff — same contract as qa_soundcheck / Admin Ops batch.
+    if on_progress:
+        on_progress(90, f"Soundcheck: checking {len(all_ids)} workshop(s)")
+
+    # Full kickoff — same contract as the Admin Ops batch.
     try:
         kick = _http_json(
             "GET",
@@ -5262,12 +5298,18 @@ def _enrich_qa2_results_with_soundcheck(
             f"&name={urllib.parse.quote(f'Flow QA3 Soundcheck — {len(all_ids)} workshop(s)')}",
             timeout=60.0,
         )
+        kickoff_ok = True
         session_id = str(kick.get("session_id") or "")
         if session_id:
             session_url = f"{base}/session/{session_id}"
-            for _ in range(12):
+            for attempt in range(12):
+                if is_cancelled and is_cancelled():
+                    logger.info("QA3 Soundcheck cancelled during poll (session %s)", session_id)
+                    break
                 detail = _http_json("GET", f"{base}/api/sessions/{session_id}", timeout=30.0)
                 session_status = str((detail.get("session") or {}).get("status") or "pending")
+                if on_progress:
+                    on_progress(90, f"Soundcheck: {session_status} ({attempt + 1}/12)")
                 if session_status in ("completed", "failed"):
                     break
                 time.sleep(5.0)
@@ -5282,7 +5324,10 @@ def _enrich_qa2_results_with_soundcheck(
             exc,
         )
 
+    summary["session_status"] = session_status
+
     statuses: dict = {}
+    check_status_ok = False
     try:
         body = _http_json(
             "POST",
@@ -5291,12 +5336,27 @@ def _enrich_qa2_results_with_soundcheck(
             timeout=30.0,
         )
         statuses = body.get("statuses") or {}
+        check_status_ok = True
     except Exception as exc:
         logger.warning("QA3 Soundcheck check-status failed: %s", exc)
+
+    summary["reachable"] = kickoff_ok or check_status_ok
+
+    # Soundcheck fully unreachable (both kickoff AND check-status failed): mark
+    # the affected rows "unreachable" instead of leaving them blank — a blank
+    # Showroom cell reads as "fine / not checked" and hides the outage.
+    if not summary["reachable"]:
         for r in results:
-            r.setdefault("showroom_status", session_status if session_id else "")
-            r.setdefault("showroom_url", session_url if session_id else "")
-        return
+            if ci_to_ids.get(r.get("ci") or ""):
+                r["showroom_status"] = "unreachable"
+                r["showroom_url"] = session_url
+                note = "Soundcheck unreachable"
+                issues = (r.get("issues") or "").strip()
+                r["issues"] = f"{issues}; {note}" if issues else note
+            else:
+                r.setdefault("showroom_status", "")
+                r.setdefault("showroom_url", "")
+        return summary
 
     sched_by_ci = {s.ci: s for s in scheduled_items}
     rank = {"failed": 4, "running": 3, "pending": 2, "completed": 1}
@@ -5350,11 +5410,7 @@ def _enrich_qa2_results_with_soundcheck(
             issues = (r.get("issues") or "").strip()
             r["issues"] = f"{issues}; {note}" if issues else note
 
-
-def _enrich_qa_result_with_showroom(result: dict, schedule, config) -> None:
-    """Deprecated path — QA3 uses Soundcheck batch enrich instead of oc probes."""
-    result.setdefault("showroom_status", "")
-    result.setdefault("showroom_url", "")
+    return summary
 
 
 def qa3_verify_catalog_items_exist(
@@ -5474,11 +5530,29 @@ def qa3_verify_catalog_items_exist(
     return results
 
 
+_SOUNDCHECK_DEV_DEFAULT = "https://showroom-soundcheck-dev.apps.ocpv-infra01.dal12.infra.demo.redhat.com"
+_soundcheck_default_warned = False
+
+
 def _soundcheck_base_url() -> str:
-    return os.environ.get(
-        "SOUNDCHECK_URL",
-        "https://showroom-soundcheck-dev.apps.ocpv-infra01.dal12.infra.demo.redhat.com",
-    ).rstrip("/")
+    """Soundcheck service base URL from ``SOUNDCHECK_URL``.
+
+    Falls back to the dev endpoint if unset, but warns once so a prod QA run
+    doesn't silently probe dev (and then look "healthy" when the real workshops
+    were never checked).
+    """
+    global _soundcheck_default_warned
+    url = (os.environ.get("SOUNDCHECK_URL") or "").strip()
+    if url:
+        return url.rstrip("/")
+    if not _soundcheck_default_warned:
+        logger.warning(
+            "SOUNDCHECK_URL is not set — falling back to the dev Soundcheck endpoint (%s). "
+            "Set SOUNDCHECK_URL so QA Soundcheck targets the correct environment.",
+            _SOUNDCHECK_DEV_DEFAULT,
+        )
+        _soundcheck_default_warned = True
+    return _SOUNDCHECK_DEV_DEFAULT.rstrip("/")
 
 
 def resolve_admin_ops_url(namespace: str | None = None) -> str:
@@ -5569,142 +5643,6 @@ def _collect_workshop_ids_for_schedules(
             if wid:
                 out.append((schedule, name, wid))
     return out
-
-
-def qa_soundcheck(
-    csv_file: str,
-    namespace: str,
-    config: "RHDPConfig",
-    *,
-    max_workshops: int = 40,
-    poll_attempts: int = 12,
-    poll_interval_s: float = 5.0,
-) -> list[dict]:
-    """Standalone Showroom Soundcheck QA (deep checks — intentionally not in All).
-
-    Starts one batched Soundcheck session for workshop-ids in scope, light-polls
-    the shared session, then maps last status per workshop. Failures here are
-    expected more often than QA1/QA2 — keep this type separate.
-    """
-    import urllib.parse
-
-    logger.info("=" * 70)
-    logger.info("Soundcheck QA: deep showroom / workshop checks (standalone)")
-    logger.info("=" * 70)
-
-    scheduled_items = read_csv_input(csv_file)
-    if namespace:
-        scheduled_items = [s for s in scheduled_items if (s.namespace or namespace) == namespace]
-
-    pairs = _collect_workshop_ids_for_schedules(scheduled_items, namespace, config)
-    if not pairs:
-        logger.warning("Soundcheck QA: no workshop-ids found in namespace %s", namespace)
-        return [
-            {
-                "ci_name": "(none)",
-                "ci": "",
-                "namespace": namespace,
-                "scheduled": "Yes",
-                "deployed": "No",
-                "status": "⚠️ NO WORKSHOPS",
-                "issues": "No workshop-id labels found for schedules in this namespace",
-                "landing_page_url": _soundcheck_base_url(),
-            }
-        ]
-
-    seen: set[str] = set()
-    selected: list[tuple[object, str, str]] = []
-    for sched, wname, wid in pairs:
-        if wid in seen:
-            continue
-        seen.add(wid)
-        selected.append((sched, wname, wid))
-        if len(selected) >= max_workshops:
-            break
-
-    ids = [wid for _, _, wid in selected]
-    base = _soundcheck_base_url()
-    session_id = ""
-    session_url = f"{base}/check?workshop={','.join(ids)}"
-    session_status = "unknown"
-
-    try:
-        kick = _http_json(
-            "GET",
-            f"{base}/api/check?workshop={urllib.parse.quote(','.join(ids))}"
-            f"&name={urllib.parse.quote(f'Flow Soundcheck QA — {len(ids)} workshop(s)')}",
-            timeout=60.0,
-        )
-        session_id = str(kick.get("session_id") or "")
-        if session_id:
-            session_url = f"{base}/session/{session_id}"
-            for _ in range(poll_attempts):
-                detail = _http_json("GET", f"{base}/api/sessions/{session_id}", timeout=30.0)
-                session_status = str((detail.get("session") or {}).get("status") or "pending")
-                if session_status in ("completed", "failed"):
-                    break
-                time.sleep(poll_interval_s)
-    except Exception as exc:
-        logger.warning("Soundcheck kickoff/poll failed (%s) — falling back to status lookup / deep-link", exc)
-
-    statuses: dict = {}
-    try:
-        body = _http_json(
-            "POST",
-            f"{base}/api/workshops/check-status",
-            body={"workshop_ids": ids},
-            timeout=30.0,
-        )
-        statuses = body.get("statuses") or {}
-    except Exception as exc:
-        logger.warning("Soundcheck check-status failed: %s", exc)
-
-    results: list[dict] = []
-    for schedule, wname, wid in selected:
-        entry = statuses.get(wid) if isinstance(statuses.get(wid), dict) else None
-        st = (entry or {}).get("status") if entry else session_status
-        sid = (entry or {}).get("session_id") if entry else session_id
-        link = f"{base}/session/{sid}" if sid else session_url
-        if st == "completed":
-            status = "✅ SOUNDCHECK OK"
-            issues = ""
-        elif st == "failed":
-            status = "❌ SOUNDCHECK FAILED"
-            issues = f"Soundcheck failed for workshop-id {wid}"
-        elif st in ("running", "pending"):
-            status = "⚠️ SOUNDCHECK RUNNING"
-            issues = f"Session still {st} — open {link}"
-        else:
-            status = "⚠️ SOUNDCHECK UNKNOWN"
-            issues = f"No Soundcheck result yet — open {link}"
-        results.append(
-            {
-                "ci_name": schedule.ci_name,
-                "ci": schedule.ci,
-                "namespace": namespace,
-                "scheduled": "Yes",
-                "deployed": "Yes",
-                "status": status,
-                "healthy": st == "completed",
-                "ready": st == "completed",
-                "issues": issues,
-                "resourceclaim_name": wname,
-                "landing_page_url": link,
-                "link_to_service": link,
-            }
-        )
-
-    ok = sum(1 for r in results if "OK" in r["status"])
-    bad = sum(1 for r in results if "FAILED" in r["status"])
-    logger.info(
-        "Soundcheck QA summary: %d ok, %d failed, %d total (session=%s)",
-        ok,
-        bad,
-        len(results),
-        session_id or "n/a",
-    )
-    logger.info("=" * 70)
-    return results
 
 
 def qa_destroy_check(

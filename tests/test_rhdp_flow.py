@@ -2659,6 +2659,193 @@ class TestRHDPConfigDefaults(unittest.TestCase):
         self.assertEqual(config.base_domain, "integration.demo.redhat.com")
 
 
+class TestSoundcheckEnrich(unittest.TestCase):
+    """HTTP-contract coverage for the QA3 Soundcheck batch enrich.
+
+    These mock the Soundcheck service (``_http_json``) and the cluster workshop
+    listing (``_collect_workshop_ids_for_schedules``) so the real contract —
+    batch-once, status mapping, unreachable handling, cancel — is exercised
+    without a live cluster or Soundcheck endpoint.
+    """
+
+    def _schedule_and_result(self, ci="my.catalog.item.prod", ns="user-ns"):
+        sched = make_schedule(ci=ci, namespace=ns)
+        result = {"ci": ci, "issues": ""}
+        return sched, result
+
+    def _no_sleep(self):
+        return patch("rhdp_flow.time.sleep", lambda *_a, **_k: None)
+
+    def test_maps_completed_status_to_healthy(self):
+        import rhdp_flow
+
+        sched, result = self._schedule_and_result()
+
+        def fake_http(method, url, body=None, timeout=30.0):
+            if "/api/check?" in url:
+                return {"session_id": "sess-1"}
+            if "/api/sessions/" in url:
+                return {"session": {"status": "completed"}}
+            if url.endswith("/api/workshops/check-status"):
+                return {"statuses": {"wid-1": {"status": "completed", "session_id": "sess-1"}}}
+            return {}
+
+        with self._no_sleep(), patch(
+            "rhdp_flow._collect_workshop_ids_for_schedules",
+            return_value=[(sched, "ws-1", "wid-1")],
+        ), patch("rhdp_flow._http_json", side_effect=fake_http):
+            summary = rhdp_flow._enrich_qa2_results_with_soundcheck(
+                [result], [sched], ["user-ns"], make_config()
+            )
+
+        self.assertTrue(summary["reachable"])
+        self.assertEqual(result["showroom_status"], "healthy")
+        self.assertIn("/session/sess-1", result["showroom_url"])
+
+    def test_failed_status_adds_issue(self):
+        import rhdp_flow
+
+        sched, result = self._schedule_and_result()
+
+        def fake_http(method, url, body=None, timeout=30.0):
+            if "/api/check?" in url:
+                return {"session_id": "sess-9"}
+            if "/api/sessions/" in url:
+                return {"session": {"status": "failed"}}
+            if url.endswith("/api/workshops/check-status"):
+                return {"statuses": {"wid-1": {"status": "failed", "session_id": "sess-9"}}}
+            return {}
+
+        with self._no_sleep(), patch(
+            "rhdp_flow._collect_workshop_ids_for_schedules",
+            return_value=[(sched, "ws-1", "wid-1")],
+        ), patch("rhdp_flow._http_json", side_effect=fake_http):
+            rhdp_flow._enrich_qa2_results_with_soundcheck([result], [sched], ["user-ns"], make_config())
+
+        self.assertEqual(result["showroom_status"], "unhealthy")
+        self.assertIn("Soundcheck failed", result["issues"])
+
+    def test_unreachable_marks_rows_not_blank(self):
+        import rhdp_flow
+
+        sched, result = self._schedule_and_result()
+
+        def boom(*_a, **_k):
+            raise RuntimeError("connection refused")
+
+        with self._no_sleep(), patch(
+            "rhdp_flow._collect_workshop_ids_for_schedules",
+            return_value=[(sched, "ws-1", "wid-1")],
+        ), patch("rhdp_flow._http_json", side_effect=boom):
+            summary = rhdp_flow._enrich_qa2_results_with_soundcheck(
+                [result], [sched], ["user-ns"], make_config()
+            )
+
+        self.assertFalse(summary["reachable"])
+        self.assertEqual(result["showroom_status"], "unreachable")
+        self.assertIn("Soundcheck unreachable", result["issues"])
+
+    def test_single_kickoff_across_multiple_namespaces(self):
+        import rhdp_flow
+
+        s1 = make_schedule(ci="ci.one.prod", namespace="ns-a")
+        s2 = make_schedule(ci="ci.two.prod", namespace="ns-b")
+        r1 = {"ci": "ci.one.prod", "issues": ""}
+        r2 = {"ci": "ci.two.prod", "issues": ""}
+
+        def fake_collect(scheduled_items, namespace, config):
+            if namespace == "ns-a":
+                return [(s1, "ws-a", "wid-a")]
+            if namespace == "ns-b":
+                return [(s2, "ws-b", "wid-b")]
+            return []
+
+        kickoffs = []
+
+        def fake_http(method, url, body=None, timeout=30.0):
+            if "/api/check?" in url:
+                kickoffs.append(url)
+                return {"session_id": "sess-x"}
+            if "/api/sessions/" in url:
+                return {"session": {"status": "completed"}}
+            if url.endswith("/api/workshops/check-status"):
+                return {
+                    "statuses": {
+                        "wid-a": {"status": "completed", "session_id": "sess-x"},
+                        "wid-b": {"status": "completed", "session_id": "sess-x"},
+                    }
+                }
+            return {}
+
+        with self._no_sleep(), patch(
+            "rhdp_flow._collect_workshop_ids_for_schedules", side_effect=fake_collect
+        ), patch("rhdp_flow._http_json", side_effect=fake_http):
+            rhdp_flow._enrich_qa2_results_with_soundcheck(
+                [r1, r2], [s1, s2], ["ns-a", "ns-b"], make_config()
+            )
+
+        # One batched kickoff covering both namespaces' workshop ids.
+        self.assertEqual(len(kickoffs), 1)
+        self.assertIn("wid-a", kickoffs[0])
+        self.assertIn("wid-b", kickoffs[0])
+        self.assertEqual(r1["showroom_status"], "healthy")
+        self.assertEqual(r2["showroom_status"], "healthy")
+
+    def test_cancel_during_poll_short_circuits(self):
+        import rhdp_flow
+
+        sched, result = self._schedule_and_result()
+        session_calls = []
+
+        def fake_http(method, url, body=None, timeout=30.0):
+            if "/api/check?" in url:
+                return {"session_id": "sess-c"}
+            if "/api/sessions/" in url:
+                session_calls.append(url)
+                return {"session": {"status": "pending"}}
+            if url.endswith("/api/workshops/check-status"):
+                return {"statuses": {}}
+            return {}
+
+        with self._no_sleep(), patch(
+            "rhdp_flow._collect_workshop_ids_for_schedules",
+            return_value=[(sched, "ws-1", "wid-1")],
+        ), patch("rhdp_flow._http_json", side_effect=fake_http):
+            rhdp_flow._enrich_qa2_results_with_soundcheck(
+                [result], [sched], ["user-ns"], make_config(), is_cancelled=lambda: True
+            )
+
+        # Cancel is checked at the top of the poll loop, so no session poll runs.
+        self.assertEqual(session_calls, [])
+
+    def test_progress_callback_invoked(self):
+        import rhdp_flow
+
+        sched, result = self._schedule_and_result()
+        progress = []
+
+        def fake_http(method, url, body=None, timeout=30.0):
+            if "/api/check?" in url:
+                return {"session_id": "sess-p"}
+            if "/api/sessions/" in url:
+                return {"session": {"status": "completed"}}
+            if url.endswith("/api/workshops/check-status"):
+                return {"statuses": {"wid-1": {"status": "completed", "session_id": "sess-p"}}}
+            return {}
+
+        with self._no_sleep(), patch(
+            "rhdp_flow._collect_workshop_ids_for_schedules",
+            return_value=[(sched, "ws-1", "wid-1")],
+        ), patch("rhdp_flow._http_json", side_effect=fake_http):
+            rhdp_flow._enrich_qa2_results_with_soundcheck(
+                [result], [sched], ["user-ns"], make_config(),
+                on_progress=lambda pct, msg: progress.append((pct, msg)),
+            )
+
+        self.assertTrue(progress)
+        self.assertTrue(any("Soundcheck" in msg for _pct, msg in progress))
+
+
 # ============================================================================
 # ENTRY POINT
 # ============================================================================

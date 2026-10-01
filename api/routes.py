@@ -94,6 +94,7 @@ from rhdp_flow import (
     RHDPConfig,
     WorkshopSchedule,
     _dedup_qa_results,
+    _enrich_qa2_results_with_soundcheck,
     _merge_qa1_qa2,
     _soundcheck_base_url,
     analyze_cluster_tenant_relationships,
@@ -2819,10 +2820,49 @@ def _run_qa_over(
             if run_setup:
                 all_setup.extend(qa1_verify_setup(temp_path, ns, config))
             if run_deploy:
-                all_deploy.extend(qa2_verify_deployment_status(temp_path, ns, config))
+                # Defer Soundcheck: run it ONCE across all namespaces after the
+                # loop (one batched kickoff with live progress + cancel), not a
+                # separate kickoff+poll per namespace.
+                all_deploy.extend(
+                    qa2_verify_deployment_status(temp_path, ns, config, enrich_soundcheck=False)
+                )
+
+        cancelled = bool(job_id and jobs.is_cancel_requested(job_id))
+
+        # Soundcheck once across every deploy result (not per-namespace). Must run
+        # before the setup+deploy merge so showroom_status lands on merged rows.
+        if not cancelled and run_deploy and all_deploy:
+            deploy_schedules = [
+                s
+                for s in filter_schedules_by_scope(
+                    _schedules,
+                    floor=floor,
+                    floor_date=floor_date,
+                    time_band=time_band,
+                    ci_names=ci_names,
+                )
+                if s.namespace in namespaces
+            ]
+            sc_namespaces = sorted({s.namespace for s in deploy_schedules}) or list(namespaces)
+            sc_summary = _enrich_qa2_results_with_soundcheck(
+                all_deploy,
+                deploy_schedules,
+                sc_namespaces,
+                config,
+                on_progress=(
+                    (lambda pct, msg: jobs.update_job(job_id, progress=pct, message=msg))
+                    if job_id
+                    else None
+                ),
+                is_cancelled=(lambda: jobs.is_cancel_requested(job_id)) if job_id else None,
+            )
+            if job_id and sc_summary.get("checked") and not sc_summary.get("reachable"):
+                jobs.update_job(
+                    job_id,
+                    message="Soundcheck unreachable — results shown without deep health",
+                )
 
         # Catalog runs once on floor-scoped rows across all selected namespaces.
-        cancelled = bool(job_id and jobs.is_cancel_requested(job_id))
         if not cancelled and run_catalog:
             if job_id:
                 jobs.update_job(job_id, progress=95, message="QA1: verifying catalog items")
