@@ -65,6 +65,8 @@ from api.models import (
     OperationResponse,
     OperatorOverride,
     OperatorOverrideCreate,
+    ParameterValidationResponse,
+    ParameterValidationViolation,
     PoolCapacityValidationResponse,
     PoolCapacityWarning,
     PoolInfo,
@@ -108,6 +110,7 @@ from rhdp_flow import (
     find_similar_catalog_items,
     generate_showroom_applicationset,
     get_catalog_item_num_users_limit,
+    get_catalog_item_parameter_schemas,
     get_catalog_namespace,
     import_namespace_to_csv,
     list_catalog_items,
@@ -130,6 +133,7 @@ from rhdp_flow import (
     utc_timestamp_str,
     validate_catalog_item_exists,
     validate_cluster_before_tenant,
+    validate_schedule_parameter_values,
 )
 
 logger = logging.getLogger("rhdp_flow.api")
@@ -1414,6 +1418,60 @@ def validate_num_users(_key=Depends(verify_api_key), config=Depends(_request_con
     )
 
 
+@router.post("/schedules/validate-parameters", response_model=ParameterValidationResponse)
+def validate_parameters(_key=Depends(verify_api_key), config=Depends(_request_config)):
+    """Validate operator-supplied parameter values (e.g. AWS_Region) against each catalog
+    item's openAPIV3Schema, before scheduling/deploying.
+
+    Catches values that Babylon would otherwise reject only at provision time — for example
+    aws_region=us-east-1 on an item whose schema pins enum=[us-east-2]. 'violations' are hard
+    blockers (enum mismatch); 'warnings' are advisory (value set for a parameter the item does
+    not expose, or a required parameter with no default that flow does not supply).
+    """
+    if not _schedules:
+        raise HTTPException(400, "No schedules loaded.")
+    violations: list[ParameterValidationViolation] = []
+    warnings: list[ParameterValidationViolation] = []
+    checked = 0
+    skipped = 0
+    schema_cache: dict[str, dict | None] = {}
+    seen: set = set()
+
+    def _check_ci(ci: str, schedule: WorkshopSchedule):
+        nonlocal checked, skipped
+        if ci not in schema_cache:
+            schema_cache[ci] = get_catalog_item_parameter_schemas(ci, config)
+        schemas = schema_cache[ci]
+        if schemas is None:
+            skipped += 1
+            return
+        checked += 1
+        result = validate_schedule_parameter_values(schedule, schemas)
+        for entry in result["errors"]:
+            key = ("err", entry["ci"], entry["namespace"], entry["parameter"], entry["value"])
+            if key not in seen:
+                seen.add(key)
+                violations.append(ParameterValidationViolation(**entry))
+        for entry in result["warnings"]:
+            key = ("warn", entry["ci"], entry["namespace"], entry["parameter"], entry["value"])
+            if key not in seen:
+                seen.add(key)
+                warnings.append(ParameterValidationViolation(**entry))
+
+    for s in _schedules:
+        _check_ci(s.ci, s)
+        if s.is_multi_asset and s.asset_cis:
+            for asset_ci in (c.strip() for c in s.asset_cis.split(",") if c.strip()):
+                _check_ci(asset_ci, s)
+
+    return ParameterValidationResponse(
+        violations=violations,
+        warnings=warnings,
+        checked=checked,
+        skipped=skipped,
+    )
+
+
 @router.post("/schedules/validate-catalog-namespaces", response_model=CatalogNamespaceValidationResponse)
 def validate_catalog_namespaces(_key=Depends(verify_api_key), config=Depends(_request_config)):
     """Check whether catalog items exist in their expected catalog namespaces."""
@@ -1797,6 +1855,8 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
             limit_errors: list[str] = []
             ns_cache: dict[str, tuple] = {}
             not_found_errors: list[str] = []
+            param_errors: list[str] = []
+            param_schema_cache: dict[str, dict | None] = {}
             for s in schedules:
                 if s.users is not None and s.users > 0:
                     if s.ci not in ci_cache:
@@ -1831,6 +1891,15 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
                     )
                 elif not exists and found_ns is None:
                     not_found_errors.append(f"{s.ci_name} ({s.ci}): {suggestion}")
+                # Validate operator-supplied parameter values (e.g. AWS_Region) against the
+                # catalog item's enum, using the resolved CI/namespace above.
+                if s.ci not in param_schema_cache:
+                    param_schema_cache[s.ci] = get_catalog_item_parameter_schemas(
+                        s.ci, config_check, s.catalog_namespace or None
+                    )
+                result = validate_schedule_parameter_values(s, param_schema_cache[s.ci])
+                for entry in result["errors"]:
+                    param_errors.append(f"{s.ci_name} ({s.ci}): {entry['message']}")
         finally:
             cluster_targets.cleanup_kubeconfig(config_check.kubeconfig_path if body.target_cluster else None)
         if limit_errors:
@@ -1842,6 +1911,11 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
             raise HTTPException(
                 400,
                 f"Catalog items not found — cannot deploy: {'; '.join(not_found_errors)}"
+            )
+        if param_errors:
+            raise HTTPException(
+                400,
+                f"Invalid catalog parameters — cannot deploy: {'; '.join(param_errors)}"
             )
 
     if not body.dry_run:
@@ -2441,6 +2515,8 @@ async def deploy_retry(request: Request, body: RetryRequest, _key=Depends(verify
         try:
             ci_cache: dict[str, dict | None] = {}
             limit_errors = []
+            param_errors: list[str] = []
+            param_schema_cache: dict[str, dict | None] = {}
             for s in matching:
                 if s.users is not None and s.users > 0:
                     if s.ci not in ci_cache:
@@ -2450,10 +2526,22 @@ async def deploy_retry(request: Request, body: RetryRequest, _key=Depends(verify
                         limit_errors.append(
                             f"{s.ci_name} ({s.ci}): {s.users} users exceeds catalog maximum of {info['maximum']}"
                         )
+                if s.ci not in param_schema_cache:
+                    param_schema_cache[s.ci] = get_catalog_item_parameter_schemas(
+                        s.ci, config_check, s.catalog_namespace or None
+                    )
+                result = validate_schedule_parameter_values(s, param_schema_cache[s.ci])
+                for entry in result["errors"]:
+                    param_errors.append(f"{s.ci_name} ({s.ci}): {entry['message']}")
             if limit_errors:
                 raise HTTPException(
                     400,
                     f"num_users limit exceeded: {'; '.join(limit_errors)}"
+                )
+            if param_errors:
+                raise HTTPException(
+                    400,
+                    f"Invalid catalog parameters — cannot deploy: {'; '.join(param_errors)}"
                 )
 
         finally:

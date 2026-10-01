@@ -338,6 +338,24 @@ export interface NumUsersValidationResponse {
   limits: Record<string, number>;
 }
 
+export interface ParameterValidationViolation {
+  ci_name: string;
+  ci: string;
+  namespace: string;
+  parameter: string;
+  value: string | null;
+  allowed: string[] | null;
+  severity: 'high' | 'medium';
+  message: string;
+}
+
+export interface ParameterValidationResponse {
+  violations: ParameterValidationViolation[];
+  warnings: ParameterValidationViolation[];
+  checked: number;
+  skipped: number;
+}
+
 export interface PoolCapacityWarning {
   ci_name: string;
   ci: string;
