@@ -3546,7 +3546,11 @@ def create_multi_workshop_from_group(
     first = group_schedules[0]
 
     # Collect per-asset passwords, num_users, and concurrencies from individual rows
-    asset_cis = ",".join(s.ci for s in group_schedules)
+    # If a single-row CSV format: all CIs are in asset_cis field; otherwise derive from group rows
+    if len(group_schedules) == 1 and group_schedules[0].asset_cis:
+        asset_cis = group_schedules[0].asset_cis
+    else:
+        asset_cis = ",".join(s.ci for s in group_schedules)
     asset_passwords: dict[str, str] = {}
     asset_num_users: dict[str, int] = {}
     asset_concurrencies: dict[str, int] = {}
