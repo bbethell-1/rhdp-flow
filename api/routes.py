@@ -1885,6 +1885,13 @@ async def deploy(request: Request, body: DeployRequest = DeployRequest(), _key=D
     if not _schedules:
         raise HTTPException(400, "No schedules loaded. Upload a CSV first.")
 
+    # Clear stale QA results so a fresh deploy doesn't inherit prior-cycle coverage.
+    global _qa_results, _qa_last_scope
+    with _state_lock:
+        _qa_results = []
+        _qa_last_scope = None
+        _save_qa_results()
+
     schedules = _filter_schedules(body.ci_filter)
 
     # Explicit selection, else the default cluster (Events) when configured.
